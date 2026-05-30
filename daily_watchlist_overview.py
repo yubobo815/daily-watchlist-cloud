@@ -961,7 +961,7 @@ def write_history_html(path: Path) -> None:
       };
     }
 
-    async function loadSupabaseHistory() {
+    async function loadSupabaseHistory(ticker) {
       const config = window.WATCHLIST_SUPABASE;
       if (!config || !config.url || !config.anonKey) return null;
 
@@ -973,7 +973,8 @@ def write_history_html(path: Path) -> None:
       if (!latestRuns.length) return [];
 
       const runDate = latestRuns[0].run_date;
-      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=payload&run_date=eq.${encodeURIComponent(runDate)}&order=ticker.asc,history_date.asc`;
+      const selectedTicker = ticker.trim().toUpperCase();
+      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=payload&run_date=eq.${encodeURIComponent(runDate)}&ticker=eq.${encodeURIComponent(selectedTicker)}&order=history_date.asc`;
       const historyResponse = await fetch(historyUrl, { headers: supabaseHeaders(config) });
       if (!historyResponse.ok) throw new Error("Could not read Supabase history.");
       const rows = await historyResponse.json();
@@ -986,7 +987,7 @@ def write_history_html(path: Path) -> None:
       return parseCSV(await response.text());
     }
 
-    function showTicker() {
+    function renderTicker() {
       const ticker = input.value.trim().toUpperCase();
       const rows = historyRows.filter((row) => row.ticker === ticker).sort((a, b) => a.date.localeCompare(b.date));
       const params = new URLSearchParams(window.location.search);
@@ -1027,14 +1028,38 @@ def write_history_html(path: Path) -> None:
       `).join("");
     }
 
-    loadSupabaseHistory()
+    function hasSupabaseConfig() {
+      const config = window.WATCHLIST_SUPABASE;
+      return !!(config && config.url && config.anonKey);
+    }
+
+    async function showTicker() {
+      const ticker = input.value.trim().toUpperCase();
+      if (!ticker) return;
+
+      if (hasSupabaseConfig()) {
+        try {
+          historyRows = await loadSupabaseHistory(ticker);
+        } catch {
+          historyRows = await loadCsvHistory();
+        }
+      }
+      renderTicker();
+    }
+
+    Promise.resolve()
+      .then(() => {
+        const ticker = (new URLSearchParams(window.location.search).get("ticker") || input.value || "ORCL").toUpperCase();
+        input.value = ticker;
+        return hasSupabaseConfig() ? loadSupabaseHistory(ticker) : loadCsvHistory();
+      })
       .then((rows) => rows || loadCsvHistory())
       .catch(() => loadCsvHistory())
       .then((rows) => {
         historyRows = rows;
         const ticker = new URLSearchParams(window.location.search).get("ticker");
         if (ticker) input.value = ticker.toUpperCase();
-        showTicker();
+        renderTicker();
       })
       .catch(() => {
         timeline.innerHTML = '<div class="empty">History CSV is not available yet. It will appear after the next successful refresh.</div>';
