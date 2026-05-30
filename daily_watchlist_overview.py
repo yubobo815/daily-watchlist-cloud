@@ -1,0 +1,965 @@
+import argparse
+import html
+import json
+import math
+import os
+import time
+import urllib.request
+from urllib.error import URLError
+from typing import Optional
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+ETF_HINTS = {
+    "SPY", "QQQ", "DIA", "IWM", "SMH", "VGT", "XLK", "XLE", "XLF", "XLV",
+    "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "ARKK", "SOXX", "IBB",
+    "TLT", "GLD", "SLV", "USO", "DRAM",
+}
+
+STOCK_NAMES = {
+    "AAPL": "Apple",
+    "ADBE": "Adobe",
+    "ADSK": "Autodesk",
+    "AMAT": "Applied Materials",
+    "AMD": "Advanced Micro Devices",
+    "AMZN": "Amazon",
+    "ANET": "Arista Networks",
+    "ARM": "Arm Holdings",
+    "ASTS": "AST SpaceMobile",
+    "AVGO": "Broadcom",
+    "CAT": "Caterpillar",
+    "COST": "Costco",
+    "COHR": "Coherent",
+    "CRM": "Salesforce",
+    "CRWV": "CoreWeave",
+    "DELL": "Dell Technologies",
+    "DIS": "Disney",
+    "DRAM": "Global X DRAM ETF",
+    "EOS.AX": "Electro Optic Systems",
+    "GD": "General Dynamics",
+    "GLW": "Corning",
+    "GOOG": "Alphabet",
+    "GOOGL": "Alphabet",
+    "IBM": "IBM",
+    "INTC": "Intel",
+    "LITE": "Lumentum",
+    "LLY": "Eli Lilly",
+    "META": "Meta Platforms",
+    "MRVL": "Marvell Technology",
+    "MSFT": "Microsoft",
+    "MU": "Micron",
+    "NASA": "Nasa",
+    "NFLX": "Netflix",
+    "NKE": "Nike",
+    "NOW": "ServiceNow",
+    "NVDA": "Nvidia",
+    "OKTA": "Okta",
+    "ORCL": "Oracle",
+    "PANW": "Palo Alto Networks",
+    "PLTR": "Palantir",
+    "PYPL": "PayPal",
+    "QCOM": "Qualcomm",
+    "ROK": "Rockwell Automation",
+    "RKLB": "Rocket Lab",
+    "SHOP": "Shopify",
+    "SMCI": "Super Micro Computer",
+    "SMH": "VanEck Semiconductor ETF",
+    "SNAP": "Snap",
+    "SNOW": "Snowflake",
+    "SOHR": "Soho House",
+    "SRM": "SRM Entertainment",
+    "STX": "Seagate",
+    "TEAM": "Atlassian",
+    "TSLA": "Tesla",
+    "TSM": "Taiwan Semiconductor",
+    "UNH": "UnitedHealth",
+    "VGT": "Vanguard Information Technology ETF",
+    "VOLT": "Volt Information Sciences",
+    "VRT": "Vertiv",
+    "WDC": "Western Digital",
+    "ZM": "Zoom",
+}
+
+
+def normalize_ticker(ticker: str) -> str:
+    ticker = ticker.strip().upper()
+    aliases = {"SPX": "^GSPC", "BRK.B": "BRK-B"}
+    return aliases.get(ticker, ticker)
+
+
+def display_ticker(ticker: str) -> str:
+    return ticker.replace("^GSPC", "SPX").replace("BRK-B", "BRK.B")
+
+
+def stock_name(ticker: str) -> str:
+    return STOCK_NAMES.get(display_ticker(ticker), display_ticker(ticker))
+
+
+def read_watchlist(path: Path) -> list[str]:
+    tickers: list[str] = []
+    seen: set[str] = set()
+    for raw in path.read_text().replace(",", "\n").splitlines():
+        ticker = normalize_ticker(raw)
+        if ticker and ticker not in seen:
+            tickers.append(ticker)
+            seen.add(ticker)
+    return tickers
+
+
+def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFrame:
+    cache_path = Path(f"watchlist_{ticker.replace('^', '_')}_{years}y.csv")
+    if cache_path.exists() and not refresh:
+        return pd.read_csv(cache_path, parse_dates=["date"])
+
+    period2 = int(time.time())
+    period1 = period2 - int(years * 365.25 * 24 * 60 * 60)
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        f"?period1={period1}&period2={period2}&interval=1d&events=history"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+
+    result = payload["chart"]["result"][0]
+    q = result["indicators"]["quote"][0]
+    adj = result["indicators"].get("adjclose", [{}])[0].get("adjclose", q["close"])
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(result["timestamp"], unit="s", utc=True).tz_convert(None).date,
+            "open": q["open"],
+            "high": q["high"],
+            "low": q["low"],
+            "close": q["close"],
+            "adjclose": adj,
+            "volume": q["volume"],
+        }
+    )
+    df = df.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    df.to_csv(cache_path, index=False)
+    return df
+
+
+def cached_chart(ticker: str, years: int = 3) -> pd.DataFrame:
+    cache_path = Path(f"watchlist_{ticker.replace('^', '_')}_{years}y.csv")
+    if not cache_path.exists():
+        raise FileNotFoundError(f"cache not found: {cache_path}")
+    return pd.read_csv(cache_path, parse_dates=["date"])
+
+
+def check_live_data_access() -> tuple[bool, str]:
+    req = urllib.request.Request(
+        "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=5d&interval=1d",
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status != 200:
+                return False, f"Yahoo preflight returned HTTP {resp.status}"
+        return True, "Live Yahoo access available."
+    except Exception as exc:
+        return False, f"Live Yahoo access unavailable: {exc}"
+
+
+def ema(series: pd.Series, length: int) -> pd.Series:
+    return series.ewm(span=length, adjust=False, min_periods=length).mean()
+
+
+def rsi(close: pd.Series, length: int = 14) -> pd.Series:
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+    avg_loss = loss.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
+    prev_close = df["close"].shift(1)
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - prev_close).abs(),
+            (df["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return tr.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+
+
+def macd_hist(close: pd.Series) -> pd.Series:
+    macd = ema(close, 12) - ema(close, 26)
+    signal = ema(macd, 9)
+    return macd - signal
+
+
+def prepare(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy().sort_values("date").reset_index(drop=True)
+    out["rsi"] = rsi(out["close"])
+    out["bb_basis"] = out["close"].rolling(20, min_periods=20).mean()
+    out["bb_std"] = out["close"].rolling(20, min_periods=20).std(ddof=0)
+    out["upper_bb"] = out["bb_basis"] + 2.0 * out["bb_std"]
+    out["lower_bb"] = out["bb_basis"] - 2.0 * out["bb_std"]
+    out["ema_fast"] = ema(out["close"], 20)
+    out["ema_slow"] = ema(out["close"], 50)
+    out["ema_long"] = ema(out["close"], 200)
+    out["vol_ma"] = out["volume"].rolling(20, min_periods=20).mean()
+    out["atr"] = atr(out)
+    out["atr_pct"] = out["atr"] / out["close"] * 100
+    out["macd_hist"] = macd_hist(out["close"])
+    out["range"] = out["high"] - out["low"]
+    out["close_loc"] = np.where(out["range"] > 0, (out["close"] - out["low"]) / out["range"], 0.5)
+    out["body"] = (out["close"] - out["open"]).abs()
+    out["body_pct"] = np.where(out["range"] > 0, out["body"] / out["range"], 0)
+    out["upper_wick_pct"] = np.where(out["range"] > 0, (out["high"] - out[["open", "close"]].max(axis=1)) / out["range"], 0)
+    out["lower_wick_pct"] = np.where(out["range"] > 0, (out[["open", "close"]].min(axis=1) - out["low"]) / out["range"], 0)
+    return out
+
+
+def bool_text(value: bool) -> str:
+    return "YES" if value else "NO"
+
+
+def detect_setup_at(d: pd.DataFrame, i: int) -> str:
+    if i < 210:
+        return "NONE"
+
+    row = d.iloc[i]
+    prev = d.iloc[i - 1]
+    if pd.isna(row.atr) or pd.isna(row.ema_long) or pd.isna(prev.macd_hist):
+        return "NONE"
+
+    lookback_bars = 3
+    ema_slope_bars = 5
+    close = float(row.close)
+    open_ = float(row.open)
+    high = float(row.high)
+    low = float(row.low)
+    atr_now = float(row.atr)
+
+    price_follow = close > prev.high
+    constructive_close = row.close_loc >= 0.55 and close >= (open_ + prev.close) / 2
+    demand_tail = row.lower_wick_pct >= 0.30 and row.close_loc >= 0.55
+    wide_bullish = close > open_ and row.body_pct >= 0.45 and row.close_loc >= 0.65
+
+    recent_oversold_bb = (
+        (d["low"].iloc[i - lookback_bars : i + 1] <= d["lower_bb"].iloc[i - lookback_bars : i + 1])
+        & (d["rsi"].iloc[i - lookback_bars : i + 1] < 45)
+    ).any()
+    back_inside_bb = close > row.lower_bb
+    right_side = recent_oversold_bb and back_inside_bb and row.rsi > prev.rsi and (price_follow or constructive_close or demand_tail)
+
+    uptrend = close > row.ema_slow and row.ema_fast > row.ema_slow and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
+    strong_momentum = close > row.ema_fast and row.ema_fast > row.ema_slow and row.ema_fast >= d.iloc[i - ema_slope_bars].ema_fast and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
+    pullback_support = low <= row.ema_fast or low <= row.bb_basis or close <= row.ema_fast * 1.02
+    shallow_pullback = low <= row.ema_fast * 1.015 or low <= row.bb_basis or close <= row.ema_fast * 1.025
+    support_held = close > row.ema_slow and close > row.lower_bb
+    pullback_reversal = 40 <= row.rsi <= 60 and row.rsi > prev.rsi and (price_follow or constructive_close)
+    pullback = uptrend and (pullback_support or (strong_momentum and shallow_pullback)) and support_held and pullback_reversal
+
+    early_pullback = (
+        uptrend
+        and (low <= row.ema_fast * 1.03 or low <= row.bb_basis * 1.02 or close <= row.ema_fast * 1.04)
+        and support_held
+        and 38 <= row.rsi <= 68
+        and row.rsi >= prev.rsi - 2
+        and (demand_tail or constructive_close)
+    )
+
+    recent_momentum_high = d["high"].iloc[i - 10 : i].max()
+    momentum_dip = d["low"].iloc[i - 2 : i + 1].min() <= recent_momentum_high * 0.97
+    momentum = strong_momentum and momentum_dip and close > open_ and close > prev.close and close > row.ema_fast and 55 <= row.rsi <= 85 and close <= row.ema_fast * 1.35
+
+    breakout_level = d["close"].iloc[i - 20 : i].max()
+    breakout_ext = (close - row.ema_fast) / atr_now if atr_now > 0 else 0
+    breakout = strong_momentum and close >= breakout_level and close > prev.high and wide_bullish and 55 <= row.rsi <= 82 and breakout_ext <= 3.5 and row.macd_hist >= prev.macd_hist
+
+    body_for_ratio = max(float(row.body), 0.01)
+    lower_wick = min(open_, close) - low
+    vol_ready = not math.isnan(row.vol_ma) and row.vol_ma > 0
+    breakdown_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close < row.ema_fast and close < prev.low and row.close_loc <= 0.45
+    fear_rejected = lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.60 and (low <= row.lower_bb or low <= row.ema_fast or low < prev.low) and not breakdown_vol
+    reversal = right_side or (fear_rejected and recent_oversold_bb and back_inside_bb)
+
+    if breakout:
+        return "BREAKOUT BUY"
+    if momentum:
+        return "MOMENTUM BUY"
+    if pullback:
+        return "PULLBACK BUY"
+    if early_pullback:
+        return "EARLY PULLBACK BUY"
+    if reversal:
+        return "REVERSAL BUY"
+    return "NONE"
+
+
+def historical_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10, lookback_days: int = 500) -> dict:
+    if setup == "NONE":
+        return {"hist_trades": "", "hist_win_rate": "", "hist_avg_return": ""}
+
+    returns: list[float] = []
+    end = len(d) - holding_days - 1
+    start = max(210, end - lookback_days)
+    for i in range(start, end):
+        if detect_setup_at(d, i) != setup:
+            continue
+        entry = float(d.iloc[i].close)
+        exit_ = float(d.iloc[i + holding_days].close)
+        if entry > 0:
+            returns.append((exit_ / entry - 1) * 100)
+
+    if not returns:
+        return {"hist_trades": 0, "hist_win_rate": "", "hist_avg_return": ""}
+
+    wins = sum(1 for value in returns if value > 0)
+    return {
+        "hist_trades": len(returns),
+        "hist_win_rate": round(wins / len(returns) * 100, 1),
+        "hist_avg_return": round(float(np.mean(returns)), 2),
+    }
+
+
+def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
+    d = prepare(raw)
+    if len(d) < 220:
+        raise ValueError("not enough history")
+
+    i = len(d) - 1
+    row = d.iloc[i]
+    prev = d.iloc[i - 1]
+    lookback_bars = 3
+    ema_slope_bars = 5
+    personality_lookback = 100
+    is_etf = ticker in ETF_HINTS
+
+    close = float(row.close)
+    open_ = float(row.open)
+    high = float(row.high)
+    low = float(row.low)
+    atr_now = float(row.atr)
+    vol_ready = not math.isnan(row.vol_ma) and row.vol_ma > 0
+    body_for_ratio = max(float(row.body), 0.01)
+    upper_wick = high - max(open_, close)
+    lower_wick = min(open_, close) - low
+    range_atr = float(row.range / atr_now) if atr_now > 0 else 0.0
+
+    travel = d["close"].diff().abs().iloc[i - personality_lookback + 1 : i + 1].sum()
+    trend_efficiency = abs(close - float(d.iloc[i - personality_lookback].close)) / travel if travel > 0 else 0.0
+
+    effective_monster_eff = 0.30 * (1.15 if is_etf else 1.0)
+    effective_compounder_eff = 0.18 * (0.75 if is_etf else 1.0)
+    effective_high_vol_atr = 10.0 * (1.35 if is_etf else 1.0)
+    effective_avoid_eff = 0.08 * (0.60 if is_etf else 1.0)
+
+    ema_alignment_clean = close > row.ema_fast > row.ema_slow > row.ema_long
+    ema_alignment_bearish = close < row.ema_slow and row.ema_fast < row.ema_slow
+    long_slope_up = row.ema_long >= d.iloc[i - ema_slope_bars].ema_long
+    slow_slope_up = row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
+    rs_up = close > float(d.iloc[i - 10].close)
+
+    accum_vol = vol_ready and row.volume > row.vol_ma * 0.9 and close > open_ and close >= prev.close and row.close_loc >= 0.55
+    dist_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close <= prev.close and row.close_loc <= 0.45
+    dry_up_vol = vol_ready and row.volume < row.vol_ma and (low <= row.ema_fast * 1.025 or low <= row.bb_basis) and close >= row.ema_slow
+    breakout_vol = vol_ready and row.volume > row.vol_ma * 1.1 and (close > prev.high or close > row.ema_fast) and row.close_loc >= 0.60
+    breakdown_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close < row.ema_fast and close < prev.low and row.close_loc <= 0.45
+    exhaust_vol = vol_ready and row.volume > row.vol_ma * 1.5 and atr_now > 0 and (close - row.ema_fast) / atr_now >= 3.375 and row.close_loc <= 0.55
+
+    buyer_score = min(
+        100.0,
+        row.close_loc * 45
+        + (20 if close > open_ else 0)
+        + (15 if row.body > atr_now * 0.75 and close > open_ else 0)
+        + (15 if accum_vol or breakout_vol else 0)
+        + (5 if lower_wick > body_for_ratio * 1.5 else 0),
+    )
+    seller_score = min(
+        100.0,
+        (1 - row.close_loc) * 45
+        + (20 if close < open_ else 0)
+        + (15 if row.body > atr_now * 0.75 and close < open_ else 0)
+        + (15 if dist_vol or breakdown_vol else 0)
+        + (5 if upper_wick > body_for_ratio * 1.5 else 0),
+    )
+
+    buyer_control = buyer_score >= 70
+    seller_control = seller_score >= 70
+    fear_rejected = lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.60 and (low <= row.lower_bb or low <= row.ema_fast or low < prev.low) and not breakdown_vol
+    greed_rejected = upper_wick > body_for_ratio * 1.5 and row.close_loc <= 0.40 and (high >= row.upper_bb or high >= d["high"].iloc[i - lookback_bars : i].max())
+    fomo = range_atr >= 2.5 and vol_ready and row.volume > row.vol_ma * 1.8 and close > row.ema_fast * 1.08 and row.rsi >= 75
+    quiet_absorption = vol_ready and row.volume < row.vol_ma and row.close_loc >= 0.45 and close >= row.ema_slow and (low <= row.ema_fast * 1.02 or low <= row.bb_basis) and not seller_control
+    psych = (
+        "FR" if fear_rejected else
+        "QA" if quiet_absorption else
+        "FOMO" if fomo else
+        "GR" if greed_rejected else
+        "BUYERS" if buyer_control else
+        "SELLERS" if seller_control else
+        "MIXED"
+    )
+
+    range_bound = trend_efficiency < effective_compounder_eff and row.atr_pct <= effective_high_vol_atr and not ema_alignment_bearish
+    power_trend = ema_alignment_clean and long_slope_up and slow_slope_up and trend_efficiency >= effective_monster_eff and (rs_up or is_etf)
+    steady_trend = ema_alignment_clean and slow_slope_up and trend_efficiency >= effective_compounder_eff and row.atr_pct <= effective_high_vol_atr
+    mean_reversion = range_bound and (fear_rejected or quiet_absorption or close > row.ema_slow)
+    high_vol = row.atr_pct > effective_high_vol_atr and trend_efficiency < effective_compounder_eff
+    avoid = ema_alignment_bearish and trend_efficiency < effective_avoid_eff and (not is_etf or close < row.ema_long) and not fear_rejected
+    mode = (
+        "WAIT / AVOID" if avoid else
+        "POWER TREND" if power_trend else
+        "STEADY TREND" if steady_trend else
+        "MEAN REVERSION" if mean_reversion else
+        "HIGH VOLATILITY" if high_vol else
+        "MIXED / NEUTRAL"
+    )
+
+    rsi_near_oversold = row.rsi < 45
+    bb_recent = (d["low"].iloc[i - lookback_bars : i + 1] <= d["lower_bb"].iloc[i - lookback_bars : i + 1]).any()
+    recent_oversold_bb = ((d["low"].iloc[i - lookback_bars : i + 1] <= d["lower_bb"].iloc[i - lookback_bars : i + 1]) & (d["rsi"].iloc[i - lookback_bars : i + 1] < 45)).any()
+    back_inside_bb = close > row.lower_bb
+    price_follow = close > prev.high
+    constructive_close = row.close_loc >= 0.55 and close >= (open_ + prev.close) / 2
+    demand_tail = row.lower_wick_pct >= 0.30 and row.close_loc >= 0.55
+    wide_bullish = close > open_ and row.body_pct >= 0.45 and row.close_loc >= 0.65
+    right_side = recent_oversold_bb and back_inside_bb and row.rsi > prev.rsi and (price_follow or constructive_close or demand_tail)
+
+    uptrend = close > row.ema_slow and row.ema_fast > row.ema_slow and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
+    strong_momentum = close > row.ema_fast and row.ema_fast > row.ema_slow and row.ema_fast >= d.iloc[i - ema_slope_bars].ema_fast and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
+    pullback_support = low <= row.ema_fast or low <= row.bb_basis or close <= row.ema_fast * 1.02
+    shallow_pullback = low <= row.ema_fast * 1.015 or low <= row.bb_basis or close <= row.ema_fast * 1.025
+    support_held = close > row.ema_slow and close > row.lower_bb
+    pullback_reversal = 40 <= row.rsi <= 60 and row.rsi > prev.rsi and (price_follow or constructive_close)
+    pullback = uptrend and (pullback_support or (strong_momentum and shallow_pullback)) and support_held and pullback_reversal
+    early_pullback = uptrend and (low <= row.ema_fast * 1.03 or low <= row.bb_basis * 1.02 or close <= row.ema_fast * 1.04) and support_held and 38 <= row.rsi <= 68 and row.rsi >= prev.rsi - 2 and (demand_tail or constructive_close)
+    recent_momentum_high = d["high"].iloc[i - 10 : i].max()
+    momentum_dip = d["low"].iloc[i - 2 : i + 1].min() <= recent_momentum_high * 0.97
+    momentum = strong_momentum and momentum_dip and close > open_ and close > prev.close and close > row.ema_fast and 55 <= row.rsi <= 85 and close <= row.ema_fast * 1.35
+    breakout_level = d["close"].iloc[i - 20 : i].max()
+    breakout_ext = (close - row.ema_fast) / atr_now if atr_now > 0 else 0
+    breakout = strong_momentum and close >= breakout_level and close > prev.high and wide_bullish and 55 <= row.rsi <= 82 and breakout_ext <= 3.5 and row.macd_hist >= prev.macd_hist
+    reversal = right_side or (fear_rejected and recent_oversold_bb and back_inside_bb)
+
+    selected = (
+        ("BREAKOUT BUY", breakout),
+        ("MOMENTUM BUY", momentum and not breakout),
+        ("PULLBACK BUY", pullback and not breakout and not momentum),
+        ("EARLY PULLBACK BUY", early_pullback and not breakout and not momentum and not pullback),
+        ("REVERSAL BUY", reversal and not breakout and not momentum and not pullback and not early_pullback),
+    )
+    setup = next((name for name, flag in selected if flag), "NONE")
+    setup_forming = setup != "NONE"
+    setup_stats = historical_setup_stats(d, setup)
+
+    setup_max_atr = 12.0 if setup == "BREAKOUT BUY" else 10.0 if setup == "MOMENTUM BUY" else 8.0
+    setup_atr_ok = row.atr_pct <= setup_max_atr
+    volume_ok = vol_ready and not dist_vol and (
+        breakout_vol if setup == "BREAKOUT BUY" else
+        (accum_vol or breakout_vol) if setup == "MOMENTUM BUY" else
+        (dry_up_vol or accum_vol or breakout_vol) if "PULLBACK" in setup else
+        (accum_vol or breakout_vol or fear_rejected or quiet_absorption)
+    )
+    close_ok = row.close_loc >= 0.55
+    no_chase = range_atr <= 2.5
+    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and no_chase and not avoid and not seller_control and not fomo and not greed_rejected
+
+    sell_rsi = row.rsi > 75
+    close_off_high = row.close_loc < 0.55
+    confirmed_exhaustion = sell_rsi and (high > row.upper_bb or greed_rejected) and close_off_high and (close < open_ or row.macd_hist < prev.macd_hist)
+    atr_extension = (close - row.ema_fast) / atr_now if atr_now > 0 else 0.0
+    atr_extension_exhaustion = atr_extension >= 4.5 and (close_off_high or row.macd_hist < prev.macd_hist or row.rsi < prev.rsi)
+    trend_damage = close < row.ema_fast or (row.macd_hist < 0 <= prev.macd_hist) or (row.rsi < prev.rsi and close < prev.low)
+    confirmed_break = close < row.ema_fast and close < prev.low and ((close < open_ and row.close_loc <= 0.40 and row.body_pct >= 0.35) or breakdown_vol or row.macd_hist < prev.macd_hist)
+    exit_pressure = ((confirmed_exhaustion and confirmed_break) or atr_extension_exhaustion or (seller_control and (close_off_high or trend_damage)))
+
+    candle_entry_midpoint = (high + low) / 2
+    prior_high = float(prev.high)
+    breakout_retest_level = max(prior_high, float(breakout_level))
+    reclaim_retest_level = prior_high if close > prior_high else candle_entry_midpoint
+    if setup == "BREAKOUT BUY":
+        entry_est = min(close, breakout_retest_level)
+    elif setup == "MOMENTUM BUY":
+        entry_est = min(close, max(reclaim_retest_level, float(row.ema_fast))) if close > prior_high else min(close, candle_entry_midpoint)
+    elif setup in {"PULLBACK BUY", "EARLY PULLBACK BUY"}:
+        entry_est = min(close, max(min(float(row.ema_fast), close), candle_entry_midpoint))
+    elif setup == "REVERSAL BUY":
+        entry_est = min(close, candle_entry_midpoint)
+    else:
+        entry_est = np.nan
+
+    trade_entry = float(entry_est) if setup_forming and not math.isnan(entry_est) else close
+    stop_pct = 6.0 if setup == "BREAKOUT BUY" else 4.0 if setup == "MOMENTUM BUY" else 7.0 if setup == "PULLBACK BUY" else 6.0 if setup == "EARLY PULLBACK BUY" else 5.0
+    stop = max(trade_entry * (1 - stop_pct / 100), trade_entry * 0.93)
+    target = trade_entry + atr_now * 3.0 if setup == "BREAKOUT BUY" and atr_now > 0 else trade_entry * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
+    reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
+
+    if filters_ok:
+        action = "BUY CANDIDATE"
+        rank = 100
+    elif setup_forming:
+        action = "SETUP FORMING"
+        rank = 70
+    elif exit_pressure:
+        action = "EXIT PRESSURE"
+        rank = 20
+    elif mode in {"POWER TREND", "STEADY TREND"}:
+        action = "WATCH TREND"
+        rank = 50
+    elif mode == "WAIT / AVOID":
+        action = "WAIT / AVOID"
+        rank = 0
+    else:
+        action = "WAIT"
+        rank = 30
+
+    score = rank
+    score += 10 if mode == "POWER TREND" else 7 if mode == "STEADY TREND" else 4 if mode == "MEAN REVERSION" else 0
+    score += 8 if psych in {"FR", "QA", "BUYERS"} else -8 if psych in {"FOMO", "GR", "SELLERS"} else 0
+    score += min(max(trend_efficiency * 20, 0), 10)
+    score -= min(max(row.atr_pct - setup_max_atr, 0), 15)
+
+    notes = []
+    if fear_rejected:
+        notes.append("Fear rejected")
+    if quiet_absorption:
+        notes.append("Quiet absorption")
+    if breakout:
+        notes.append("Breakout attempt")
+    if exit_pressure:
+        notes.append("Exit pressure")
+    if avoid:
+        notes.append("Weak mode")
+
+    return {
+        "ticker": display_ticker(ticker),
+        "name": stock_name(ticker),
+        "date": str(pd.to_datetime(row.date).date()),
+        "instrument": "ETF" if is_etf else "Stock",
+        "action": action,
+        "setup": setup,
+        "adaptive_mode": mode,
+        "psychology": psych,
+        "score": round(float(score), 1),
+        "close": round(close, 2),
+        "day_change_pct": round((close / prev.close - 1) * 100, 2),
+        "rsi": round(float(row.rsi), 1),
+        "atr_pct": round(float(row.atr_pct), 2),
+        "setup_atr_limit": setup_max_atr,
+        "trend_efficiency": round(float(trend_efficiency), 2),
+        "buyer_score": round(float(buyer_score), 0),
+        "seller_score": round(float(seller_score), 0),
+        "volume_state": "BREAKDOWN" if breakdown_vol else "DISTRIBUTION" if dist_vol else "BREAKOUT" if breakout_vol else "DEMAND" if accum_vol else "DRY-UP" if dry_up_vol else "NEUTRAL",
+        "entry_est": round(float(entry_est), 2) if setup_forming and not math.isnan(entry_est) else "",
+        "stop_est": round(float(stop), 2) if setup_forming else "",
+        "target_est": round(float(target), 2) if setup_forming else "",
+        "reward_risk": round(float(reward_risk), 2) if setup_forming and not math.isnan(reward_risk) else "",
+        "hist_trades": setup_stats["hist_trades"],
+        "hist_win_rate": setup_stats["hist_win_rate"],
+        "hist_avg_return": setup_stats["hist_avg_return"],
+        "exit_pressure": bool_text(exit_pressure),
+        "confirmed_break": bool_text(confirmed_break),
+        "notes": "; ".join(notes),
+    }
+
+
+def action_class(action: str) -> str:
+    return {
+        "BUY CANDIDATE": "buy",
+        "SETUP FORMING": "setup",
+        "EXIT PRESSURE": "exit",
+        "WATCH TREND": "watch",
+        "WAIT": "avoid",
+        "WAIT / AVOID": "avoid",
+    }.get(action, "wait")
+
+
+def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, preflight_text: Optional[str] = None) -> None:
+    display_columns = [
+        "ticker", "name", "action", "score", "close", "day_change_pct",
+        "setup", "psychology", "hist_win_rate", "reward_risk",
+        "volume_state", "entry_est", "stop_est", "target_est",
+    ]
+    display_columns = [col for col in display_columns if col in df.columns]
+    visible_df = df[display_columns].copy()
+
+    summary_items = [
+        ("BUY", int((df["action"] == "BUY CANDIDATE").sum()), "buy"),
+        ("SETUP", int((df["action"] == "SETUP FORMING").sum()), "setup"),
+        ("WATCH", int((df["action"] == "WATCH TREND").sum()), "watch"),
+        ("EXIT", int((df["action"] == "EXIT PRESSURE").sum()), "exit"),
+        ("AVOID", int(df["action"].isin(["WAIT", "WAIT / AVOID"]).sum()), "avoid"),
+    ]
+    cards = "".join(
+        f"<div class='card {kind}'><span>{label}</span><strong>{value}</strong></div>"
+        for label, value, kind in summary_items
+    )
+
+    header_labels = {
+        "ticker": "Sym",
+        "name": "Name",
+        "action": "Signal",
+        "score": "Score",
+        "close": "Last",
+        "day_change_pct": "Chg%",
+        "setup": "Setup",
+        "adaptive_mode": "Mode",
+        "psychology": "Tape",
+        "hist_win_rate": "Win%",
+        "reward_risk": "R/R",
+        "volume_state": "Vol",
+        "entry_est": "Entry",
+        "stop_est": "Stop",
+        "target_est": "Target",
+    }
+    action_labels = {
+        "BUY CANDIDATE": "BUY",
+        "SETUP FORMING": "SETUP",
+        "EXIT PRESSURE": "EXIT",
+        "WATCH TREND": "WATCH",
+        "WAIT": "WAIT",
+        "WAIT / AVOID": "AVOID",
+    }
+    setup_labels = {
+        "BREAKOUT_BUY": "BO",
+        "MOMENTUM_BUY": "MOM",
+        "PULLBACK_BUY": "PB",
+        "EARLY_PULLBACK_BUY": "EPB",
+        "REVERSAL_BUY": "REV",
+        "NONE": "-",
+    }
+    mode_labels = {
+        "POWER TREND": "Power",
+        "STEADY TREND": "Steady",
+        "MEAN REVERSION": "Revert",
+        "HIGH VOLATILITY": "Volatile",
+        "WAIT / AVOID": "Avoid",
+        "MIXED / NEUTRAL": "Mixed",
+    }
+    psych_labels = {
+        "FEAR_REJECTED": "FR",
+        "QUIET_ABSORPTION": "QA",
+        "FOMO_CHASE": "FOMO",
+        "GREED_REJECTED": "GR",
+        "MIXED": "-",
+    }
+
+    def fmt_cell(col: str, value) -> str:
+        text = "" if pd.isna(value) else str(value)
+        escaped = html.escape(text)
+        if col == "action":
+            short = html.escape(action_labels.get(text, text))
+            return f"<span class='badge action {action_class(text)}'>{short}</span>"
+        if col == "setup":
+            short = html.escape(setup_labels.get(text, text.replace("_BUY", "").replace("_", " ")))
+            return f"<span class='badge setup'>{short}</span>" if short != "-" else "<span class='dash'>-</span>"
+        if col == "psychology" and text not in {"", "MIXED"}:
+            short = html.escape(psych_labels.get(text, text))
+            return f"<span class='badge psych'>{short}</span>"
+        if col == "psychology":
+            return "<span class='dash'>-</span>"
+        if col == "adaptive_mode":
+            short = html.escape(mode_labels.get(text, text.title()))
+            return f"<span class='mode'>{short}</span>"
+        if col in {"score", "hist_win_rate", "reward_risk", "day_change_pct"}:
+            try:
+                return f"{float(value):.1f}"
+            except (TypeError, ValueError):
+                return escaped
+        if col in {"close", "entry_est", "stop_est", "target_est"}:
+            try:
+                return f"{float(value):.2f}"
+            except (TypeError, ValueError):
+                return escaped
+        return escaped
+
+    rows = []
+    for _, row in visible_df.iterrows():
+        cells = "".join(f"<td data-col='{col}'>{fmt_cell(col, row[col])}</td>" for col in visible_df.columns)
+        rows.append(f"<tr class='{action_class(row['action'])}'>{cells}</tr>")
+    header = "".join(f"<th data-col='{c}'>{header_labels.get(c, c.replace('_', ' ').title())}</th>" for c in visible_df.columns)
+    meta_line = f"{datetime.now().strftime('%Y-%m-%d %H:%M')} · Confirm final entries on TradingView."
+    status_block = ""
+    if status_text:
+        status_block = f"<div class='status'>{html.escape(status_text)}</div>"
+    preflight_block = ""
+    if preflight_text:
+        preflight_block = f"<div class='status preflight'>{html.escape(preflight_text)}</div>"
+
+    html_page = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Daily Watchlist Overview</title>
+  <style>
+    :root {{
+      --bg: #f6f7f4;
+      --ink: #171817;
+      --muted: #6b6f68;
+      --line: #e2e4dd;
+      --panel: #ffffff;
+      --buy: #dff4e7;
+      --setup: #fff1c8;
+      --watch: #e4edff;
+      --exit: #ffe1de;
+      --avoid: #ececea;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }}
+    .page {{ padding: 18px; }}
+    .topbar {{
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-end;
+      margin-bottom: 10px;
+    }}
+    h1 {{ margin: 0; font-size: 22px; letter-spacing: 0; }}
+    .meta {{ color: var(--muted); font-size: 12px; line-height: 1.25; }}
+    .status {{
+      margin-top: 8px;
+      display: inline-block;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #fff4cf;
+      border: 1px solid #ebd98a;
+      color: #5b4b12;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .status.preflight {{
+      margin-left: 8px;
+      background: #ffe7e2;
+      border-color: #efb0a2;
+      color: #7b2f1d;
+    }}
+    .cards {{
+      display: grid;
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
+    }}
+    .card {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-top: 4px solid #a7aba1;
+      border-radius: 7px;
+      padding: 8px 11px;
+      min-height: 56px;
+    }}
+    .card span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 700; margin-bottom: 4px; }}
+    .card strong {{ font-size: 24px; line-height: 1; }}
+    .card.buy {{ border-top-color: #1d9a55; }}
+    .card.setup {{ border-top-color: #d69b00; }}
+    .card.watch {{ border-top-color: #3f6fd5; }}
+    .card.exit {{ border-top-color: #c93b32; }}
+    .card.avoid {{ border-top-color: #777; }}
+    .table-wrap {{
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      max-height: calc(100vh - 128px);
+    }}
+    table {{ border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; }}
+    th, td {{
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      white-space: nowrap;
+      background: inherit;
+    }}
+    th {{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #20221f;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 650;
+    }}
+    th[data-col="ticker"], td[data-col="ticker"] {{
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      font-weight: 700;
+      background: inherit;
+      min-width: 68px;
+    }}
+    th[data-col="name"], td[data-col="name"] {{
+      position: sticky;
+      left: 68px;
+      z-index: 3;
+      background: inherit;
+      min-width: 155px;
+      max-width: 155px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
+    th[data-col="ticker"], th[data-col="name"] {{ z-index: 4; background: #20221f; }}
+    td[data-col="score"], td[data-col="hist_win_rate"], td[data-col="hist_avg_return"],
+    td[data-col="hist_trades"], td[data-col="close"], td[data-col="day_change_pct"],
+    td[data-col="entry_est"], td[data-col="stop_est"], td[data-col="target_est"],
+    td[data-col="rsi"], td[data-col="atr_pct"], td[data-col="reward_risk"] {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }}
+    td[data-col="score"] {{ font-weight: 800; color: #111; }}
+    td[data-col="setup"], td[data-col="adaptive_mode"], td[data-col="psychology"] {{ text-align: center; }}
+    tr.buy {{ background: var(--buy); }}
+    tr.setup {{ background: var(--setup); }}
+    tr.exit {{ background: var(--exit); }}
+    tr.watch {{ background: var(--watch); }}
+    tr.avoid {{ background: var(--avoid); color: #62665f; }}
+    tr:hover td {{ filter: brightness(0.97); }}
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      min-width: 42px;
+      justify-content: center;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid rgba(0,0,0,.08);
+      background: #f4f4f1;
+    }}
+    .badge.buy {{ color: #0b6b39; background: #ccefd9; }}
+    .badge.setup {{ color: #866000; background: #ffe5a3; }}
+    .badge.watch {{ color: #214eaa; background: #d7e4ff; }}
+    .badge.exit {{ color: #9b2018; background: #ffd0cc; }}
+    .badge.avoid {{ color: #555; background: #dfdfdc; }}
+    .badge.psych {{ color: #235458; background: #d6f1ef; }}
+    .mode {{ font-weight: 700; color: #30342e; }}
+    .dash {{ color: #999; }}
+    @media (max-width: 900px) {{
+      .page {{ padding: 10px; }}
+      .cards {{ grid-template-columns: repeat(2, minmax(140px, 1fr)); }}
+      .topbar {{ display: block; }}
+      h1 {{ font-size: 20px; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="topbar">
+      <div>
+        <h1>Watchlist</h1>
+        <div class="meta">{meta_line}</div>
+        {status_block}
+        {preflight_block}
+      </div>
+    </div>
+    <section class="cards">{cards}</section>
+    <section class="table-wrap">
+      <table>
+        <thead><tr>{header}</tr></thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
+"""
+    path.write_text(html_page)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Create a daily stock/ETF watchlist overview.")
+    parser.add_argument("--watchlist", default="daily_watchlist.txt")
+    parser.add_argument("--refresh", action="store_true", help="Fetch fresh Yahoo data instead of using cached CSV files.")
+    parser.add_argument("--years", type=int, default=3)
+    args = parser.parse_args()
+
+    tickers = read_watchlist(Path(args.watchlist))
+    live_access_ok = True
+    live_access_message = "Live Yahoo access available."
+    if args.refresh:
+        live_access_ok, live_access_message = check_live_data_access()
+
+    rows = []
+    failures = []
+    stale_cache_fallbacks = []
+    for ticker in tickers:
+        try:
+            if args.refresh and not live_access_ok:
+                df = cached_chart(ticker, years=args.years)
+                stale_cache_fallbacks.append(
+                    {"ticker": display_ticker(ticker), "error": live_access_message}
+                )
+            else:
+                df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
+            rows.append(classify_and_score(ticker, df))
+        except URLError as exc:
+            if not args.refresh:
+                failures.append({"ticker": display_ticker(ticker), "error": str(exc)})
+                continue
+            try:
+                df = cached_chart(ticker, years=args.years)
+                rows.append(classify_and_score(ticker, df))
+                stale_cache_fallbacks.append(
+                    {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
+                )
+            except Exception as cache_exc:
+                failures.append({"ticker": display_ticker(ticker), "error": f"{exc}; fallback failed: {cache_exc}"})
+        except Exception as exc:
+            failures.append({"ticker": display_ticker(ticker), "error": str(exc)})
+
+    if not rows:
+        raise SystemExit("No symbols could be analyzed.")
+
+    report = pd.DataFrame(rows)
+    report = report.sort_values(["score", "action", "ticker"], ascending=[False, True, True]).reset_index(drop=True)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    csv_path = Path(f"daily_watchlist_overview_{today}.csv")
+    html_path = Path(f"daily_watchlist_overview_{today}.html")
+    report.to_csv(csv_path, index=False)
+    data_dates = sorted(str(value) for value in pd.to_datetime(report["date"]).dt.date.unique())
+    latest_data_date = data_dates[-1]
+    earliest_data_date = data_dates[0]
+    status_parts = [f"Report data as of {latest_data_date}"]
+    if earliest_data_date != latest_data_date:
+        status_parts.append(f"mixed source dates {earliest_data_date} to {latest_data_date}")
+    if stale_cache_fallbacks:
+        status_parts.append(f"{len(stale_cache_fallbacks)} symbols used cached data")
+    if failures:
+        status_parts.append(f"{len(failures)} symbols failed")
+    status_text = " | ".join(status_parts)
+    preflight_text = None if live_access_ok else f"{live_access_message} Running cache-backed refresh."
+
+    write_html(report, html_path, status_text=status_text, preflight_text=preflight_text)
+    report.to_csv("daily_watchlist_overview_latest.csv", index=False)
+    write_html(report, Path("daily_watchlist_overview_latest.html"), status_text=status_text, preflight_text=preflight_text)
+
+    if failures:
+        pd.DataFrame(failures).to_csv("daily_watchlist_overview_failures.csv", index=False)
+    elif Path("daily_watchlist_overview_failures.csv").exists():
+        Path("daily_watchlist_overview_failures.csv").unlink()
+
+    if stale_cache_fallbacks:
+        pd.DataFrame(stale_cache_fallbacks).to_csv("daily_watchlist_overview_stale_cache.csv", index=False)
+    elif Path("daily_watchlist_overview_stale_cache.csv").exists():
+        Path("daily_watchlist_overview_stale_cache.csv").unlink()
+
+    columns = ["ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct", "notes"]
+    print(report[columns].to_string(index=False))
+    print(live_access_message)
+    print(f"\nWrote {csv_path}, {html_path}, daily_watchlist_overview_latest.csv, and daily_watchlist_overview_latest.html")
+    if failures:
+        print(f"Skipped {len(failures)} symbol(s); see daily_watchlist_overview_failures.csv")
+    if stale_cache_fallbacks:
+        print(f"Used cached data for {len(stale_cache_fallbacks)} symbol(s); see daily_watchlist_overview_stale_cache.csv")
+
+
+if __name__ == "__main__":
+    main()

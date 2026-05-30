@@ -1,0 +1,25 @@
+# Generated reports
+daily_watchlist_overview_*.csv
+daily_watchlist_overview_*.html
+daily_watchlist_overview_failures.csv
+daily_watchlist_overview_latest.csv
+daily_watchlist_overview_latest.html
+daily_watchlist_overview_stale_cache.csv
+
+# Local market data caches and backtest outputs
+watchlist_*_3y.csv
+ohlcv_*_5y.csv
+backtest_*.csv
+optimizer_*.csv
+candidate_optimizer_*.csv
+staged_optimizer_*.csv
+personality_mode_by_ticker.csv
+suitability_filter_by_ticker.csv
+watchlist_modes.csv
+sp100_nasdaq100_*.csv
+index_universe_fetch_failures.txt
+
+# Python/runtime noise
+__pycache__/
+*.pyc
+.DS_Store
