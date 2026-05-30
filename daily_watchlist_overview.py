@@ -352,8 +352,8 @@ def historical_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10, 
     }
 
 
-def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
-    d = prepare(raw)
+def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False) -> dict:
+    d = raw.copy() if prepared else prepare(raw)
     if len(d) < 220:
         raise ValueError("not enough history")
 
@@ -638,6 +638,261 @@ def action_class(action: str) -> str:
     }.get(action, "wait")
 
 
+def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> list[dict]:
+    d = prepare(raw)
+    if len(d) < 220:
+        return []
+
+    history_rows: list[dict] = []
+    start = max(220, len(d) - days + 1)
+    for end in range(start, len(d) + 1):
+        try:
+            snapshot = classify_and_score(ticker, d.iloc[:end].copy(), prepared=True)
+        except Exception:
+            continue
+        snapshot["history_day"] = len(d) - end
+        history_rows.append(snapshot)
+    return history_rows
+
+
+def write_history_html(path: Path) -> None:
+    html_page = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watchlist Behavior History</title>
+  <style>
+    :root {
+      --bg: #f1efe5;
+      --ink: #12140f;
+      --muted: #69705f;
+      --line: #dad7c8;
+      --panel: rgba(255,255,248,.92);
+      --buy: #ccefd9;
+      --setup: #ffe5a3;
+      --watch: #d7e4ff;
+      --exit: #ffd0cc;
+      --avoid: #e5e5df;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Avenir Next, Charter, Georgia, ui-serif, serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 5%, rgba(126, 169, 255, .28), transparent 34%),
+        radial-gradient(circle at 90% 10%, rgba(255, 197, 77, .32), transparent 30%),
+        linear-gradient(135deg, #fbf4df 0%, var(--bg) 55%, #e2eadf 100%);
+      min-height: 100vh;
+    }
+    .page { padding: 24px; max-width: 1220px; margin: 0 auto; }
+    .topbar { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+    .eyebrow { margin: 0 0 6px; color: #647052; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(32px, 5vw, 64px); letter-spacing: -.06em; line-height: .9; }
+    .meta { margin-top: 10px; color: var(--muted); max-width: 760px; line-height: 1.4; }
+    .link-button, button {
+      border: 1px solid rgba(17,20,15,.15);
+      background: #fffdf2;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 10px 13px;
+      text-decoration: none;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(50, 56, 42, .08);
+    }
+    .controls {
+      margin: 22px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid rgba(17,20,15,.10);
+      border-radius: 22px;
+      padding: 14px;
+      box-shadow: 0 18px 60px rgba(50, 56, 42, .10);
+    }
+    input {
+      min-width: 220px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 11px 14px;
+      font: inherit;
+      font-weight: 800;
+      text-transform: uppercase;
+      background: white;
+    }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { background: var(--panel); border: 1px solid rgba(17,20,15,.10); border-radius: 22px; padding: 16px; box-shadow: 0 16px 50px rgba(50,56,42,.10); }
+    .card span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+    .card strong { display: block; margin-top: 6px; font-size: 24px; letter-spacing: -.04em; }
+    .timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); gap: 8px; margin-bottom: 18px; }
+    .day { border: 1px solid rgba(17,20,15,.10); border-radius: 16px; padding: 10px; min-height: 90px; background: white; }
+    .day.buy { background: var(--buy); }
+    .day.setup { background: var(--setup); }
+    .day.watch { background: var(--watch); }
+    .day.exit { background: var(--exit); }
+    .day.avoid { background: var(--avoid); }
+    .date { font-size: 11px; color: var(--muted); font-weight: 800; }
+    .signal { margin-top: 5px; font-size: 12px; font-weight: 900; }
+    .price { margin-top: 5px; font-size: 16px; font-weight: 900; }
+    .table-wrap { background: var(--panel); border: 1px solid rgba(17,20,15,.10); border-radius: 22px; overflow: auto; box-shadow: 0 18px 60px rgba(50,56,42,.10); }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    th { position: sticky; top: 0; background: #20221f; color: #f7f1db; z-index: 1; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .empty { padding: 24px; background: var(--panel); border-radius: 22px; color: var(--muted); }
+    @media (max-width: 820px) {
+      .page { padding: 12px; }
+      .topbar { display: block; }
+      .cards { grid-template-columns: repeat(2, minmax(135px, 1fr)); }
+      input { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="topbar">
+      <div>
+        <p class="eyebrow">Behavior rewind</p>
+        <h1>30-Day History</h1>
+        <div class="meta">Type a symbol like ORCL to see how the scanner classified each recent trading day. This is the scanner's historical read, not a TradingView confirmation.</div>
+      </div>
+      <a class="link-button" href="index.html">Back to Watchlist</a>
+    </div>
+    <section class="controls">
+      <input id="ticker" value="ORCL" aria-label="Ticker">
+      <button id="load" type="button">Show History</button>
+      <a class="link-button" href="watchlist_behavior_history_latest.csv">Download History CSV</a>
+    </section>
+    <section class="cards" id="cards"></section>
+    <section class="timeline" id="timeline"></section>
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Signal</th><th>Setup</th><th>Mode</th><th>Tape</th><th>Score</th><th>Close</th><th>Chg%</th><th>Entry</th><th>Stop</th><th>Target</th><th>Notes</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const input = document.querySelector("#ticker");
+    const loadButton = document.querySelector("#load");
+    const cards = document.querySelector("#cards");
+    const timeline = document.querySelector("#timeline");
+    const rowsBody = document.querySelector("#rows");
+    let historyRows = [];
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\\r?\\n/);
+      const headers = lines.shift().split(",");
+      return lines.map((line) => {
+        const cells = [];
+        let current = "";
+        let quoted = false;
+        for (let i = 0; i < line.length; i += 1) {
+          const char = line[i];
+          const next = line[i + 1];
+          if (char === '"' && quoted && next === '"') {
+            current += '"';
+            i += 1;
+          } else if (char === '"') {
+            quoted = !quoted;
+          } else if (char === "," && !quoted) {
+            cells.push(current);
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        cells.push(current);
+        return Object.fromEntries(headers.map((header, index) => [header, cells[index] || ""]));
+      });
+    }
+
+    function actionKind(action) {
+      if (action === "BUY CANDIDATE") return "buy";
+      if (action === "SETUP FORMING") return "setup";
+      if (action === "WATCH TREND") return "watch";
+      if (action === "EXIT PRESSURE") return "exit";
+      return "avoid";
+    }
+
+    function shortAction(action) {
+      return {
+        "BUY CANDIDATE": "BUY",
+        "SETUP FORMING": "SETUP",
+        "WATCH TREND": "WATCH",
+        "EXIT PRESSURE": "EXIT",
+        "WAIT / AVOID": "AVOID",
+      }[action] || action || "WAIT";
+    }
+
+    function showTicker() {
+      const ticker = input.value.trim().toUpperCase();
+      const rows = historyRows.filter((row) => row.ticker === ticker).sort((a, b) => a.date.localeCompare(b.date));
+      const params = new URLSearchParams(window.location.search);
+      params.set("ticker", ticker);
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+
+      if (!rows.length) {
+        cards.innerHTML = "";
+        timeline.innerHTML = `<div class="empty">No 30-day history found for ${ticker}. It may have failed data fetch or have too little price history.</div>`;
+        rowsBody.innerHTML = "";
+        return;
+      }
+
+      const latest = rows[rows.length - 1];
+      const first = rows[0];
+      const signalChanges = rows.reduce((count, row, index) => count + (index > 0 && row.action !== rows[index - 1].action ? 1 : 0), 0);
+      const closeChange = Number(first.close) ? ((Number(latest.close) / Number(first.close) - 1) * 100).toFixed(1) : "";
+      cards.innerHTML = `
+        <div class="card"><span>Latest Signal</span><strong>${shortAction(latest.action)}</strong></div>
+        <div class="card"><span>Latest Score</span><strong>${latest.score || "-"}</strong></div>
+        <div class="card"><span>30-Day Change</span><strong>${closeChange}%</strong></div>
+        <div class="card"><span>Signal Changes</span><strong>${signalChanges}</strong></div>
+      `;
+      timeline.innerHTML = rows.map((row) => `
+        <div class="day ${actionKind(row.action)}" title="${row.date} ${row.action} ${row.setup}">
+          <div class="date">${row.date.slice(5)}</div>
+          <div class="signal">${shortAction(row.action)}</div>
+          <div class="price">${Number(row.close).toFixed(2)}</div>
+          <div class="date">${row.setup === "NONE" ? "" : row.setup.replace(" BUY", "")}</div>
+        </div>
+      `).join("");
+      rowsBody.innerHTML = rows.slice().reverse().map((row) => `
+        <tr>
+          <td>${row.date}</td><td>${shortAction(row.action)}</td><td>${row.setup}</td><td>${row.adaptive_mode}</td>
+          <td>${row.psychology}</td><td>${row.score}</td><td>${row.close}</td><td>${row.day_change_pct}</td>
+          <td>${row.entry_est}</td><td>${row.stop_est}</td><td>${row.target_est}</td><td>${row.notes}</td>
+        </tr>
+      `).join("");
+    }
+
+    fetch("watchlist_behavior_history_latest.csv")
+      .then((response) => response.text())
+      .then((text) => {
+        historyRows = parseCSV(text);
+        const ticker = new URLSearchParams(window.location.search).get("ticker");
+        if (ticker) input.value = ticker.toUpperCase();
+        showTicker();
+      })
+      .catch(() => {
+        timeline.innerHTML = '<div class="empty">History CSV is not available yet. It will appear after the next successful refresh.</div>';
+      });
+    loadButton.addEventListener("click", showTicker);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") showTicker();
+    });
+  </script>
+</body>
+</html>
+"""
+    path.write_text(html_page)
+
+
 def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, preflight_text: Optional[str] = None) -> None:
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
@@ -714,6 +969,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     def fmt_cell(col: str, value) -> str:
         text = "" if pd.isna(value) else str(value)
         escaped = html.escape(text)
+        if col == "ticker":
+            return f"<a class='ticker-link' href='history.html?ticker={escaped}'>{escaped}</a>"
         if col == "action":
             short = html.escape(action_labels.get(text, text))
             return f"<span class='badge action {action_class(text)}'>{short}</span>"
@@ -848,6 +1105,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       font-weight: 800;
       box-shadow: 0 8px 28px rgba(0,0,0,.06);
     }}
+    .ticker-link {{ color: #0f4029; font-weight: 900; text-decoration-thickness: 2px; text-underline-offset: 3px; }}
     .cards {{
       display: grid;
       grid-template-columns: repeat(5, minmax(140px, 1fr));
@@ -1009,6 +1267,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       </div>
       <div class="actions">
         <a class="link-button" href="daily_watchlist_overview_latest.csv">Download CSV</a>
+        <a class="link-button" href="history.html?ticker=ORCL">30-Day History</a>
         <a class="link-button" href="https://github.com/yubobo815/daily-watchlist-cloud/actions/workflows/daily-watchlist-pages.yml">Refresh history</a>
       </div>
     </div>
@@ -1106,6 +1365,7 @@ def main() -> None:
     parser.add_argument("--watchlist", default="daily_watchlist.txt")
     parser.add_argument("--refresh", action="store_true", help="Fetch fresh Yahoo data instead of using cached CSV files.")
     parser.add_argument("--years", type=int, default=3)
+    parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
     args = parser.parse_args()
 
     tickers = read_watchlist(Path(args.watchlist))
@@ -1115,6 +1375,7 @@ def main() -> None:
         live_access_ok, live_access_message = check_live_data_access()
 
     rows = []
+    history_rows = []
     failures = []
     stale_cache_fallbacks = []
     for ticker in tickers:
@@ -1127,6 +1388,7 @@ def main() -> None:
             else:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
             rows.append(classify_and_score(ticker, df))
+            history_rows.extend(build_behavior_history(ticker, df, days=args.history_days))
         except URLError as exc:
             if not args.refresh:
                 failures.append({"ticker": display_ticker(ticker), "error": str(exc)})
@@ -1134,6 +1396,7 @@ def main() -> None:
             try:
                 df = cached_chart(ticker, years=args.years)
                 rows.append(classify_and_score(ticker, df))
+                history_rows.extend(build_behavior_history(ticker, df, days=args.history_days))
                 stale_cache_fallbacks.append(
                     {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
                 )
@@ -1169,6 +1432,16 @@ def main() -> None:
     report.to_csv("daily_watchlist_overview_latest.csv", index=False)
     write_html(report, Path("daily_watchlist_overview_latest.html"), status_text=status_text, preflight_text=preflight_text)
 
+    history = pd.DataFrame(history_rows)
+    if not history.empty:
+        history = history.sort_values(["ticker", "date"]).reset_index(drop=True)
+        history_path = Path(f"watchlist_behavior_history_{today}.csv")
+        history.to_csv(history_path, index=False)
+        history.to_csv("watchlist_behavior_history_latest.csv", index=False)
+        write_history_html(Path("history.html"))
+    elif Path("watchlist_behavior_history_latest.csv").exists():
+        Path("watchlist_behavior_history_latest.csv").unlink()
+
     if failures:
         pd.DataFrame(failures).to_csv("daily_watchlist_overview_failures.csv", index=False)
     elif Path("daily_watchlist_overview_failures.csv").exists():
@@ -1182,7 +1455,7 @@ def main() -> None:
     columns = ["ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct", "notes"]
     print(report[columns].to_string(index=False))
     print(live_access_message)
-    print(f"\nWrote {csv_path}, {html_path}, daily_watchlist_overview_latest.csv, and daily_watchlist_overview_latest.html")
+    print(f"\nWrote {csv_path}, {html_path}, daily_watchlist_overview_latest.csv, daily_watchlist_overview_latest.html, watchlist_behavior_history_latest.csv, and history.html")
     if failures:
         print(f"Skipped {len(failures)} symbol(s); see daily_watchlist_overview_failures.csv")
     if stale_cache_fallbacks:

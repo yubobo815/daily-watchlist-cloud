@@ -70,6 +70,8 @@ jobs:
           cp daily_watchlist_overview_latest.html public/index.html
           cp daily_watchlist_overview_latest.html public/daily_watchlist_overview_latest.html
           cp daily_watchlist_overview_latest.csv public/daily_watchlist_overview_latest.csv
+          cp history.html public/history.html
+          cp watchlist_behavior_history_latest.csv public/watchlist_behavior_history_latest.csv
           cp daily_watchlist_overview_failures.csv public/daily_watchlist_overview_failures.csv 2>/dev/null || true
           cp daily_watchlist_overview_stale_cache.csv public/daily_watchlist_overview_stale_cache.csv 2>/dev/null || true
 
