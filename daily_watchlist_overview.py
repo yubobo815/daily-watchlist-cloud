@@ -225,6 +225,19 @@ def bool_text(value: bool) -> str:
     return "YES" if value else "NO"
 
 
+def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_pullback_pct: float) -> tuple[float, str]:
+    if math.isnan(entry) or entry <= 0 or close <= 0:
+        return entry, ""
+
+    max_pullback = close * (1 - max_pullback_pct / 100)
+    if atr_now > 0:
+        max_pullback = max(max_pullback, close - atr_now * 1.5)
+
+    if entry < max_pullback:
+        return max_pullback, f"Entry zone capped near current price; original retest {entry:.2f} was stale"
+    return entry, ""
+
+
 def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     if i < 210:
         return "NONE"
@@ -482,14 +495,19 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
     reclaim_retest_level = prior_high if close > prior_high else candle_entry_midpoint
     if setup == "BREAKOUT BUY":
         entry_est = min(close, breakout_retest_level)
+        entry_est, entry_note = clamp_entry_to_current_zone(float(entry_est), close, atr_now, 5.0)
     elif setup == "MOMENTUM BUY":
         entry_est = min(close, max(reclaim_retest_level, float(row.ema_fast))) if close > prior_high else min(close, candle_entry_midpoint)
+        entry_est, entry_note = clamp_entry_to_current_zone(float(entry_est), close, atr_now, 4.0)
     elif setup in {"PULLBACK BUY", "EARLY PULLBACK BUY"}:
         entry_est = min(close, max(min(float(row.ema_fast), close), candle_entry_midpoint))
+        entry_est, entry_note = clamp_entry_to_current_zone(float(entry_est), close, atr_now, 6.0)
     elif setup == "REVERSAL BUY":
         entry_est = min(close, candle_entry_midpoint)
+        entry_est, entry_note = clamp_entry_to_current_zone(float(entry_est), close, atr_now, 5.0)
     else:
         entry_est = np.nan
+        entry_note = ""
 
     trade_entry = float(entry_est) if setup_forming and not math.isnan(entry_est) else close
     stop_pct = 6.0 if setup == "BREAKOUT BUY" else 4.0 if setup == "MOMENTUM BUY" else 7.0 if setup == "PULLBACK BUY" else 6.0 if setup == "EARLY PULLBACK BUY" else 5.0
@@ -529,6 +547,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
         notes.append("Quiet absorption")
     if breakout:
         notes.append("Breakout attempt")
+    if entry_note:
+        notes.append(entry_note)
     if exit_pressure:
         notes.append("Exit pressure")
     if avoid:
