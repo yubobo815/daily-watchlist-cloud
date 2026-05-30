@@ -580,8 +580,8 @@ def action_class(action: str) -> str:
 def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, preflight_text: Optional[str] = None) -> None:
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
-        "setup", "psychology", "hist_win_rate", "reward_risk",
-        "volume_state", "entry_est", "stop_est", "target_est",
+        "setup", "adaptive_mode", "psychology", "hist_win_rate", "reward_risk",
+        "volume_state", "entry_est", "stop_est", "target_est", "notes",
     ]
     display_columns = [col for col in display_columns if col in df.columns]
     visible_df = df[display_columns].copy()
@@ -594,7 +594,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         ("AVOID", int(df["action"].isin(["WAIT", "WAIT / AVOID"]).sum()), "avoid"),
     ]
     cards = "".join(
-        f"<div class='card {kind}'><span>{label}</span><strong>{value}</strong></div>"
+        f"<button class='card {kind}' type='button' data-filter='{kind}'><span>{label}</span><strong>{value}</strong></button>"
         for label, value, kind in summary_items
     )
 
@@ -614,6 +614,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "entry_est": "Entry",
         "stop_est": "Stop",
         "target_est": "Target",
+        "notes": "Read",
     }
     action_labels = {
         "BUY CANDIDATE": "BUY",
@@ -624,11 +625,11 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "WAIT / AVOID": "AVOID",
     }
     setup_labels = {
-        "BREAKOUT_BUY": "BO",
-        "MOMENTUM_BUY": "MOM",
-        "PULLBACK_BUY": "PB",
-        "EARLY_PULLBACK_BUY": "EPB",
-        "REVERSAL_BUY": "REV",
+        "BREAKOUT BUY": "BO",
+        "MOMENTUM BUY": "MOM",
+        "PULLBACK BUY": "PB",
+        "EARLY PULLBACK BUY": "EPB",
+        "REVERSAL BUY": "REV",
         "NONE": "-",
     }
     mode_labels = {
@@ -640,10 +641,12 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "MIXED / NEUTRAL": "Mixed",
     }
     psych_labels = {
-        "FEAR_REJECTED": "FR",
-        "QUIET_ABSORPTION": "QA",
-        "FOMO_CHASE": "FOMO",
-        "GREED_REJECTED": "GR",
+        "FR": "FR",
+        "QA": "QA",
+        "FOMO": "FOMO",
+        "GR": "GR",
+        "BUYERS": "BUYERS",
+        "SELLERS": "SELLERS",
         "MIXED": "-",
     }
 
@@ -676,12 +679,29 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return escaped
         return escaped
 
+    numeric_columns = {"score", "hist_win_rate", "reward_risk", "day_change_pct", "close", "entry_est", "stop_est", "target_est"}
+
     rows = []
     for _, row in visible_df.iterrows():
+        search_text = " ".join(str(row.get(col, "")) for col in visible_df.columns).lower()
+        action_kind = action_class(row["action"])
+        score_value = row.get("score", "")
+        change_value = row.get("day_change_pct", "")
+        data_attrs = (
+            f"data-action='{action_kind}' "
+            f"data-score='{html.escape(str(score_value))}' "
+            f"data-change='{html.escape(str(change_value))}' "
+            f"data-ticker='{html.escape(str(row.get('ticker', '')))}' "
+            f"data-search='{html.escape(search_text)}'"
+        )
         cells = "".join(f"<td data-col='{col}'>{fmt_cell(col, row[col])}</td>" for col in visible_df.columns)
-        rows.append(f"<tr class='{action_class(row['action'])}'>{cells}</tr>")
-    header = "".join(f"<th data-col='{c}'>{header_labels.get(c, c.replace('_', ' ').title())}</th>" for c in visible_df.columns)
-    meta_line = f"{datetime.now().strftime('%Y-%m-%d %H:%M')} · Confirm final entries on TradingView."
+        rows.append(f"<tr class='{action_kind}' {data_attrs}>{cells}</tr>")
+    header = "".join(
+        f"<th data-col='{c}' data-sort='{'number' if c in numeric_columns else 'text'}'>{header_labels.get(c, c.replace('_', ' ').title())}</th>"
+        for c in visible_df.columns
+    )
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    meta_line = f"{generated_at} · Confirm BUY CANDIDATE entries on TradingView before acting."
     status_block = ""
     if status_text:
         status_block = f"<div class='status'>{html.escape(status_text)}</div>"
@@ -693,42 +713,50 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Daily Watchlist Overview</title>
   <style>
     :root {{
-      --bg: #f6f7f4;
-      --ink: #171817;
-      --muted: #6b6f68;
-      --line: #e2e4dd;
-      --panel: #ffffff;
-      --buy: #dff4e7;
-      --setup: #fff1c8;
-      --watch: #e4edff;
-      --exit: #ffe1de;
-      --avoid: #ececea;
+      --bg: #eef1e8;
+      --ink: #11140f;
+      --muted: #68705f;
+      --line: #d9dece;
+      --panel: rgba(255,255,250,.92);
+      --panel-strong: #fffdf3;
+      --buy: #d8f7e4;
+      --setup: #fff0b8;
+      --watch: #dfeaff;
+      --exit: #ffddd8;
+      --avoid: #eaebe5;
+      --shadow: 0 20px 70px rgba(54, 67, 40, .14);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
-      background: var(--bg);
+      font-family: Avenir Next, Charter, Georgia, ui-serif, serif;
+      background:
+        radial-gradient(circle at 10% 0%, rgba(255, 211, 87, .35), transparent 30%),
+        radial-gradient(circle at 88% 12%, rgba(94, 154, 255, .23), transparent 36%),
+        linear-gradient(135deg, #f5f1df 0%, var(--bg) 52%, #dde8e0 100%);
       color: var(--ink);
+      min-height: 100vh;
     }}
-    .page {{ padding: 18px; }}
+    .page {{ padding: 24px; }}
     .topbar {{
       display: flex;
       justify-content: space-between;
       gap: 18px;
-      align-items: flex-end;
-      margin-bottom: 10px;
+      align-items: flex-start;
+      margin-bottom: 16px;
     }}
-    h1 {{ margin: 0; font-size: 22px; letter-spacing: 0; }}
-    .meta {{ color: var(--muted); font-size: 12px; line-height: 1.25; }}
+    .eyebrow {{ margin: 0 0 5px; color: #647052; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }}
+    h1 {{ margin: 0; font-size: clamp(32px, 5vw, 68px); letter-spacing: -.06em; line-height: .88; }}
+    .meta {{ color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 10px; max-width: 760px; }}
     .status {{
       margin-top: 8px;
       display: inline-block;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: 999px;
       background: #fff4cf;
       border: 1px solid #ebd98a;
       color: #5b4b12;
@@ -741,37 +769,89 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       border-color: #efb0a2;
       color: #7b2f1d;
     }}
+    .actions {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      min-width: 260px;
+    }}
+    .link-button {{
+      border: 1px solid rgba(17,20,15,.12);
+      color: var(--ink);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 10px 13px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: 0 8px 28px rgba(0,0,0,.06);
+    }}
     .cards {{
       display: grid;
       grid-template-columns: repeat(5, minmax(140px, 1fr));
-      gap: 8px;
-      margin-bottom: 10px;
+      gap: 10px;
+      margin-bottom: 14px;
     }}
     .card {{
       background: var(--panel);
       border: 1px solid var(--line);
       border-top: 4px solid #a7aba1;
-      border-radius: 7px;
-      padding: 8px 11px;
-      min-height: 56px;
+      border-radius: 16px;
+      padding: 12px 14px;
+      min-height: 70px;
+      text-align: left;
+      cursor: pointer;
+      box-shadow: 0 10px 40px rgba(0,0,0,.06);
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
     }}
-    .card span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 700; margin-bottom: 4px; }}
-    .card strong {{ font-size: 24px; line-height: 1; }}
+    .card:hover, .card.active {{ transform: translateY(-2px); box-shadow: var(--shadow); }}
+    .card.active {{ outline: 2px solid rgba(17,20,15,.72); }}
+    .card span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .12em; margin-bottom: 6px; }}
+    .card strong {{ font-size: 32px; line-height: 1; }}
     .card.buy {{ border-top-color: #1d9a55; }}
     .card.setup {{ border-top-color: #d69b00; }}
     .card.watch {{ border-top-color: #3f6fd5; }}
     .card.exit {{ border-top-color: #c93b32; }}
     .card.avoid {{ border-top-color: #777; }}
+    .control-panel {{
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) repeat(3, auto);
+      gap: 10px;
+      align-items: center;
+      background: rgba(255,255,250,.78);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 10px;
+      margin-bottom: 12px;
+      box-shadow: 0 12px 45px rgba(0,0,0,.07);
+      backdrop-filter: blur(12px);
+    }}
+    input, select, .pill {{
+      border: 1px solid rgba(17,20,15,.12);
+      border-radius: 999px;
+      background: #fffef7;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 10px 12px;
+    }}
+    input[type="search"] {{ width: 100%; }}
+    .pill {{ cursor: pointer; }}
+    .pill.active {{ background: #1e211b; color: #fff; }}
+    .visible-count {{ color: var(--muted); font-size: 13px; font-weight: 800; text-align: right; white-space: nowrap; }}
     .table-wrap {{
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 18px;
       background: var(--panel);
-      max-height: calc(100vh - 128px);
+      max-height: calc(100vh - 230px);
+      box-shadow: var(--shadow);
     }}
-    table {{ border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; }}
+    table {{ border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; font-family: Avenir Next, ui-sans-serif, system-ui, sans-serif; }}
     th, td {{
-      padding: 7px 8px;
+      padding: 9px 10px;
       border-bottom: 1px solid var(--line);
       text-align: left;
       white-space: nowrap;
@@ -785,7 +865,10 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       color: #fff;
       font-size: 11px;
       font-weight: 650;
+      cursor: pointer;
+      user-select: none;
     }}
+    th.sorted::after {{ content: " ↓"; opacity: .7; }}
     th[data-col="ticker"], td[data-col="ticker"] {{
       position: sticky;
       left: 0;
@@ -799,8 +882,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       left: 68px;
       z-index: 3;
       background: inherit;
-      min-width: 155px;
-      max-width: 155px;
+      min-width: 170px;
+      max-width: 170px;
       overflow: hidden;
       text-overflow: ellipsis;
     }}
@@ -819,6 +902,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     tr.exit {{ background: var(--exit); }}
     tr.watch {{ background: var(--watch); }}
     tr.avoid {{ background: var(--avoid); color: #62665f; }}
+    tr.hidden {{ display: none; }}
     tr:hover td {{ filter: brightness(0.97); }}
     .badge {{
       display: inline-flex;
@@ -844,8 +928,11 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     @media (max-width: 900px) {{
       .page {{ padding: 10px; }}
       .cards {{ grid-template-columns: repeat(2, minmax(140px, 1fr)); }}
-      .topbar {{ display: block; }}
+      .topbar, .control-panel {{ display: block; }}
+      .actions {{ justify-content: flex-start; margin-top: 14px; }}
+      .control-panel > * {{ margin-bottom: 8px; width: 100%; }}
       h1 {{ font-size: 20px; }}
+      .table-wrap {{ max-height: none; }}
     }}
   </style>
 </head>
@@ -853,20 +940,100 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
   <main class="page">
     <div class="topbar">
       <div>
+        <p class="eyebrow">Daily trading cockpit</p>
         <h1>Watchlist</h1>
         <div class="meta">{meta_line}</div>
         {status_block}
         {preflight_block}
       </div>
+      <div class="actions">
+        <a class="link-button" href="daily_watchlist_overview_latest.csv">Download CSV</a>
+        <a class="link-button" href="https://github.com/yubobo815/daily-watchlist-cloud/actions/workflows/daily-watchlist-pages.yml">Refresh history</a>
+      </div>
     </div>
     <section class="cards">{cards}</section>
+    <section class="control-panel" aria-label="Watchlist controls">
+      <input id="search" type="search" placeholder="Search ticker, setup, note, mode..." autocomplete="off">
+      <button class="pill active" type="button" data-filter="all">All</button>
+      <select id="sort">
+        <option value="score-desc">Score high to low</option>
+        <option value="change-desc">Best day change</option>
+        <option value="change-asc">Worst day change</option>
+        <option value="ticker-asc">Ticker A to Z</option>
+      </select>
+      <div class="visible-count"><span id="visibleCount">{len(rows)}</span> / {len(rows)} shown</div>
+    </section>
     <section class="table-wrap">
-      <table>
+      <table id="watchTable">
         <thead><tr>{header}</tr></thead>
         <tbody>{''.join(rows)}</tbody>
       </table>
     </section>
   </main>
+  <script>
+    const rows = Array.from(document.querySelectorAll("#watchTable tbody tr"));
+    const search = document.querySelector("#search");
+    const sort = document.querySelector("#sort");
+    const visibleCount = document.querySelector("#visibleCount");
+    const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
+    let activeFilter = "all";
+
+    function rowMatches(row) {{
+      const term = search.value.trim().toLowerCase();
+      const actionOk = activeFilter === "all" || row.dataset.action === activeFilter;
+      const searchOk = !term || row.dataset.search.includes(term);
+      return actionOk && searchOk;
+    }}
+
+    function sortRows() {{
+      const [field, direction] = sort.value.split("-");
+      const multiplier = direction === "asc" ? 1 : -1;
+      const tbody = document.querySelector("#watchTable tbody");
+      rows.sort((a, b) => {{
+        if (field === "ticker") {{
+          return a.dataset.ticker.localeCompare(b.dataset.ticker) * multiplier;
+        }}
+        const key = field === "change" ? "change" : "score";
+        const av = Number.parseFloat(a.dataset[key]) || 0;
+        const bv = Number.parseFloat(b.dataset[key]) || 0;
+        return (av - bv) * multiplier;
+      }});
+      rows.forEach((row) => tbody.appendChild(row));
+    }}
+
+    function applyFilters() {{
+      sortRows();
+      let visible = 0;
+      rows.forEach((row) => {{
+        const show = rowMatches(row);
+        row.classList.toggle("hidden", !show);
+        if (show) visible += 1;
+      }});
+      visibleCount.textContent = visible;
+      filterButtons.forEach((button) => button.classList.toggle("active", button.dataset.filter === activeFilter));
+    }}
+
+    filterButtons.forEach((button) => {{
+      button.addEventListener("click", () => {{
+        activeFilter = button.dataset.filter;
+        applyFilters();
+      }});
+    }});
+    search.addEventListener("input", applyFilters);
+    sort.addEventListener("change", applyFilters);
+    document.querySelectorAll("th").forEach((th) => {{
+      th.addEventListener("click", () => {{
+        const col = th.dataset.col;
+        if (col === "ticker") sort.value = "ticker-asc";
+        if (col === "score") sort.value = "score-desc";
+        if (col === "day_change_pct") sort.value = "change-desc";
+        document.querySelectorAll("th").forEach((node) => node.classList.remove("sorted"));
+        th.classList.add("sorted");
+        applyFilters();
+      }});
+    }});
+    applyFilters();
+  </script>
 </body>
 </html>
 """
