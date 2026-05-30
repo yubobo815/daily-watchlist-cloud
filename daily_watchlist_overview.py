@@ -238,6 +238,20 @@ def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_
     return entry, ""
 
 
+def latest_pivot(values: pd.Series, left: int = 3, right: int = 3, kind: str = "high") -> float:
+    if len(values) < left + right + 1:
+        return np.nan
+    confirmed = []
+    for idx in range(left, len(values) - right):
+        window = values.iloc[idx - left : idx + right + 1]
+        value = values.iloc[idx]
+        if kind == "high" and value == window.max():
+            confirmed.append(float(value))
+        elif kind == "low" and value == window.min():
+            confirmed.append(float(value))
+    return confirmed[-1] if confirmed else np.nan
+
+
 def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     if i < 210:
         return "NONE"
@@ -349,6 +363,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
     lookback_bars = 3
     ema_slope_bars = 5
     personality_lookback = 100
+    pivot_left_bars = 3
+    pivot_right_bars = 3
     is_etf = ticker in ETF_HINTS
 
     close = float(row.close)
@@ -361,6 +377,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
     upper_wick = high - max(open_, close)
     lower_wick = min(open_, close) - low
     range_atr = float(row.range / atr_now) if atr_now > 0 else 0.0
+    last_pivot_high = latest_pivot(d["high"].iloc[: i + 1], pivot_left_bars, pivot_right_bars, "high")
+    last_pivot_low = latest_pivot(d["low"].iloc[: i + 1], pivot_left_bars, pivot_right_bars, "low")
 
     travel = d["close"].diff().abs().iloc[i - personality_lookback + 1 : i + 1].sum()
     trend_efficiency = abs(close - float(d.iloc[i - personality_lookback].close)) / travel if travel > 0 else 0.0
@@ -431,31 +449,45 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
         "MIXED / NEUTRAL"
     )
 
+    rsi_oversold = row.rsi < 30
     rsi_near_oversold = row.rsi < 45
-    bb_recent = (d["low"].iloc[i - lookback_bars : i + 1] <= d["lower_bb"].iloc[i - lookback_bars : i + 1]).any()
+    rsi_recovering = row.rsi > 30 and prev.rsi <= 30
+    rsi_turning_up = row.rsi > prev.rsi and prev.rsi <= d.iloc[i - 2].rsi
+    bb_touch_or_pierce = (d["low"].iloc[i - lookback_bars : i + 1] <= d["lower_bb"].iloc[i - lookback_bars : i + 1]).any()
     recent_oversold_bb = ((d["low"].iloc[i - lookback_bars : i + 1] <= d["lower_bb"].iloc[i - lookback_bars : i + 1]) & (d["rsi"].iloc[i - lookback_bars : i + 1] < 45)).any()
     back_inside_bb = close > row.lower_bb
     price_follow = close > prev.high
+    bullish_reversal_close = close > open_ and row.close_loc >= 0.50
     constructive_close = row.close_loc >= 0.55 and close >= (open_ + prev.close) / 2
     demand_tail = row.lower_wick_pct >= 0.30 and row.close_loc >= 0.55
     wide_bullish = close > open_ and row.body_pct >= 0.45 and row.close_loc >= 0.65
-    right_side = recent_oversold_bb and back_inside_bb and row.rsi > prev.rsi and (price_follow or constructive_close or demand_tail)
+    bb_reclaim = (close > row.lower_bb and prev.close <= prev.lower_bb) or (back_inside_bb and close > prev.high)
+    right_side = recent_oversold_bb and bb_reclaim and row.rsi > prev.rsi and (price_follow or bullish_reversal_close or demand_tail)
 
+    trend_condition = close > row.ema_slow and row.ema_fast >= row.ema_slow
     uptrend = close > row.ema_slow and row.ema_fast > row.ema_slow and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
     strong_momentum = close > row.ema_fast and row.ema_fast > row.ema_slow and row.ema_fast >= d.iloc[i - ema_slope_bars].ema_fast and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
     pullback_support = low <= row.ema_fast or low <= row.bb_basis or close <= row.ema_fast * 1.02
     shallow_pullback = low <= row.ema_fast * 1.015 or low <= row.bb_basis or close <= row.ema_fast * 1.025
     support_held = close > row.ema_slow and close > row.lower_bb
-    pullback_reversal = 40 <= row.rsi <= 60 and row.rsi > prev.rsi and (price_follow or constructive_close)
+    early_support_zone = low <= row.ema_fast * 1.03 or low <= row.bb_basis * 1.02 or close <= row.ema_fast * 1.04
+    early_support_held = close > row.ema_slow and close >= row.lower_bb and row.close_loc >= 0.50
+    early_pullback_candle = demand_tail or constructive_close or (close >= prev.close and row.close_loc >= 0.50)
+    standard_pullback_reversal = 40 <= row.rsi <= 60 and row.rsi > prev.rsi and (price_follow or constructive_close)
+    momentum_pullback_reversal = 45 <= row.rsi <= 70 and row.rsi >= prev.rsi and (close > row.ema_fast or price_follow or constructive_close)
+    pullback_reversal = standard_pullback_reversal or (strong_momentum and momentum_pullback_reversal)
     pullback = uptrend and (pullback_support or (strong_momentum and shallow_pullback)) and support_held and pullback_reversal
-    early_pullback = uptrend and (low <= row.ema_fast * 1.03 or low <= row.bb_basis * 1.02 or close <= row.ema_fast * 1.04) and support_held and 38 <= row.rsi <= 68 and row.rsi >= prev.rsi - 2 and (demand_tail or constructive_close)
+    early_pullback = uptrend and early_support_zone and early_support_held and 38 <= row.rsi <= 68 and row.rsi >= prev.rsi - 2 and early_pullback_candle
     recent_momentum_high = d["high"].iloc[i - 10 : i].max()
     momentum_dip = d["low"].iloc[i - 2 : i + 1].min() <= recent_momentum_high * 0.97
-    momentum = strong_momentum and momentum_dip and close > open_ and close > prev.close and close > row.ema_fast and 55 <= row.rsi <= 85 and close <= row.ema_fast * 1.35
+    momentum_reclaim = close > open_ and close > prev.close and close > row.ema_fast and row.close_loc >= 0.55
+    momentum = strong_momentum and momentum_dip and momentum_reclaim and 55 <= row.rsi <= 85 and close <= row.ema_fast * 1.35
     breakout_level = d["close"].iloc[i - 20 : i].max()
     breakout_ext = (close - row.ema_fast) / atr_now if atr_now > 0 else 0
     breakout = strong_momentum and close >= breakout_level and close > prev.high and wide_bullish and 55 <= row.rsi <= 82 and breakout_ext <= 3.5 and row.macd_hist >= prev.macd_hist
-    reversal = right_side or (fear_rejected and recent_oversold_bb and back_inside_bb)
+    frequent_buy_setup = bb_touch_or_pierce and back_inside_bb and (rsi_near_oversold or rsi_turning_up)
+    profile_buy = (frequent_buy_setup or (fear_rejected and recent_oversold_bb and back_inside_bb)) and trend_condition
+    reversal = right_side or profile_buy
 
     selected = (
         ("BREAKOUT BUY", breakout),
@@ -470,15 +502,21 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
 
     setup_max_atr = 12.0 if setup == "BREAKOUT BUY" else 10.0 if setup == "MOMENTUM BUY" else 8.0
     setup_atr_ok = row.atr_pct <= setup_max_atr
-    volume_ok = vol_ready and not dist_vol and (
+    behavior_volume_ok = (
         breakout_vol if setup == "BREAKOUT BUY" else
         (accum_vol or breakout_vol) if setup == "MOMENTUM BUY" else
         (dry_up_vol or accum_vol or breakout_vol) if "PULLBACK" in setup else
-        (accum_vol or breakout_vol or fear_rejected or quiet_absorption)
+        (accum_vol or breakout_vol or ((fear_rejected or quiet_absorption or buyer_control) and recent_oversold_bb))
     )
+    volume_ok = vol_ready and not dist_vol and behavior_volume_ok
     close_ok = row.close_loc >= 0.55
-    no_chase = range_atr <= 2.5
-    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and no_chase and not avoid and not seller_control and not fomo and not greed_rejected
+    setup_low = min(low, float(d["low"].iloc[i - lookback_bars : i + 1].min()))
+    close_above_setup_low_atr = (close - setup_low) / atr_now if atr_now > 0 else 0.0
+    close_above_pivot_pct = (close - last_pivot_high) / last_pivot_high * 100 if not math.isnan(last_pivot_high) and last_pivot_high > 0 else 0.0
+    no_chase = range_atr <= 2.5 and close_above_setup_low_atr <= 2.5 and close_above_pivot_pct <= 8.0
+    high_beta_no_chase = not high_vol or (range_atr <= 2.5 * (0.90 if is_etf else 0.75) and close_above_setup_low_atr <= 2.5 * (0.90 if is_etf else 0.75))
+    personality_entry_ok = mode != "MEAN REVERSION" or fear_rejected or quiet_absorption or buyer_control
+    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and no_chase and high_beta_no_chase and personality_entry_ok and not avoid and not seller_control and not fomo and not greed_rejected
 
     sell_rsi = row.rsi > 75
     close_off_high = row.close_loc < 0.55
@@ -509,10 +547,13 @@ def classify_and_score(ticker: str, raw: pd.DataFrame) -> dict:
         entry_est = np.nan
         entry_note = ""
 
-    trade_entry = float(entry_est) if setup_forming and not math.isnan(entry_est) else close
+    trade_entry = close
     stop_pct = 6.0 if setup == "BREAKOUT BUY" else 4.0 if setup == "MOMENTUM BUY" else 7.0 if setup == "PULLBACK BUY" else 6.0 if setup == "EARLY PULLBACK BUY" else 5.0
-    stop = max(trade_entry * (1 - stop_pct / 100), trade_entry * 0.93)
-    target = trade_entry + atr_now * 3.0 if setup == "BREAKOUT BUY" and atr_now > 0 else trade_entry * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
+    atr_stop_mult = 4.0 if setup in {"BREAKOUT BUY", "MOMENTUM BUY"} else 3.5 if setup == "PULLBACK BUY" else 3.25 if setup == "EARLY PULLBACK BUY" else 3.0
+    percent_stop = max(close * (1 - stop_pct / 100), close * 0.93)
+    atr_stop = close - atr_now * atr_stop_mult if atr_now > 0 else percent_stop
+    stop = max(percent_stop, atr_stop)
+    target = close + atr_now * 3.0 if atr_now > 0 else close * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
     reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
 
     if filters_ok:
