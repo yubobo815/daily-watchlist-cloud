@@ -352,7 +352,7 @@ def historical_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10, 
     }
 
 
-def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False) -> dict:
+def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, include_setup_stats: bool = True) -> dict:
     d = raw.copy() if prepared else prepare(raw)
     if len(d) < 220:
         raise ValueError("not enough history")
@@ -498,7 +498,11 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False) -
     )
     setup = next((name for name, flag in selected if flag), "NONE")
     setup_forming = setup != "NONE"
-    setup_stats = historical_setup_stats(d, setup)
+    setup_stats = (
+        historical_setup_stats(d, setup)
+        if include_setup_stats
+        else {"hist_trades": "", "hist_win_rate": "", "hist_avg_return": ""}
+    )
 
     setup_max_atr = 12.0 if setup == "BREAKOUT BUY" else 10.0 if setup == "MOMENTUM BUY" else 8.0
     setup_atr_ok = row.atr_pct <= setup_max_atr
@@ -647,7 +651,7 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
     start = max(220, len(d) - days + 1)
     for end in range(start, len(d) + 1):
         try:
-            snapshot = classify_and_score(ticker, d.iloc[:end].copy(), prepared=True)
+            snapshot = classify_and_score(ticker, d.iloc[:end].copy(), prepared=True, include_setup_stats=False)
         except Exception:
             continue
         snapshot["history_day"] = len(d) - end
