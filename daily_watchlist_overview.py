@@ -4,6 +4,7 @@ import json
 import math
 import os
 import time
+import urllib.parse
 import urllib.request
 from urllib.error import URLError
 from typing import Optional
@@ -163,6 +164,124 @@ def check_live_data_access() -> tuple[bool, str]:
         return True, "Live Yahoo access available."
     except Exception as exc:
         return False, f"Live Yahoo access unavailable: {exc}"
+
+
+def clean_json_value(value):
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if pd.isna(value):
+        return None
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    return value
+
+
+def clean_record(record: dict) -> dict:
+    return {key: clean_json_value(value) for key, value in record.items()}
+
+
+def numeric_or_none(value):
+    value = clean_json_value(value)
+    if value == "":
+        return None
+    return value
+
+
+def supabase_credentials() -> tuple[str, str]:
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or ""
+    return url, key
+
+
+def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]) -> None:
+    if not records:
+        return
+
+    url, key = supabase_credentials()
+    if not url or not key:
+        return
+
+    endpoint = f"{url}/rest/v1/{table}?on_conflict={urllib.parse.quote(','.join(conflict_columns))}"
+    payload = json.dumps(records).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=payload,
+        method="POST",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        if resp.status not in {200, 201, 204}:
+            raise RuntimeError(f"Supabase upsert to {table} returned HTTP {resp.status}")
+
+
+def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str) -> None:
+    url, key = supabase_credentials()
+    if not url or not key:
+        print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.")
+        return
+
+    report_records = []
+    for record in report.to_dict(orient="records"):
+        row = clean_record(record)
+        report_records.append(
+            {
+                "run_date": run_date,
+                "ticker": row.get("ticker"),
+                "name": row.get("name"),
+                "data_date": row.get("date"),
+                "action": row.get("action"),
+                "setup": row.get("setup"),
+                "adaptive_mode": row.get("adaptive_mode"),
+                "psychology": row.get("psychology"),
+                "score": numeric_or_none(row.get("score")),
+                "close": numeric_or_none(row.get("close")),
+                "day_change_pct": numeric_or_none(row.get("day_change_pct")),
+                "entry_est": numeric_or_none(row.get("entry_est")),
+                "stop_est": numeric_or_none(row.get("stop_est")),
+                "target_est": numeric_or_none(row.get("target_est")),
+                "notes": row.get("notes"),
+                "payload": row,
+            }
+        )
+
+    history_records = []
+    if not history.empty:
+        for record in history.to_dict(orient="records"):
+            row = clean_record(record)
+            history_records.append(
+                {
+                    "run_date": run_date,
+                    "ticker": row.get("ticker"),
+                    "history_date": row.get("date"),
+                    "action": row.get("action"),
+                    "setup": row.get("setup"),
+                    "adaptive_mode": row.get("adaptive_mode"),
+                    "psychology": row.get("psychology"),
+                    "score": numeric_or_none(row.get("score")),
+                    "close": numeric_or_none(row.get("close")),
+                    "day_change_pct": numeric_or_none(row.get("day_change_pct")),
+                    "entry_est": numeric_or_none(row.get("entry_est")),
+                    "stop_est": numeric_or_none(row.get("stop_est")),
+                    "target_est": numeric_or_none(row.get("target_est")),
+                    "notes": row.get("notes"),
+                    "payload": row,
+                }
+            )
+
+    supabase_upsert("watchlist_snapshots", report_records, ["run_date", "ticker"])
+    supabase_upsert("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
+    print(f"Synced {len(report_records)} snapshot rows and {len(history_records)} history rows to Supabase.")
 
 
 def ema(series: pd.Series, length: int) -> pd.Series:
@@ -781,6 +900,7 @@ def write_history_html(path: Path) -> None:
       </table>
     </section>
   </main>
+  <script src="supabase-config.js"></script>
   <script>
     const input = document.querySelector("#ticker");
     const loadButton = document.querySelector("#load");
@@ -834,6 +954,38 @@ def write_history_html(path: Path) -> None:
       }[action] || action || "WAIT";
     }
 
+    function supabaseHeaders(config) {
+      return {
+        apikey: config.anonKey,
+        Authorization: `Bearer ${config.anonKey}`,
+      };
+    }
+
+    async function loadSupabaseHistory() {
+      const config = window.WATCHLIST_SUPABASE;
+      if (!config || !config.url || !config.anonKey) return null;
+
+      const baseUrl = config.url.replace(/\\/$/, "");
+      const latestUrl = `${baseUrl}/rest/v1/watchlist_snapshots?select=run_date&order=run_date.desc&limit=1`;
+      const latestResponse = await fetch(latestUrl, { headers: supabaseHeaders(config) });
+      if (!latestResponse.ok) throw new Error("Could not read latest Supabase run.");
+      const latestRuns = await latestResponse.json();
+      if (!latestRuns.length) return [];
+
+      const runDate = latestRuns[0].run_date;
+      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=payload&run_date=eq.${encodeURIComponent(runDate)}&order=ticker.asc,history_date.asc`;
+      const historyResponse = await fetch(historyUrl, { headers: supabaseHeaders(config) });
+      if (!historyResponse.ok) throw new Error("Could not read Supabase history.");
+      const rows = await historyResponse.json();
+      return rows.map((row) => row.payload || row);
+    }
+
+    async function loadCsvHistory() {
+      const response = await fetch("watchlist_behavior_history_latest.csv");
+      if (!response.ok) throw new Error("History CSV is not available.");
+      return parseCSV(await response.text());
+    }
+
     function showTicker() {
       const ticker = input.value.trim().toUpperCase();
       const rows = historyRows.filter((row) => row.ticker === ticker).sort((a, b) => a.date.localeCompare(b.date));
@@ -875,10 +1027,11 @@ def write_history_html(path: Path) -> None:
       `).join("");
     }
 
-    fetch("watchlist_behavior_history_latest.csv")
-      .then((response) => response.text())
-      .then((text) => {
-        historyRows = parseCSV(text);
+    loadSupabaseHistory()
+      .then((rows) => rows || loadCsvHistory())
+      .catch(() => loadCsvHistory())
+      .then((rows) => {
+        historyRows = rows;
         const ticker = new URLSearchParams(window.location.search).get("ticker");
         if (ticker) input.value = ticker.toUpperCase();
         showTicker();
@@ -1370,6 +1523,7 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true", help="Fetch fresh Yahoo data instead of using cached CSV files.")
     parser.add_argument("--years", type=int, default=3)
     parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
+    parser.add_argument("--no-supabase", action="store_true", help="Skip Supabase sync even if credentials are configured.")
     args = parser.parse_args()
 
     tickers = read_watchlist(Path(args.watchlist))
@@ -1455,6 +1609,9 @@ def main() -> None:
         pd.DataFrame(stale_cache_fallbacks).to_csv("daily_watchlist_overview_stale_cache.csv", index=False)
     elif Path("daily_watchlist_overview_stale_cache.csv").exists():
         Path("daily_watchlist_overview_stale_cache.csv").unlink()
+
+    if not args.no_supabase:
+        sync_supabase(report, history, today)
 
     columns = ["ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct", "notes"]
     print(report[columns].to_string(index=False))

@@ -7,6 +7,7 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 - Runs `python daily_watchlist_overview.py --refresh`.
 - Publishes `daily_watchlist_overview_latest.html` as the site homepage.
 - Publishes the latest CSV beside the HTML report.
+- Saves each refresh into Supabase when the Supabase secrets are configured.
 - Runs at 8:00am Australia/Melbourne time, including daylight saving changes.
 - Can also be run manually from the GitHub Actions tab.
 
@@ -18,6 +19,23 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 4. Set `Build and deployment -> Source` to `GitHub Actions`.
 5. Open the `Actions` tab and run `Daily Watchlist Pages` manually once.
 
+## Optional Supabase history database
+
+1. Open Supabase SQL Editor.
+2. Run the SQL in `supabase_schema.sql`.
+3. In GitHub, open `Settings -> Secrets and variables -> Actions`.
+4. Add `SUPABASE_URL`.
+5. Add `SUPABASE_SERVICE_ROLE_KEY`.
+6. Add `SUPABASE_ANON_KEY`.
+
+After that, every cloud refresh writes:
+
+- `watchlist_snapshots`: one row per ticker per run date.
+- `watchlist_behavior_history`: one row per ticker per replayed history date.
+
+The service role key is only for GitHub Actions. Do not put it into browser JavaScript.
+The anon key is safe to publish in the browser because the tables only allow public reads.
+
 After the first successful run, GitHub will show the public Pages URL in the workflow summary.
 
 ## Published files
@@ -25,6 +43,8 @@ After the first successful run, GitHub will show the public Pages URL in the wor
 - `index.html`: the main report page.
 - `daily_watchlist_overview_latest.html`: same report page, explicit filename.
 - `daily_watchlist_overview_latest.csv`: latest signal data.
+- `history.html`: ticker behavior history viewer.
+- `watchlist_behavior_history_latest.csv`: latest 30-trading-day behavior history.
 - `daily_watchlist_overview_failures.csv`: failed symbols, when present.
 - `daily_watchlist_overview_stale_cache.csv`: cache fallback details, when present.
 
