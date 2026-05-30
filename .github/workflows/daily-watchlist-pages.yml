@@ -1,6 +1,9 @@
 name: Daily Watchlist Pages
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
   schedule:
     # GitHub schedules use UTC. Running at both 21:00 and 22:00 UTC lets
@@ -28,7 +31,7 @@ jobs:
         id: time_gate
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "push" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
