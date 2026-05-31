@@ -1,4 +1,5 @@
 import argparse
+import http.cookiejar
 import html
 import json
 import math
@@ -315,6 +316,39 @@ def compact_yahoo_text(value) -> str:
     return "" if value is None else str(value)
 
 
+def yahoo_headers() -> dict:
+    return {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Referer": "https://finance.yahoo.com/",
+    }
+
+
+def yahoo_quote_summary(ticker: str, modules: str) -> dict:
+    base = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{urllib.parse.quote(ticker)}"
+    query = f"modules={urllib.parse.quote(modules)}"
+    req = urllib.request.Request(f"{base}?{query}", headers=yahoo_headers())
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        crumb_req = urllib.request.Request(
+            "https://query2.finance.yahoo.com/v1/test/getcrumb",
+            headers=yahoo_headers(),
+        )
+        with opener.open(crumb_req, timeout=8) as resp:
+            crumb = resp.read().decode("utf-8").strip()
+        crumb_query = (
+            f"{query}&formatted=true&lang=en-US&region=US"
+            f"&corsDomain=finance.yahoo.com&crumb={urllib.parse.quote(crumb)}"
+        )
+        quote_req = urllib.request.Request(f"{base}?{crumb_query}", headers=yahoo_headers())
+        with opener.open(quote_req, timeout=8) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+
 def fetch_company_profile(ticker: str, refresh: bool = False) -> dict:
     display = display_ticker(ticker)
     cache_path = Path(f"watchlist_profile_{display.replace('.', '_').replace('^', '_')}.json")
@@ -329,21 +363,8 @@ def fetch_company_profile(ticker: str, refresh: bool = False) -> dict:
             "incomeStatementHistoryQuarterly",
         ]
     )
-    url = (
-        f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{urllib.parse.quote(ticker)}"
-        f"?modules={urllib.parse.quote(modules)}"
-    )
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json",
-            "Referer": "https://finance.yahoo.com/",
-        },
-    )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        payload = yahoo_quote_summary(ticker, modules)
         result = (payload.get("quoteSummary", {}).get("result") or [{}])[0]
     except Exception:
         if cache_path.exists():
