@@ -20,7 +20,7 @@ const WATCHLIST_COLUMNS = [
   ["ticker", "Sym"],
   ["name", "Name"],
   ["action", "Signal"],
-  ["score", "Score"],
+  ["score", "Conviction"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
   ["setup", "Pattern"],
@@ -368,21 +368,31 @@ function scoreBand(value) {
   return "risk";
 }
 
+function convictionScore(rowOrScore) {
+  const raw = typeof rowOrScore === "object" ? numericValue(rowOrScore, "score") : Number(rowOrScore);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(100, (raw / 128) * 100));
+}
+
+function fmtConviction(rowOrScore) {
+  return fmtNumber(convictionScore(rowOrScore), 0);
+}
+
 function behaviorDetail(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
-  const score = numericValue(row, "score");
+  const score = convictionScore(row);
   const move = numericValue(row, "day_change_pct");
   const tape = row.psychology || "Mixed tape";
   const mode = row.adaptive_mode || "Mixed mode";
   const note = String(row.notes || "").trim();
 
   if (note) return note;
-  if (kind === "buy") return `${pattern} behavior with strong score and ${tape.toLowerCase()} tape.`;
-  if (kind === "setup") return `${pattern} is forming; score is constructive but still developing.`;
-  if (kind === "watch") return `${mode} behavior; monitor for score expansion or cleaner entry.`;
-  if (kind === "exit") return `Exit pressure: weak score with ${move < 0 ? "negative" : "unstable"} price action.`;
-  if (score < 25) return "Weak scanner behavior; avoid until score and tape improve.";
+  if (kind === "buy") return `${pattern} behavior with strong conviction and ${tape.toLowerCase()} tape.`;
+  if (kind === "setup") return `${pattern} is forming; conviction is constructive but still developing.`;
+  if (kind === "watch") return `${mode} behavior; monitor for conviction expansion or cleaner entry.`;
+  if (kind === "exit") return `Exit pressure: weak conviction with ${move < 0 ? "negative" : "unstable"} price action.`;
+  if (score < 25) return "Weak scanner behavior; avoid until conviction and tape improve.";
   return `${mode} behavior with no clear edge yet.`;
 }
 
@@ -421,7 +431,7 @@ function dailyChangeItems(rows, previousRows) {
     .map((row) => {
       const previous = previousByTicker.get(row.ticker);
       if (!previous) return null;
-      const scoreMove = numericValue(row, "score") - numericValue(previous, "score");
+      const scoreMove = convictionScore(row) - convictionScore(previous);
       const actionChanged = row.action !== previous.action;
       const setupChanged = row.setup !== previous.setup;
       const priceMove = numericValue(row, "close") - numericValue(previous, "close");
@@ -432,7 +442,7 @@ function dailyChangeItems(rows, previousRows) {
         (setupChanged ? 20 : 0) +
         Math.min(Math.abs(scoreMove), 30) +
         Math.min(Math.abs(pricePct), 10);
-      if (!actionChanged && !setupChanged && Math.abs(scoreMove) < 8 && Math.abs(pricePct) < 3) return null;
+      if (!actionChanged && !setupChanged && Math.abs(scoreMove) < 6 && Math.abs(pricePct) < 3) return null;
       return { row, previous, scoreMove, pricePct, actionChanged, setupChanged, priority };
     })
     .filter(Boolean)
@@ -452,13 +462,14 @@ function renderScoreBreakdown(row) {
     ["Volume", volume],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
     ["Pattern", setupLabel(row.setup)],
-    ["Score", fmtNumber(row.score, 1)]
+    ["Conviction", `${fmtConviction(row)}/100`],
+    ["Raw Rank", fmtNumber(row.score, 1)]
   ];
   const trendWidth = Number.isFinite(trend) ? Math.max(4, Math.min(100, trend * 100)) : 4;
   return `
     <div class="score-explainer">
       <div class="score-explainer-head">
-        <span>Score Read</span>
+        <span>Conviction Read</span>
         <strong>${escapeHtml(behaviorDetail(row))}</strong>
       </div>
       <div class="score-factors">
@@ -485,9 +496,9 @@ function renderHistoryChangeChips(row, previous) {
   if (row.setup !== previous.setup) {
     chips.push(`<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>`);
   }
-  const scoreMove = numericValue(row, "score") - numericValue(previous, "score");
-  if (Math.abs(scoreMove) >= 5) {
-    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Score ${fmtSignedNumber(scoreMove, 1)}</span>`);
+  const scoreMove = convictionScore(row) - convictionScore(previous);
+  if (Math.abs(scoreMove) >= 4) {
+    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>`);
   }
   return chips.join(" ") || `<span class="change-chip quiet">Steady</span>`;
 }
@@ -593,7 +604,8 @@ function renderWatchlistCell(row, key) {
   if (key === "notes") {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
-  if (["score", "day_change_pct"].includes(key)) return escapeHtml(fmtNumber(row[key], 1));
+  if (key === "score") return escapeHtml(fmtConviction(row));
+  if (key === "day_change_pct") return escapeHtml(fmtNumber(row[key], 1));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }
@@ -630,7 +642,7 @@ function focusItem(row, reason) {
       <strong>${escapeHtml(securityDisplay(row))}</strong>
       <span class="focus-meta">
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        <span>Score ${fmtNumber(row.score, 1)}</span>
+        <span>Conviction ${fmtConviction(row)}/100</span>
         <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
         <span>${escapeHtml(setupLabel(row.setup))}</span>
       </span>
@@ -641,12 +653,12 @@ function focusItem(row, reason) {
 function renderTodayFocus() {
   const panel = document.querySelector("#today-focus");
   if (!panel) return;
-  const ranked = [...state.rows].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  const ranked = [...state.rows].sort((a, b) => convictionScore(b) - convictionScore(a));
   const strongest = ranked.find((row) => actionKind(row.action) === "buy");
   const building = ranked.find((row) => actionKind(row.action) === "setup");
   const pressure = [...state.rows]
     .filter((row) => actionKind(row.action) === "exit")
-    .sort((a, b) => Number(a.score || 0) - Number(b.score || 0))[0];
+    .sort((a, b) => convictionScore(a) - convictionScore(b))[0];
   const bestDay = [...state.rows]
     .filter((row) => ["buy", "setup", "watch"].includes(actionKind(row.action)))
     .sort((a, b) => Number(b.day_change_pct || 0) - Number(a.day_change_pct || 0))[0];
@@ -689,7 +701,7 @@ function renderChangedToday() {
     <div class="section-heading">
       <div>
         <span>Changed Today</span>
-        <strong>Largest signal, pattern, score, and price shifts.</strong>
+        <strong>Largest signal, pattern, conviction, and price shifts.</strong>
       </div>
     </div>
     <div class="change-grid">
@@ -702,7 +714,7 @@ function renderChangedToday() {
           <div class="change-card-body">
             ${actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>` : ""}
             ${setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : ""}
-            <span class="change-chip ${moveClass(scoreMove)}">Score ${fmtSignedNumber(scoreMove, 1)}</span>
+            <span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>
             <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
           </div>
         </a>
@@ -728,6 +740,7 @@ function renderWatchlist() {
     .filter((row) => !needle || WATCHLIST_COLUMNS.some(([key]) => String(row[key] || "").toLowerCase().includes(needle)))
     .sort((a, b) => {
       if (sortKey === "ticker") return a.ticker.localeCompare(b.ticker) * multiplier;
+      if (sortKey === "score") return (convictionScore(a) - convictionScore(b)) * multiplier;
       return (Number(a[sortKey] || 0) - Number(b[sortKey] || 0)) * multiplier;
     });
 
@@ -794,7 +807,7 @@ function renderLatestHistoryPanel(latest) {
       </div>
       <div class="latest-metrics">
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
-        <div><span>Score</span><strong>${fmtNumber(latest.score, 1)}</strong></div>
+        <div><span>Conviction</span><strong>${fmtConviction(latest)}/100</strong></div>
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
@@ -817,7 +830,7 @@ function renderHistoryVisual(rows) {
   const pad = { left: 34, right: 22, top: 16, bottom: 26 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
-  const scores = chronological.map((row) => numericValue(row, "score"));
+  const scores = chronological.map((row) => convictionScore(row));
   const closes = chronological.map((row) => numericValue(row, "close"));
   const minClose = Math.min(...closes);
   const maxClose = Math.max(...closes);
@@ -828,7 +841,7 @@ function renderHistoryVisual(rows) {
   const pricePath = linePath(pricePointList);
   const latest = chronological.at(-1);
   const first = chronological[0];
-  const scoreMove = numericValue(latest, "score") - numericValue(first, "score");
+  const scoreMove = convictionScore(latest) - convictionScore(first);
   const priceMove = numericValue(latest, "close") - numericValue(first, "close");
   const signalCounts = chronological.reduce((counts, row) => {
     const kind = actionKind(row.action);
@@ -845,12 +858,12 @@ function renderHistoryVisual(rows) {
   const barWidth = Math.max(6, Math.min(18, barSlot * 0.58));
   const baselineY = pad.top + plotHeight;
   const scoreBars = chronological.map((row, index) => {
-    const score = Math.max(0, Math.min(100, numericValue(row, "score")));
+    const score = convictionScore(row);
     const y = scoreY(score);
     const x = xFor(index) - barWidth / 2;
     return `
       <rect class="score-bar score-${scoreBand(score)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, baselineY - y).toFixed(1)}" rx="3">
-        <title>${escapeHtml(row.history_date)} · score ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
+        <title>${escapeHtml(row.history_date)} · conviction ${fmtConviction(row)}/100 · raw rank ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
       </rect>
     `;
   }).join("");
@@ -868,8 +881,8 @@ function renderHistoryVisual(rows) {
         <strong><span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span></strong>
       </div>
       <div>
-        <span class="subtle">30-day score move</span>
-        <strong class="${scoreMove >= 0 ? "up" : "down"}">${scoreMove >= 0 ? "+" : ""}${fmtNumber(scoreMove, 1)}</strong>
+        <span class="subtle">30-day conviction move</span>
+        <strong class="${scoreMove >= 0 ? "up" : "down"}">${scoreMove >= 0 ? "+" : ""}${fmtNumber(scoreMove, 0)}</strong>
       </div>
       <div>
         <span class="subtle">30-day price move</span>
@@ -878,22 +891,22 @@ function renderHistoryVisual(rows) {
     </div>
     <details class="chart-details">
       <summary>
-        <span>Show Score Detail</span>
+        <span>Show Conviction Detail</span>
         <strong>Daily bars, compact view</strong>
       </summary>
       <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>Score Detail</span>
-          <strong>Daily scanner score bars</strong>
-          <p class="chart-note">Bars are daily scanner scores. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
+          <span>Conviction Detail</span>
+          <strong>Daily normalized conviction bars</strong>
+          <p class="chart-note">Bars show normalized conviction from 0-100. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
-          <strong>${fmtNumber(latest.score, 1)}</strong>
+          <strong>${fmtConviction(latest)}</strong>
         </div>
       </div>
-      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day score and price chart">
+      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day conviction and price chart">
         <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
         ${gridLines}
         ${scoreBars}
@@ -901,7 +914,7 @@ function renderHistoryVisual(rows) {
         ${dateTicks}
       </svg>
       <div class="chart-legend">
-        <span><i class="legend-score"></i> daily score bars</span>
+        <span><i class="legend-score"></i> daily conviction bars</span>
         <span><i class="legend-price"></i> price direction</span>
       </div>
       <div class="chart-insights">
@@ -931,7 +944,7 @@ function renderHistoryRows() {
     .filter(({ row, previous, index }) => {
       if (index === chronological.length - 1) return true;
       if (!previous) return actionKind(row.action) !== "avoid";
-      return row.action !== previous.action || row.setup !== previous.setup || Math.abs(numericValue(row, "score") - numericValue(previous, "score")) >= 8;
+      return row.action !== previous.action || row.setup !== previous.setup || Math.abs(convictionScore(row) - convictionScore(previous)) >= 6;
     })
     .slice(-8)
     .reverse();
@@ -944,7 +957,7 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previous)}</div>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Score ${fmtNumber(row.score, 1)} · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Conviction ${fmtConviction(row)}/100 · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
@@ -957,7 +970,7 @@ function renderHistoryRows() {
           <div>
             <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
             <span class="subtle"> ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
-            <div class="bar"><span style="width: ${Math.max(2, Math.min(100, Number(row.score) || 0))}%"></span></div>
+            <div class="bar"><span style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
           </div>
           <span class="num">${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
         </div>
