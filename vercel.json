@@ -1,3 +1,10 @@
 {
-  "framework": "nextjs"
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/history",
+      "destination": "/history.html"
+    }
+  ]
 }

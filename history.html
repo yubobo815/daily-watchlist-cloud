@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ticker History</title>
+    <meta name="description" content="30-day watchlist behavior history by ticker.">
+    <link rel="stylesheet" href="./assets/styles.css">
+    <script defer src="./assets/app.js"></script>
+  </head>
+  <body data-page="history">
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Behavior rewind</p>
+          <h1 id="history-title">ORCL 30-Day History</h1>
+          <p id="status" class="subtle meta">Loading ticker behavior...</p>
+          <div id="run-status" class="status bad">No history loaded</div>
+        </div>
+        <div class="actions">
+          <a class="button" href="./">Back to Watchlist</a>
+          <button id="download-csv" class="button primary" type="button">Download CSV</button>
+        </div>
+      </section>
+
+      <section class="history-grid">
+        <aside class="panel">
+          <form id="ticker-form">
+            <label class="subtle" for="ticker">Ticker</label>
+            <input id="ticker" class="ticker-input" autocomplete="off">
+            <button class="button primary" type="submit">Show History</button>
+          </form>
+          <div id="latest-panel" class="timeline"></div>
+        </aside>
+
+        <section class="panel">
+          <h2>Behavior Change</h2>
+          <div id="timeline" class="timeline">
+            <div class="empty">Loading history...</div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

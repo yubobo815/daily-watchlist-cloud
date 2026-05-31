@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Daily Watchlist</title>
+    <meta name="description" content="Daily stock and ETF watchlist powered by Supabase.">
+    <link rel="stylesheet" href="./assets/styles.css">
+    <script defer src="./assets/app.js"></script>
+  </head>
+  <body data-page="watchlist">
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Vercel trading cockpit</p>
+          <h1>Daily Watchlist</h1>
+          <p id="status" class="subtle meta">Loading Supabase watchlist...</p>
+          <div id="run-status" class="status bad">Waiting for database config</div>
+        </div>
+        <div class="actions">
+          <button id="download-csv" class="button primary" type="button">Download CSV</button>
+          <a class="button" href="./history.html?ticker=ORCL">ORCL History</a>
+          <a class="button" href="https://yubobo815.github.io/daily-watchlist-cloud/">GitHub Pages</a>
+        </div>
+      </section>
+
+      <section id="cards" class="cards"></section>
+
+      <section class="controls">
+        <input id="search" class="search" placeholder="Search ticker, setup, note, mode...">
+        <button id="all-filter" class="chip active" type="button">All</button>
+        <select id="sort" class="control">
+          <option value="score-desc">Score high to low</option>
+          <option value="day_change_pct-desc">Best day change</option>
+          <option value="day_change_pct-asc">Worst day change</option>
+          <option value="ticker-asc">Ticker A to Z</option>
+        </select>
+        <div id="count" class="count">0 / 0 shown</div>
+      </section>
+
+      <section class="table-wrap">
+        <table>
+          <thead id="watchlist-head"></thead>
+          <tbody id="watchlist-body"></tbody>
+        </table>
+        <div id="empty" class="empty hidden">No matching rows yet.</div>
+      </section>
+    </main>
+  </body>
+</html>

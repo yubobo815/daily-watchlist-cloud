@@ -69,6 +69,13 @@ h1 {
   line-height: 0.86;
 }
 
+h2 {
+  margin: 0 0 12px;
+  font-family: Charter, Georgia, serif;
+  font-size: 30px;
+  letter-spacing: -0.04em;
+}
+
 .subtle {
   color: var(--muted);
   font-size: 13px;
@@ -101,6 +108,7 @@ h1 {
 
 .button {
   padding: 10px 14px;
+  cursor: pointer;
   text-decoration: none;
   font-size: 13px;
   font-weight: 850;
@@ -272,7 +280,6 @@ th {
   color: #fff;
   font-size: 11px;
   font-weight: 750;
-  cursor: pointer;
 }
 
 th:first-child,
@@ -314,7 +321,7 @@ th:first-child {
   color: #62665f;
 }
 
-.ticker {
+.ticker-link {
   color: #0f4029;
   font-weight: 950;
   text-decoration-thickness: 2px;
@@ -421,6 +428,10 @@ th:first-child {
   padding: 38px;
   text-align: center;
   color: var(--muted);
+}
+
+.hidden {
+  display: none;
 }
 
 @media (max-width: 960px) {
