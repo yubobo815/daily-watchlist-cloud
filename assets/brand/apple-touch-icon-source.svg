@@ -1,0 +1,34 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Daily Trade Copilot Home Screen Icon</title>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="40" x2="950" y2="1000" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#061A35"/>
+      <stop offset="0.55" stop-color="#041428"/>
+      <stop offset="1" stop-color="#020A14"/>
+    </linearGradient>
+    <radialGradient id="greenGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(800 820) rotate(-42) scale(390 300)">
+      <stop offset="0" stop-color="#10E078" stop-opacity="0.62"/>
+      <stop offset="0.45" stop-color="#0AC66C" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#061A35" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="arrowGreen" x1="495" y1="740" x2="785" y2="310" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#049F69"/>
+      <stop offset="0.42" stop-color="#10C878"/>
+      <stop offset="1" stop-color="#18F285"/>
+    </linearGradient>
+    <linearGradient id="whiteStroke" x1="250" y1="720" x2="500" y2="410" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F7F7F7"/>
+      <stop offset="0.5" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F1F1F1"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#greenGlow)"/>
+  <g filter="url(#softShadow)" transform="translate(0 -6)">
+    <path d="M242 690 L434 450 C440 443 451 443 457 450 L548 551 C554 558 554 568 548 575 L514 613 C507 620 497 620 491 613 L448 564 C442 557 431 557 425 565 L315 690 Z" fill="url(#whiteStroke)"/>
+    <path d="M494 690 L679 417 L637 393 C626 387 628 371 640 367 L797 316 C810 312 822 324 819 337 L785 492 C782 505 766 509 758 499 L724 457 L564 690 Z" fill="url(#arrowGreen)"/>
+  </g>
+</svg>

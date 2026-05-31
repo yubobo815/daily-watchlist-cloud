@@ -377,6 +377,13 @@ function renderHistoryVisual(rows) {
   const scorePath = linePath(scorePointList);
   const pricePath = linePath(pricePointList);
   const scoreArea = `${scorePath} L ${xFor(chronological.length - 1).toFixed(1)} ${(pad.top + plotHeight).toFixed(1)} L ${pad.left.toFixed(1)} ${(pad.top + plotHeight).toFixed(1)} Z`;
+  const buyZoneY = scoreY(75);
+  const exitZoneY = scoreY(25);
+  const scoreBands = `
+    <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${(buyZoneY - pad.top).toFixed(1)}" class="zone-band zone-buy" />
+    <rect x="${pad.left}" y="${buyZoneY.toFixed(1)}" width="${plotWidth}" height="${(exitZoneY - buyZoneY).toFixed(1)}" class="zone-band zone-mid" />
+    <rect x="${pad.left}" y="${exitZoneY.toFixed(1)}" width="${plotWidth}" height="${(pad.top + plotHeight - exitZoneY).toFixed(1)}" class="zone-band zone-exit" />
+  `;
   const latest = chronological.at(-1);
   const first = chronological[0];
   const scoreMove = numericValue(latest, "score") - numericValue(first, "score");
@@ -385,7 +392,7 @@ function renderHistoryVisual(rows) {
     const x = xFor(index);
     const nextX = index === chronological.length - 1 ? width - pad.right : xFor(index + 1);
     const segmentWidth = Math.max(8, nextX - x);
-    return `<rect x="${x.toFixed(1)}" y="${pad.top}" width="${segmentWidth.toFixed(1)}" height="${plotHeight}" fill="${ACTION_TONE[actionKind(row.action)]}" opacity="0.08" />`;
+    return `<rect x="${x.toFixed(1)}" y="${pad.top}" width="${segmentWidth.toFixed(1)}" height="${plotHeight}" fill="${ACTION_TONE[actionKind(row.action)]}" opacity="0.035" />`;
   }).join("");
   const markers = chronological.map((row, index) => {
     const kind = actionKind(row.action);
@@ -419,8 +426,9 @@ function renderHistoryVisual(rows) {
     <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>30-day map</span>
-          <strong>Score path vs. price shape</strong>
+          <span>score zones</span>
+          <strong>Where the scanner moved over 30 days</strong>
+          <p class="chart-note">Green top zone = stronger setup. Red bottom zone = exit pressure. The dotted blue line shows price direction only.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
@@ -429,6 +437,7 @@ function renderHistoryVisual(rows) {
       </div>
       <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day score and price chart">
         <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
+        ${scoreBands}
         <line x1="${pad.left}" y1="${scoreY(75).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(75).toFixed(1)}" class="guide buy-guide" />
         <line x1="${pad.left}" y1="${scoreY(50).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(50).toFixed(1)}" class="guide" />
         <line x1="${pad.left}" y1="${scoreY(25).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(25).toFixed(1)}" class="guide exit-guide" />
@@ -437,15 +446,15 @@ function renderHistoryVisual(rows) {
         <path d="${pricePath}" class="price-line" />
         <path d="${scorePath}" class="score-line" />
         ${markers}
-        <text x="16" y="${scoreY(75).toFixed(1) + 4}" class="axis-label">BUY</text>
-        <text x="16" y="${scoreY(50).toFixed(1) + 4}" class="axis-label">MID</text>
-        <text x="16" y="${scoreY(25).toFixed(1) + 4}" class="axis-label">EXIT</text>
+        <text x="16" y="${scoreY(87).toFixed(1) + 4}" class="axis-label">STRONGER</text>
+        <text x="16" y="${scoreY(50).toFixed(1) + 4}" class="axis-label">NEUTRAL</text>
+        <text x="16" y="${scoreY(13).toFixed(1) + 4}" class="axis-label">EXIT RISK</text>
         ${dateTicks}
       </svg>
       <div class="chart-legend">
         <span><i class="legend-score"></i> scanner score</span>
-        <span><i class="legend-price"></i> close price shape</span>
-        <span><i class="legend-band"></i> signal zones</span>
+        <span><i class="legend-price"></i> price direction</span>
+        <span><i class="legend-band"></i> score zones</span>
       </div>
     </div>
   `;

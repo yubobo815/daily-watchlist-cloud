@@ -87,14 +87,14 @@ select {
 
 .brand-name {
   font-size: 16px;
-  font-weight: 950;
-  letter-spacing: -0.02em;
+  font-weight: 780;
+  letter-spacing: -0.005em;
 }
 
 .brand-subtitle {
   color: #637052;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 760;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -103,7 +103,7 @@ select {
   margin: 0 0 6px;
   color: #637052;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 760;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -112,31 +112,31 @@ h1 {
   margin: 0;
   max-width: 980px;
   font-size: clamp(42px, 8vw, 92px);
-  font-weight: 950;
-  letter-spacing: -0.075em;
-  line-height: 0.86;
+  font-weight: 760;
+  letter-spacing: -0.026em;
+  line-height: 1.02;
 }
 
 body[data-page="watchlist"] h1 {
   max-width: 720px;
   font-size: clamp(34px, 5vw, 58px);
-  letter-spacing: -0.055em;
-  line-height: 0.95;
+  letter-spacing: -0.022em;
+  line-height: 1.04;
 }
 
 body[data-page="history"] h1 {
   max-width: 760px;
-  font-size: clamp(42px, 7vw, 72px);
-  font-weight: 950;
-  letter-spacing: -0.065em;
-  line-height: 0.92;
+  font-size: clamp(36px, 6.4vw, 64px);
+  font-weight: 760;
+  letter-spacing: -0.024em;
+  line-height: 1.04;
 }
 
 h2 {
   margin: 0 0 12px;
   font-size: 30px;
-  font-weight: 950;
-  letter-spacing: -0.04em;
+  font-weight: 760;
+  letter-spacing: -0.015em;
 }
 
 .subtle {
@@ -179,7 +179,7 @@ h2 {
   cursor: pointer;
   text-decoration: none;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 780;
 }
 
 .button.primary {
@@ -242,7 +242,7 @@ h2 {
   margin-bottom: 7px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 950;
+  font-weight: 760;
   letter-spacing: 0.13em;
 }
 
@@ -310,7 +310,7 @@ h2 {
 .count {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 760;
   text-align: right;
   white-space: nowrap;
 }
@@ -356,7 +356,7 @@ td:first-child {
   left: 0;
   z-index: 2;
   min-width: 72px;
-  font-weight: 900;
+  font-weight: 780;
 }
 
 th:first-child {
@@ -391,7 +391,7 @@ th:first-child {
 
 .ticker-link {
   color: #0f4029;
-  font-weight: 950;
+  font-weight: 780;
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
@@ -407,7 +407,7 @@ th:first-child {
   border-radius: 999px;
   background: #f4f4f1;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 780;
 }
 
 .badge.buy {
@@ -457,7 +457,7 @@ th:first-child {
   border-radius: 14px;
   background: var(--strong);
   font-size: 22px;
-  font-weight: 950;
+  font-weight: 780;
   text-transform: uppercase;
 }
 
@@ -508,7 +508,7 @@ th:first-child {
 .latest-label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 950;
+  font-weight: 760;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -530,7 +530,7 @@ th:first-child {
   display: block;
   color: var(--muted);
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 760;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -551,7 +551,7 @@ th:first-child {
   padding: 2px 6px;
   border-radius: 999px;
   font-size: 11px;
-  font-weight: 950;
+  font-weight: 780;
   vertical-align: 2px;
 }
 
@@ -617,7 +617,7 @@ th:first-child {
 
 .chart-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 16px 18px 0;
@@ -628,7 +628,7 @@ th:first-child {
   display: block;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 760;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -637,6 +637,16 @@ th:first-child {
   display: block;
   margin-top: 3px;
   font-size: 17px;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+}
+
+.chart-note {
+  max-width: 560px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .chart-latest {
@@ -662,7 +672,7 @@ th:first-child {
 .history-chart text {
   fill: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 720;
 }
 
 .axis-label {
@@ -674,6 +684,22 @@ th:first-child {
   fill: rgba(255, 255, 247, 0.48);
   stroke: rgba(17, 20, 15, 0.08);
   stroke-width: 1;
+}
+
+.zone-band {
+  stroke: none;
+}
+
+.zone-buy {
+  fill: rgba(20, 145, 77, 0.13);
+}
+
+.zone-mid {
+  fill: rgba(214, 155, 0, 0.08);
+}
+
+.zone-exit {
+  fill: rgba(201, 59, 50, 0.12);
 }
 
 .guide {
@@ -719,7 +745,7 @@ th:first-child {
   padding: 0 14px 14px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 720;
 }
 
 .chart-legend span {
@@ -744,8 +770,7 @@ th:first-child {
 }
 
 .legend-band {
-  background: linear-gradient(90deg, #14914d, #d69b00, #c93b32);
-  opacity: 0.55;
+  background: linear-gradient(90deg, rgba(20, 145, 77, 0.7), rgba(214, 155, 0, 0.55), rgba(201, 59, 50, 0.68));
 }
 
 .timeline h3 {
@@ -789,7 +814,7 @@ th:first-child {
 .moment-date {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 950;
+  font-weight: 760;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -820,13 +845,13 @@ th:first-child {
   border-radius: 999px;
   background: rgba(255, 255, 247, 0.78);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 720;
   letter-spacing: 0.01em;
 }
 
 .change-chip b {
   color: var(--muted);
-  font-weight: 950;
+  font-weight: 760;
 }
 
 .change-chip.signal {
@@ -872,7 +897,7 @@ th:first-child {
   cursor: pointer;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 760;
 }
 
 .raw-history .timeline-row {
