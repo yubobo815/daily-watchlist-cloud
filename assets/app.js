@@ -383,6 +383,23 @@ function renderCompanyBrief(profile) {
   `;
 }
 
+function hasCompanyBrief(profile) {
+  return Boolean(
+    profile?.business_summary ||
+    profile?.latest_report_highlights ||
+    profile?.next_report_date ||
+    profile?.website ||
+    profile?.sector ||
+    profile?.industry
+  );
+}
+
+async function fetchCompanyBrief(ticker) {
+  const response = await fetch(`./api/company?ticker=${encodeURIComponent(ticker)}`);
+  if (!response.ok) return {};
+  return response.json();
+}
+
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -1054,7 +1071,15 @@ async function loadHistory(ticker) {
     const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name,payload&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
     state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
-    renderCompanyBrief(snapshotRows[0]?.payload || {});
+    const snapshotProfile = snapshotRows[0]?.payload || {};
+    renderCompanyBrief(snapshotProfile);
+    if (!hasCompanyBrief(snapshotProfile)) {
+      fetchCompanyBrief(state.ticker)
+        .then((profile) => {
+          if (hasCompanyBrief(profile)) renderCompanyBrief(profile);
+        })
+        .catch(() => {});
+    }
     document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
