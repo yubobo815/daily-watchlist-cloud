@@ -41,7 +41,20 @@ a {
 button,
 input,
 select {
+  color: var(--ink);
   font: inherit;
+}
+
+input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  box-shadow: 0 0 0 1000px rgba(17, 24, 39, 0.96) inset;
 }
 
 .shell {
@@ -469,6 +482,8 @@ th:first-child {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--strong);
+  color: var(--ink);
+  caret-color: var(--tone-watch);
   font-size: 22px;
   font-weight: 650;
   text-transform: uppercase;
