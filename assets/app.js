@@ -103,6 +103,21 @@ function fmtNumber(value, digits = 1) {
   return Number.isFinite(number) ? number.toFixed(digits) : String(value);
 }
 
+function fmtSignedNumber(value, digits = 1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
+}
+
+function moveClass(value) {
+  return Number(value) >= 0 ? "up" : "down";
+}
+
+function renderMovePct(value) {
+  const text = fmtSignedNumber(value, 1);
+  return text ? `<span class="move-pct ${moveClass(value)}">${text}%</span>` : "";
+}
+
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -119,20 +134,24 @@ function scalePoint(value, min, max, start, end) {
   return start + ((value - min) / (max - min)) * (end - start);
 }
 
-function describeHistoryChange(row, previous) {
-  if (!previous) return "Latest scanner state";
-  const changes = [];
+function setupLabel(value) {
+  return SETUP_LABELS[value] || value || "NONE";
+}
+
+function renderHistoryChangeChips(row, previous) {
+  if (!previous) return `<span class="change-chip quiet">Latest state</span>`;
+  const chips = [];
   if (row.action !== previous.action) {
-    changes.push(`Signal changed from ${ACTION_LABELS[previous.action] || previous.action} to ${ACTION_LABELS[row.action] || row.action}`);
+    chips.push(`<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`);
   }
   if (row.setup !== previous.setup) {
-    changes.push(`Setup shifted from ${previous.setup || "NONE"} to ${row.setup || "NONE"}`);
+    chips.push(`<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>`);
   }
   const scoreMove = numericValue(row, "score") - numericValue(previous, "score");
   if (Math.abs(scoreMove) >= 5) {
-    changes.push(`Score ${scoreMove > 0 ? "improved" : "faded"} ${Math.abs(scoreMove).toFixed(1)} pts`);
+    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Score ${fmtSignedNumber(scoreMove, 1)}</span>`);
   }
-  return changes.join(". ") || "Behavior held steady";
+  return chips.join("") || `<span class="change-chip quiet">Steady</span>`;
 }
 
 function csvEscape(value) {
@@ -318,7 +337,7 @@ function renderLatestHistoryPanel(latest) {
         <span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
       </div>
       <div class="latest-metrics">
-        <div><span>Close</span><strong>${fmtNumber(latest.close, 2)}</strong></div>
+        <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
         <div><span>Score</span><strong>${fmtNumber(latest.score, 1)}</strong></div>
         <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
@@ -439,8 +458,8 @@ function renderHistoryRows() {
         <div class="moment-date">${index === chronological.length - 1 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</div>
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-          <strong>${escapeHtml(describeHistoryChange(row, previous))}</strong>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} · Score ${fmtNumber(row.score, 1)} · ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          <div class="change-chips">${renderHistoryChangeChips(row, previous)}</div>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Score ${fmtNumber(row.score, 1)} · ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
@@ -455,7 +474,7 @@ function renderHistoryRows() {
             <span class="subtle"> ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
             <div class="bar"><span style="width: ${Math.max(2, Math.min(100, Number(row.score) || 0))}%"></span></div>
           </div>
-          <span class="num">${fmtNumber(row.close, 2)}</span>
+          <span class="num">${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
         </div>
       `).join("")}
     </details>

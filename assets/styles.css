@@ -563,6 +563,27 @@ th:first-child {
   font-variant-numeric: tabular-nums;
 }
 
+.move-pct {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  vertical-align: 2px;
+}
+
+.move-pct.up {
+  background: #d9f8e5;
+  color: #147846;
+}
+
+.move-pct.down {
+  background: #ffddd8;
+  color: #b4342b;
+}
+
 .history-visual {
   display: grid;
   gap: 12px;
@@ -745,6 +766,53 @@ th:first-child {
 .moment-body {
   display: grid;
   gap: 7px;
+}
+
+.change-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.change-chip {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 247, 0.78);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.change-chip b {
+  color: var(--muted);
+  font-weight: 950;
+}
+
+.change-chip.signal {
+  background: #eef5e9;
+}
+
+.change-chip.setup {
+  background: #fff3c9;
+}
+
+.change-chip.up {
+  background: #d9f8e5;
+  color: #147846;
+}
+
+.change-chip.down {
+  background: #ffddd8;
+  color: #b4342b;
+}
+
+.change-chip.quiet {
+  color: var(--muted);
 }
 
 .moment-body strong {
