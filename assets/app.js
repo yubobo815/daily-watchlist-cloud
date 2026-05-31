@@ -312,10 +312,18 @@ function renderLatestHistoryPanel(latest) {
     return;
   }
   panel.innerHTML = `
-    <div><strong>Latest signal</strong></div>
-    <span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
-    <p class="subtle">Close ${fmtNumber(latest.close, 2)}, score ${fmtNumber(latest.score, 1)}, entry ${fmtNumber(latest.entry_est, 2)}.</p>
-    ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
+    <div class="latest-card tone-${actionKind(latest.action)}">
+      <div class="latest-head">
+        <span class="latest-label">Latest signal</span>
+        <span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
+      </div>
+      <div class="latest-metrics">
+        <div><span>Close</span><strong>${fmtNumber(latest.close, 2)}</strong></div>
+        <div><span>Score</span><strong>${fmtNumber(latest.score, 1)}</strong></div>
+        <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
+      </div>
+      ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
+    </div>
   `;
 }
 
