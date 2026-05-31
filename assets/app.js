@@ -56,12 +56,14 @@ const SUMMARY_CARDS = [
 ];
 
 const ACTION_TONE = {
-  buy: "#14914d",
-  setup: "#d69b00",
-  watch: "#3f6fd5",
-  exit: "#c93b32",
-  avoid: "#777777"
+  buy: "#0f8a5f",
+  setup: "#b7791f",
+  watch: "#2f5fb3",
+  exit: "#b42318",
+  avoid: "#667085"
 };
+
+const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
 
 const state = {
   rows: [],
@@ -70,7 +72,8 @@ const state = {
   query: "",
   sort: "score-desc",
   historyRows: [],
-  ticker: "ORCL"
+  ticker: "ORCL",
+  tickerName: ""
 };
 
 function escapeHtml(value) {
@@ -323,7 +326,7 @@ async function initWatchlist() {
     if (!latest) throw new Error("No Supabase run found yet.");
     state.rows = await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(latest)}&order=score.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    setStatus(`Live from Supabase run ${latest}. Confirm BUY CANDIDATE entries on the TradingView Pine chart before acting. Daily refresh still comes from GitHub Actions at 8:00am Australia/Melbourne; this Vercel app reads the database instantly.`);
+    setStatus(`Last refresh date: ${latest}. ${APP_DISCLAIMER}`);
     renderWatchlist();
   } catch (error) {
     setStatus(error.message, false);
@@ -360,9 +363,9 @@ function renderHistoryVisual(rows) {
     return;
   }
 
-  const width = 920;
-  const height = 360;
-  const pad = { left: 58, right: 34, top: 34, bottom: 56 };
+  const width = 860;
+  const height = 300;
+  const pad = { left: 58, right: 30, top: 26, bottom: 46 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -513,8 +516,10 @@ function renderHistoryRows() {
 
 async function loadHistory(ticker) {
   state.ticker = normaliseTicker(ticker);
+  state.tickerName = "";
   document.querySelector("#ticker").value = state.ticker;
   document.querySelector("#history-title").textContent = `${state.ticker} History`;
+  document.querySelector("#ticker-name").textContent = "";
   document.title = `${state.ticker} History`;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
@@ -524,9 +529,14 @@ async function loadHistory(ticker) {
     const runRows = await supabaseFetch(`watchlist_behavior_history?select=run_date&ticker=eq.${encodeURIComponent(state.ticker)}&order=run_date.desc&limit=1`);
     const latest = runRows[0]?.run_date;
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
+    const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
+    state.tickerName = snapshotRows[0]?.name || "";
+    document.querySelector("#history-title").textContent = `${state.ticker} History`;
+    document.querySelector("#ticker-name").textContent = state.tickerName;
+    document.title = state.tickerName ? `${state.ticker} History · ${state.tickerName}` : `${state.ticker} History`;
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    setStatus(`Last refresh date: ${latest}. This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.`);
+    setStatus(`Last refresh date: ${latest}. ${APP_DISCLAIMER}`);
     renderHistoryRows();
   } catch (error) {
     state.historyRows = [];
