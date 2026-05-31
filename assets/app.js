@@ -841,7 +841,6 @@ function renderHistoryVisual(rows) {
   const pricePath = linePath(pricePointList);
   const latest = chronological.at(-1);
   const first = chronological[0];
-  const scoreMove = convictionScore(latest) - convictionScore(first);
   const priceMove = numericValue(latest, "close") - numericValue(first, "close");
   const signalCounts = chronological.reduce((counts, row) => {
     const kind = actionKind(row.action);
@@ -879,10 +878,6 @@ function renderHistoryVisual(rows) {
       <div>
         <span class="subtle">Latest signal</span>
         <strong><span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span></strong>
-      </div>
-      <div>
-        <span class="subtle">30-day conviction move</span>
-        <strong class="${scoreMove >= 0 ? "up" : "down"}">${scoreMove >= 0 ? "+" : ""}${fmtNumber(scoreMove, 0)}</strong>
       </div>
       <div>
         <span class="subtle">30-day price move</span>
