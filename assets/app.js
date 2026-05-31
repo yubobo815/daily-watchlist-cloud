@@ -359,6 +359,14 @@ function setupLabel(value) {
   return SETUP_LABELS[value] || value;
 }
 
+function scoreBand(value) {
+  const score = Number(value);
+  if (score >= 75) return "strong";
+  if (score >= 50) return "constructive";
+  if (score >= 25) return "weak";
+  return "risk";
+}
+
 function behaviorDetail(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
@@ -656,8 +664,8 @@ function renderHistoryVisual(rows) {
   }
 
   const width = 1040;
-  const height = 220;
-  const pad = { left: 66, right: 34, top: 22, bottom: 34 };
+  const height = 200;
+  const pad = { left: 54, right: 28, top: 18, bottom: 32 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -667,9 +675,7 @@ function renderHistoryVisual(rows) {
   const xFor = (index) => pad.left + (chronological.length === 1 ? plotWidth / 2 : (index / (chronological.length - 1)) * plotWidth);
   const scoreY = (score) => pad.top + plotHeight - (Math.max(0, Math.min(100, score)) / 100) * plotHeight;
   const closeY = (close) => scalePoint(close, minClose, maxClose, pad.top + plotHeight, pad.top);
-  const scorePointList = chronological.map((row, index) => ({ x: xFor(index), y: scoreY(numericValue(row, "score")) }));
   const pricePointList = chronological.map((row, index) => ({ x: xFor(index), y: closeY(numericValue(row, "close")) }));
-  const scorePath = linePath(scorePointList);
   const pricePath = linePath(pricePointList);
   const latest = chronological.at(-1);
   const first = chronological[0];
@@ -686,12 +692,19 @@ function renderHistoryVisual(rows) {
     <line x1="${pad.left}" y1="${scoreY(score).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(score).toFixed(1)}" class="chart-grid" />
     <text x="${pad.left - 14}" y="${scoreY(score).toFixed(1) + 4}" text-anchor="end" class="score-tick">${score}</text>
   `).join("");
-  const latestX = xFor(chronological.length - 1);
-  const latestScoreY = scoreY(numericValue(latest, "score"));
-  const latestMarker = `
-    <circle cx="${latestX.toFixed(1)}" cy="${latestScoreY.toFixed(1)}" r="5" class="latest-score-dot" />
-    <title>${escapeHtml(latest.history_date)} · ${escapeHtml(latest.action)} · score ${fmtNumber(latest.score, 1)} · close ${fmtNumber(latest.close, 2)}</title>
-  `;
+  const barSlot = chronological.length > 1 ? plotWidth / chronological.length : plotWidth;
+  const barWidth = Math.max(6, Math.min(18, barSlot * 0.58));
+  const baselineY = pad.top + plotHeight;
+  const scoreBars = chronological.map((row, index) => {
+    const score = Math.max(0, Math.min(100, numericValue(row, "score")));
+    const y = scoreY(score);
+    const x = xFor(index) - barWidth / 2;
+    return `
+      <rect class="score-bar score-${scoreBand(score)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, baselineY - y).toFixed(1)}" rx="3">
+        <title>${escapeHtml(row.history_date)} · score ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
+      </rect>
+    `;
+  }).join("");
   const dateTicks = chronological
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => index === 0 || index === chronological.length - 1 || (index % 7 === 0 && index < chronological.length - 3))
@@ -714,12 +727,17 @@ function renderHistoryVisual(rows) {
         <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
       </div>
     </div>
-    <div class="chart-card">
+    <details class="chart-details">
+      <summary>
+        <span>Show 30-day score detail</span>
+        <strong>Daily score bars and close direction</strong>
+      </summary>
+      <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>30-day behavior path</span>
-          <strong>Scanner score vs. close direction</strong>
-          <p class="chart-note">White line is scanner score. Blue dotted line is close-price direction, scaled only for shape comparison.</p>
+          <span>30-day score detail</span>
+          <strong>Daily scanner score bars</strong>
+          <p class="chart-note">Bars show actual daily scanner score. The dotted line shows close-price direction, scaled only for shape comparison.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
@@ -729,13 +747,12 @@ function renderHistoryVisual(rows) {
       <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day score and price chart">
         <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
         ${gridLines}
+        ${scoreBars}
         <path d="${pricePath}" class="price-line" />
-        <path d="${scorePath}" class="score-line" />
-        ${latestMarker}
         ${dateTicks}
       </svg>
       <div class="chart-legend">
-        <span><i class="legend-score"></i> scanner score</span>
+        <span><i class="legend-score"></i> daily score bars</span>
         <span><i class="legend-price"></i> price direction</span>
       </div>
       <div class="chart-insights">
@@ -744,7 +761,8 @@ function renderHistoryVisual(rows) {
         <div><span>Close range</span><strong>${fmtNumber(minClose, 2)} - ${fmtNumber(maxClose, 2)}</strong></div>
         <div><span>Range width</span><strong>${fmtNumber(priceRange, 2)}</strong></div>
       </div>
-    </div>
+      </div>
+    </details>
   `;
 }
 
