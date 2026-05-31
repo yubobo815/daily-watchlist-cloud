@@ -135,7 +135,8 @@ function scalePoint(value, min, max, start, end) {
 }
 
 function setupLabel(value) {
-  return SETUP_LABELS[value] || value || "NONE";
+  if (!value || value === "NONE") return "NONE";
+  return SETUP_LABELS[value] || value;
 }
 
 function renderHistoryChangeChips(row, previous) {
@@ -151,7 +152,7 @@ function renderHistoryChangeChips(row, previous) {
   if (Math.abs(scoreMove) >= 5) {
     chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Score ${fmtSignedNumber(scoreMove, 1)}</span>`);
   }
-  return chips.join("") || `<span class="change-chip quiet">Steady</span>`;
+  return chips.join(" ") || `<span class="change-chip quiet">Steady</span>`;
 }
 
 function csvEscape(value) {
