@@ -460,7 +460,7 @@ async function loadHistory(ticker) {
   document.querySelector("#history-title").textContent = `${state.ticker} 30-Day History`;
   document.title = `${state.ticker} History`;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
-  setStatus("Loading ticker behavior...");
+  setStatus("Loading ticker history...");
   document.querySelector("#run-status").textContent = "No history loaded";
   document.querySelector("#run-status").classList.add("bad");
   try {
@@ -469,7 +469,7 @@ async function loadHistory(ticker) {
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    setStatus(`${state.ticker} behavior history from Supabase run ${latest}. This is scanner behavior history, not TradingView confirmation.`);
+    setStatus(`Last refresh date: ${latest}. Reference only; not for trade confirmation.`);
     renderHistoryRows();
   } catch (error) {
     state.historyRows = [];
@@ -485,9 +485,12 @@ function initHistory() {
     event.preventDefault();
     loadHistory(document.querySelector("#ticker").value);
   });
-  document.querySelector("#download-csv").addEventListener("click", () => {
-    downloadCsv(`${state.ticker}_history.csv`, state.historyRows, HISTORY_COLUMNS);
-  });
+  const downloadButton = document.querySelector("#download-csv");
+  if (downloadButton) {
+    downloadButton.addEventListener("click", () => {
+      downloadCsv(`${state.ticker}_history.csv`, state.historyRows, HISTORY_COLUMNS);
+    });
+  }
   loadHistory(ticker);
 }
 
