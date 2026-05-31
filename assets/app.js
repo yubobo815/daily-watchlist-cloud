@@ -404,6 +404,12 @@ function isStaleMarketDate(runDate, rows) {
   return Boolean(runDate && latestDataDate && latestDataDate < runDate);
 }
 
+function historyDateSummary(rows) {
+  const dates = [...new Set(rows.map((row) => row.history_date || row.date).filter(Boolean))].sort();
+  if (!dates.length) return "";
+  return `History range: ${dates[0]} to ${dates.at(-1)}`;
+}
+
 function rowByTicker(rows) {
   return new Map(rows.map((row) => [row.ticker, row]));
 }
@@ -982,7 +988,7 @@ async function loadHistory(ticker) {
     document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    const marketData = dataDateSummary(state.historyRows);
+    const marketData = historyDateSummary(state.historyRows);
     const staleText = isStaleMarketDate(latest, state.historyRows) ? " Latest market session may be earlier than the refresh date." : "";
     setStatus(`Last refresh date: ${latest}. ${marketData}.${staleText} ${APP_DISCLAIMER}`);
     renderHistoryRows();
