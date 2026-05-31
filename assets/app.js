@@ -334,6 +334,55 @@ function historyDisplayTitle() {
   return state.tickerName || state.ticker;
 }
 
+function firstSentence(text, maxLength = 190) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  const sentence = clean.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || clean;
+  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 1).trim()}...` : sentence;
+}
+
+function safeWebsite(value) {
+  const text = String(value || "").trim();
+  if (!/^https?:\/\//i.test(text)) return "";
+  try {
+    return new URL(text).href;
+  } catch {
+    return "";
+  }
+}
+
+function renderCompanyBrief(profile) {
+  const target = document.querySelector("#ticker-name");
+  if (!target) return;
+  const summary = firstSentence(profile?.business_summary);
+  const highlights = String(profile?.latest_report_highlights || "").trim();
+  const nextReport = String(profile?.next_report_date || "").trim();
+  const website = safeWebsite(profile?.website);
+  const industry = [profile?.sector, profile?.industry].filter(Boolean).join(" · ");
+
+  if (!summary && !highlights && !nextReport && !website && !industry) {
+    target.innerHTML = `
+      <div class="company-brief muted-brief">
+        <p>Company brief will appear after the next cloud refresh.</p>
+      </div>
+    `;
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="company-brief">
+      ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
+      ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+      <div class="company-facts">
+        ${highlights ? `<div><span>Latest report</span><strong>${escapeHtml(highlights)}</strong></div>` : ""}
+        ${nextReport ? `<div><span>Next report</span><strong>${escapeHtml(nextReport)}</strong></div>` : ""}
+        ${website ? `<div><span>Website</span><strong><a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(new URL(website).hostname.replace(/^www\./, ""))}</a></strong></div>` : ""}
+      </div>
+      <span class="company-source">Source: Yahoo Finance</span>
+    </div>
+  `;
+}
+
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -992,7 +1041,7 @@ async function loadHistory(ticker) {
   state.tickerName = "";
   document.querySelector("#ticker").value = state.ticker;
   document.querySelector("#history-title").textContent = state.ticker;
-  document.querySelector("#ticker-name").textContent = "";
+  document.querySelector("#ticker-name").innerHTML = "";
   document.title = state.ticker;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
@@ -1002,10 +1051,10 @@ async function loadHistory(ticker) {
     const runRows = await supabaseFetch(`watchlist_behavior_history?select=run_date&ticker=eq.${encodeURIComponent(state.ticker)}&order=run_date.desc&limit=1`);
     const latest = runRows[0]?.run_date;
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
-    const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
+    const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name,payload&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
     state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
-    document.querySelector("#ticker-name").textContent = "";
+    renderCompanyBrief(snapshotRows[0]?.payload || {});
     document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;

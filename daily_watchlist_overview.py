@@ -304,6 +304,94 @@ def check_live_data_access() -> tuple[bool, str]:
         return False, f"Live Yahoo access unavailable: {exc}"
 
 
+def yahoo_value(value, key: str = "fmt"):
+    if isinstance(value, dict):
+        return value.get(key) or value.get("raw")
+    return value
+
+
+def compact_yahoo_text(value) -> str:
+    value = yahoo_value(value)
+    return "" if value is None else str(value)
+
+
+def fetch_company_profile(ticker: str, refresh: bool = False) -> dict:
+    display = display_ticker(ticker)
+    cache_path = Path(f"watchlist_profile_{display.replace('.', '_').replace('^', '_')}.json")
+    if cache_path.exists() and not refresh:
+        return json.loads(cache_path.read_text())
+
+    modules = ",".join(
+        [
+            "assetProfile",
+            "calendarEvents",
+            "financialData",
+            "incomeStatementHistoryQuarterly",
+        ]
+    )
+    url = (
+        f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{urllib.parse.quote(ticker)}"
+        f"?modules={urllib.parse.quote(modules)}"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+            "Referer": "https://finance.yahoo.com/",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        result = (payload.get("quoteSummary", {}).get("result") or [{}])[0]
+    except Exception:
+        if cache_path.exists():
+            return json.loads(cache_path.read_text())
+        return {}
+
+    asset = result.get("assetProfile") or {}
+    calendar = result.get("calendarEvents") or {}
+    financial = result.get("financialData") or {}
+    quarterly = (
+        result.get("incomeStatementHistoryQuarterly", {})
+        .get("incomeStatementHistory", [])
+    )
+    latest_quarter = quarterly[0] if quarterly else {}
+    earnings_dates = (
+        calendar.get("earnings", {})
+        .get("earningsDate", [])
+    )
+    next_report = compact_yahoo_text(earnings_dates[0]) if earnings_dates else ""
+
+    revenue = compact_yahoo_text(latest_quarter.get("totalRevenue"))
+    net_income = compact_yahoo_text(latest_quarter.get("netIncome"))
+    revenue_growth = compact_yahoo_text(financial.get("revenueGrowth"))
+    earnings_growth = compact_yahoo_text(financial.get("earningsGrowth"))
+    highlights = []
+    if revenue:
+        highlights.append(f"latest quarterly revenue {revenue}")
+    if net_income:
+        highlights.append(f"net income {net_income}")
+    if revenue_growth:
+        highlights.append(f"revenue growth {revenue_growth}")
+    if earnings_growth:
+        highlights.append(f"earnings growth {earnings_growth}")
+
+    profile = {
+        "ticker": display,
+        "business_summary": asset.get("longBusinessSummary", ""),
+        "website": asset.get("website", ""),
+        "sector": asset.get("sector", ""),
+        "industry": asset.get("industry", ""),
+        "latest_report_highlights": "; ".join(highlights),
+        "next_report_date": next_report,
+        "profile_source": "Yahoo Finance",
+    }
+    cache_path.write_text(json.dumps(profile, indent=2, sort_keys=True))
+    return profile
+
+
 def clean_json_value(value):
     if value is None:
         return None
@@ -1708,7 +1796,9 @@ def main() -> None:
                 )
             else:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
-            rows.append(classify_and_score(ticker, df))
+            row = classify_and_score(ticker, df)
+            row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
+            rows.append(row)
             history_rows.extend(build_behavior_history(ticker, df, days=args.history_days))
         except URLError as exc:
             if not args.refresh:
@@ -1716,7 +1806,9 @@ def main() -> None:
                 continue
             try:
                 df = cached_chart(ticker, years=args.years)
-                rows.append(classify_and_score(ticker, df))
+                row = classify_and_score(ticker, df)
+                row.update(fetch_company_profile(ticker, refresh=False))
+                rows.append(row)
                 history_rows.extend(build_behavior_history(ticker, df, days=args.history_days))
                 stale_cache_fallbacks.append(
                     {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
