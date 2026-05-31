@@ -322,7 +322,7 @@ function displaySecurityName(name, ticker) {
 }
 
 function historyDisplayTitle() {
-  return `${state.tickerName || state.ticker} 30-day history`;
+  return state.tickerName || state.ticker;
 }
 
 function fmtCompactDate(value) {
@@ -726,9 +726,9 @@ async function loadHistory(ticker) {
   state.ticker = normaliseTicker(ticker);
   state.tickerName = "";
   document.querySelector("#ticker").value = state.ticker;
-  document.querySelector("#history-title").textContent = `${state.ticker} 30-day history`;
+  document.querySelector("#history-title").textContent = state.ticker;
   document.querySelector("#ticker-name").textContent = "";
-  document.title = `${state.ticker} 30-day history`;
+  document.title = state.ticker;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
   document.querySelector("#run-status").textContent = "No history loaded";
