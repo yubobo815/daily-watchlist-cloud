@@ -246,9 +246,12 @@ async function initWatchlist() {
     document.querySelector("#all-filter").classList.add("active");
     renderWatchlist();
   });
-  document.querySelector("#download-csv").addEventListener("click", () => {
-    downloadCsv("daily_watchlist_vercel.csv", state.visibleRows, WATCHLIST_COLUMNS.map(([key]) => key));
-  });
+  const downloadButton = document.querySelector("#download-csv");
+  if (downloadButton) {
+    downloadButton.addEventListener("click", () => {
+      downloadCsv("daily_watchlist_vercel.csv", state.visibleRows, WATCHLIST_COLUMNS.map(([key]) => key));
+    });
+  }
 
   try {
     const latest = await latestRunDate();
