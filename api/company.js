@@ -38,20 +38,40 @@ function cookieHeaderFrom(response) {
     .join("; ");
 }
 
+async function fetchYahooCookie(ticker) {
+  const cookieUrls = [
+    `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}`,
+    `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/profile/`,
+    "https://fc.yahoo.com",
+  ];
+
+  const cookies = [];
+  for (const url of cookieUrls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          ...yahooHeaders(),
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+        redirect: "manual",
+      });
+      const cookie = cookieHeaderFrom(response);
+      if (cookie) cookies.push(cookie);
+    } catch {
+      // Yahoo may block one cookie path from serverless; try the next one.
+    }
+  }
+
+  return [...new Set(cookies.flatMap(cookie => cookie.split("; ").filter(Boolean)))].join("; ");
+}
+
 async function fetchYahooSummary(ticker) {
   const base = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}`;
   const query = `modules=${encodeURIComponent(YAHOO_MODULES)}`;
   const direct = await fetch(`${base}?${query}`, { headers: yahooHeaders() });
   if (direct.ok) return direct.json();
 
-  const cookieResponse = await fetch("https://fc.yahoo.com", {
-    headers: {
-      ...yahooHeaders(),
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-    redirect: "manual",
-  });
-  const cookie = cookieHeaderFrom(cookieResponse);
+  const cookie = await fetchYahooCookie(ticker);
   const crumbResponse = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
     headers: {
       ...yahooHeaders(),
