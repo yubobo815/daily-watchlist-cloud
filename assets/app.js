@@ -23,13 +23,13 @@ const WATCHLIST_COLUMNS = [
   ["score", "Score"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
-  ["setup", "Candle Behavior"],
+  ["setup", "Pattern"],
   ["adaptive_mode", "Mode"],
   ["psychology", "Tape"],
   ["entry_est", "Entry"],
   ["stop_est", "Stop"],
   ["target_est", "Target"],
-  ["notes", "Read"]
+  ["notes", "Behavior"]
 ];
 
 const HISTORY_COLUMNS = [
@@ -61,6 +61,14 @@ const ACTION_TONE = {
   watch: "#2f5fb3",
   exit: "#b42318",
   avoid: "#667085"
+};
+
+const KIND_LABELS = {
+  buy: "BUY",
+  setup: "SETUP",
+  watch: "WATCH",
+  exit: "EXIT",
+  avoid: "AVOID"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -351,6 +359,24 @@ function setupLabel(value) {
   return SETUP_LABELS[value] || value;
 }
 
+function behaviorDetail(row) {
+  const kind = actionKind(row.action);
+  const pattern = setupLabel(row.setup);
+  const score = numericValue(row, "score");
+  const move = numericValue(row, "day_change_pct");
+  const tape = row.psychology || "Mixed tape";
+  const mode = row.adaptive_mode || "Mixed mode";
+  const note = String(row.notes || "").trim();
+
+  if (note) return note;
+  if (kind === "buy") return `${pattern} behavior with strong score and ${tape.toLowerCase()} tape.`;
+  if (kind === "setup") return `${pattern} is forming; score is constructive but still developing.`;
+  if (kind === "watch") return `${mode} behavior; monitor for score expansion or cleaner entry.`;
+  if (kind === "exit") return `Exit pressure: weak score with ${move < 0 ? "negative" : "unstable"} price action.`;
+  if (score < 25) return "Weak scanner behavior; avoid until score and tape improve.";
+  return `${mode} behavior with no clear edge yet.`;
+}
+
 function renderHistoryChangeChips(row, previous) {
   if (!previous) return `<span class="change-chip quiet">Latest state</span>`;
   const chips = [];
@@ -454,7 +480,10 @@ function renderWatchlistCell(row, key) {
     return `<span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`;
   }
   if (key === "setup") {
-    return `<span class="behavior-label">${escapeHtml(setupLabel(row.setup))}</span>`;
+    return `<span class="pattern-label">${escapeHtml(setupLabel(row.setup))}</span>`;
+  }
+  if (key === "notes") {
+    return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
   if (["score", "day_change_pct"].includes(key)) return escapeHtml(fmtNumber(row[key], 1));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
@@ -610,7 +639,7 @@ function renderLatestHistoryPanel(latest) {
       <div class="latest-metrics">
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
         <div><span>Score</span><strong>${fmtNumber(latest.score, 1)}</strong></div>
-        <div><span>Candle</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
+        <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
@@ -627,8 +656,8 @@ function renderHistoryVisual(rows) {
   }
 
   const width = 1120;
-  const height = 330;
-  const pad = { left: 66, right: 38, top: 28, bottom: 50 };
+  const height = 360;
+  const pad = { left: 72, right: 42, top: 34, bottom: 58 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -654,6 +683,13 @@ function renderHistoryVisual(rows) {
   const first = chronological[0];
   const scoreMove = numericValue(latest, "score") - numericValue(first, "score");
   const priceMove = numericValue(latest, "close") - numericValue(first, "close");
+  const signalCounts = chronological.reduce((counts, row) => {
+    const kind = actionKind(row.action);
+    counts[kind] = (counts[kind] || 0) + 1;
+    return counts;
+  }, {});
+  const dominantSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "watch";
+  const priceRange = maxClose - minClose;
   const segments = chronological.map((row, index) => {
     const x = xFor(index);
     const nextX = index === chronological.length - 1 ? width - pad.right : xFor(index + 1);
@@ -673,14 +709,6 @@ function renderHistoryVisual(rows) {
     .map(({ row, index }, tickIndex, ticks) => {
       return `<text x="${xFor(index).toFixed(1)}" y="${height - 18}" text-anchor="${index === 0 ? "start" : tickIndex === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
     }).join("");
-  const behaviorRibbon = chronological.map((row, index) => {
-    const showDate = index === 0 || index === chronological.length - 1 || index % 5 === 0;
-    return `
-    <div class="ribbon-day tone-${actionKind(row.action)} ${showDate ? "has-date" : ""}" title="${escapeHtml(row.history_date)} · ${escapeHtml(ACTION_LABELS[row.action] || row.action)} · ${escapeHtml(setupLabel(row.setup))}">
-      ${showDate ? `<span>${escapeHtml(fmtCompactDate(row.history_date))}</span>` : ""}
-    </div>
-  `;
-  }).join("");
 
   visual.innerHTML = `
     <div class="visual-summary">
@@ -697,21 +725,12 @@ function renderHistoryVisual(rows) {
         <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
       </div>
     </div>
-    <div class="behavior-map">
-      <div class="behavior-map-head">
-        <span>30-day signal map</span>
-        <strong>Each block is one trading day</strong>
-      </div>
-      <div class="behavior-ribbon" aria-label="${escapeHtml(state.ticker)} daily scanner signal ribbon">
-        ${behaviorRibbon}
-      </div>
-    </div>
     <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>score zones</span>
-          <strong>Where the scanner moved over 30 days</strong>
-          <p class="chart-note">Green top zone = stronger scanner behavior. Red bottom zone = exit pressure. The dotted blue line shows price direction only.</p>
+          <span>30-day behavior path</span>
+          <strong>Scanner score vs. close direction</strong>
+          <p class="chart-note">White line is scanner score. Blue dotted line is close-price direction, scaled only for shape comparison.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
@@ -738,6 +757,12 @@ function renderHistoryVisual(rows) {
         <span><i class="legend-score"></i> scanner score</span>
         <span><i class="legend-price"></i> price direction</span>
         <span><i class="legend-band"></i> signal zones</span>
+      </div>
+      <div class="chart-insights">
+        <div><span>Dominant signal</span><strong>${escapeHtml(KIND_LABELS[dominantSignal] || dominantSignal.toUpperCase())}</strong></div>
+        <div><span>Current pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
+        <div><span>Close range</span><strong>${fmtNumber(minClose, 2)} - ${fmtNumber(maxClose, 2)}</strong></div>
+        <div><span>Range width</span><strong>${fmtNumber(priceRange, 2)}</strong></div>
       </div>
     </div>
   `;
@@ -772,7 +797,7 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previous)}</div>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Score ${fmtNumber(row.score, 1)} · Candle ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Score ${fmtNumber(row.score, 1)} · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
