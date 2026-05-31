@@ -671,14 +671,6 @@ function renderHistoryVisual(rows) {
   const pricePointList = chronological.map((row, index) => ({ x: xFor(index), y: closeY(numericValue(row, "close")) }));
   const scorePath = linePath(scorePointList);
   const pricePath = linePath(pricePointList);
-  const scoreArea = `${scorePath} L ${xFor(chronological.length - 1).toFixed(1)} ${(pad.top + plotHeight).toFixed(1)} L ${pad.left.toFixed(1)} ${(pad.top + plotHeight).toFixed(1)} Z`;
-  const buyZoneY = scoreY(75);
-  const exitZoneY = scoreY(25);
-  const scoreBands = `
-    <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${(buyZoneY - pad.top).toFixed(1)}" class="zone-band zone-buy" />
-    <rect x="${pad.left}" y="${buyZoneY.toFixed(1)}" width="${plotWidth}" height="${(exitZoneY - buyZoneY).toFixed(1)}" class="zone-band zone-mid" />
-    <rect x="${pad.left}" y="${exitZoneY.toFixed(1)}" width="${plotWidth}" height="${(pad.top + plotHeight - exitZoneY).toFixed(1)}" class="zone-band zone-exit" />
-  `;
   const latest = chronological.at(-1);
   const first = chronological[0];
   const scoreMove = numericValue(latest, "score") - numericValue(first, "score");
@@ -690,19 +682,16 @@ function renderHistoryVisual(rows) {
   }, {});
   const dominantSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "watch";
   const priceRange = maxClose - minClose;
-  const segments = chronological.map((row, index) => {
-    const x = xFor(index);
-    const nextX = index === chronological.length - 1 ? width - pad.right : xFor(index + 1);
-    const segmentWidth = Math.max(8, nextX - x);
-    return `<rect x="${x.toFixed(1)}" y="${pad.top}" width="${segmentWidth.toFixed(1)}" height="${plotHeight}" fill="${ACTION_TONE[actionKind(row.action)]}" opacity="0.035" />`;
-  }).join("");
-  const markers = chronological.map((row, index) => {
-    const kind = actionKind(row.action);
-    return `
-      <circle cx="${xFor(index).toFixed(1)}" cy="${scoreY(numericValue(row, "score")).toFixed(1)}" r="${index === chronological.length - 1 ? 6 : 4}" fill="${ACTION_TONE[kind]}" />
-      <title>${escapeHtml(row.history_date)} · ${escapeHtml(row.action)} · score ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
-    `;
-  }).join("");
+  const gridLines = [100, 75, 50, 25, 0].map((score) => `
+    <line x1="${pad.left}" y1="${scoreY(score).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(score).toFixed(1)}" class="chart-grid" />
+    <text x="${pad.left - 14}" y="${scoreY(score).toFixed(1) + 4}" text-anchor="end" class="score-tick">${score}</text>
+  `).join("");
+  const latestX = xFor(chronological.length - 1);
+  const latestScoreY = scoreY(numericValue(latest, "score"));
+  const latestMarker = `
+    <circle cx="${latestX.toFixed(1)}" cy="${latestScoreY.toFixed(1)}" r="5" class="latest-score-dot" />
+    <title>${escapeHtml(latest.history_date)} · ${escapeHtml(latest.action)} · score ${fmtNumber(latest.score, 1)} · close ${fmtNumber(latest.close, 2)}</title>
+  `;
   const dateTicks = chronological
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => index === 0 || index === chronological.length - 1 || (index % 7 === 0 && index < chronological.length - 3))
@@ -739,24 +728,15 @@ function renderHistoryVisual(rows) {
       </div>
       <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day score and price chart">
         <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
-        ${scoreBands}
-        <line x1="${pad.left}" y1="${scoreY(75).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(75).toFixed(1)}" class="guide buy-guide" />
-        <line x1="${pad.left}" y1="${scoreY(50).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(50).toFixed(1)}" class="guide" />
-        <line x1="${pad.left}" y1="${scoreY(25).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(25).toFixed(1)}" class="guide exit-guide" />
-        ${segments}
-        <path d="${scoreArea}" class="score-area" />
+        ${gridLines}
         <path d="${pricePath}" class="price-line" />
         <path d="${scorePath}" class="score-line" />
-        ${markers}
-        <text x="16" y="${scoreY(87).toFixed(1) + 4}" class="axis-label">STRONGER</text>
-        <text x="16" y="${scoreY(50).toFixed(1) + 4}" class="axis-label">NEUTRAL</text>
-        <text x="16" y="${scoreY(13).toFixed(1) + 4}" class="axis-label">EXIT RISK</text>
+        ${latestMarker}
         ${dateTicks}
       </svg>
       <div class="chart-legend">
         <span><i class="legend-score"></i> scanner score</span>
         <span><i class="legend-price"></i> price direction</span>
-        <span><i class="legend-band"></i> signal zones</span>
       </div>
       <div class="chart-insights">
         <div><span>Dominant signal</span><strong>${escapeHtml(KIND_LABELS[dominantSignal] || dominantSignal.toUpperCase())}</strong></div>
