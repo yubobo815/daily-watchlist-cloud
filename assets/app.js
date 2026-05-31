@@ -655,9 +655,9 @@ function renderHistoryVisual(rows) {
     return;
   }
 
-  const width = 1120;
-  const height = 360;
-  const pad = { left: 72, right: 42, top: 34, bottom: 58 };
+  const width = 1040;
+  const height = 260;
+  const pad = { left: 66, right: 34, top: 24, bottom: 42 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
