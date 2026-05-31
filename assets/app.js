@@ -626,9 +626,9 @@ function renderHistoryVisual(rows) {
     return;
   }
 
-  const width = 860;
-  const height = 300;
-  const pad = { left: 58, right: 30, top: 26, bottom: 46 };
+  const width = 1120;
+  const height = 330;
+  const pad = { left: 66, right: 38, top: 28, bottom: 50 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -673,11 +673,14 @@ function renderHistoryVisual(rows) {
     .map(({ row, index }, tickIndex, ticks) => {
       return `<text x="${xFor(index).toFixed(1)}" y="${height - 18}" text-anchor="${index === 0 ? "start" : tickIndex === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
     }).join("");
-  const behaviorRibbon = chronological.map((row) => `
-    <div class="ribbon-day tone-${actionKind(row.action)}" title="${escapeHtml(row.history_date)} · ${escapeHtml(ACTION_LABELS[row.action] || row.action)} · ${escapeHtml(setupLabel(row.setup))}">
-      <span>${escapeHtml(fmtCompactDate(row.history_date))}</span>
+  const behaviorRibbon = chronological.map((row, index) => {
+    const showDate = index === 0 || index === chronological.length - 1 || index % 5 === 0;
+    return `
+    <div class="ribbon-day tone-${actionKind(row.action)} ${showDate ? "has-date" : ""}" title="${escapeHtml(row.history_date)} · ${escapeHtml(ACTION_LABELS[row.action] || row.action)} · ${escapeHtml(setupLabel(row.setup))}">
+      ${showDate ? `<span>${escapeHtml(fmtCompactDate(row.history_date))}</span>` : ""}
     </div>
-  `).join("");
+  `;
+  }).join("");
 
   visual.innerHTML = `
     <div class="visual-summary">
@@ -694,8 +697,14 @@ function renderHistoryVisual(rows) {
         <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
       </div>
     </div>
-    <div class="behavior-ribbon" aria-label="${escapeHtml(state.ticker)} daily scanner signal ribbon">
-      ${behaviorRibbon}
+    <div class="behavior-map">
+      <div class="behavior-map-head">
+        <span>30-day signal map</span>
+        <strong>Each block is one trading day</strong>
+      </div>
+      <div class="behavior-ribbon" aria-label="${escapeHtml(state.ticker)} daily scanner signal ribbon">
+        ${behaviorRibbon}
+      </div>
     </div>
     <div class="chart-card">
       <div class="chart-heading">
