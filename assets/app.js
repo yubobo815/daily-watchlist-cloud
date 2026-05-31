@@ -134,6 +134,11 @@ function scalePoint(value, min, max, start, end) {
   return start + ((value - min) / (max - min)) * (end - start);
 }
 
+function linePath(points) {
+  if (!points.length) return "";
+  return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+}
+
 function setupLabel(value) {
   if (!value || value === "NONE") return "NONE";
   return SETUP_LABELS[value] || value;
@@ -356,8 +361,8 @@ function renderHistoryVisual(rows) {
   }
 
   const width = 920;
-  const height = 310;
-  const pad = { left: 46, right: 26, top: 24, bottom: 44 };
+  const height = 360;
+  const pad = { left: 58, right: 34, top: 34, bottom: 56 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -367,8 +372,11 @@ function renderHistoryVisual(rows) {
   const xFor = (index) => pad.left + (chronological.length === 1 ? plotWidth / 2 : (index / (chronological.length - 1)) * plotWidth);
   const scoreY = (score) => pad.top + plotHeight - (Math.max(0, Math.min(100, score)) / 100) * plotHeight;
   const closeY = (close) => scalePoint(close, minClose, maxClose, pad.top + plotHeight, pad.top);
-  const scorePoints = chronological.map((row, index) => `${xFor(index).toFixed(1)},${scoreY(numericValue(row, "score")).toFixed(1)}`).join(" ");
-  const pricePoints = chronological.map((row, index) => `${xFor(index).toFixed(1)},${closeY(numericValue(row, "close")).toFixed(1)}`).join(" ");
+  const scorePointList = chronological.map((row, index) => ({ x: xFor(index), y: scoreY(numericValue(row, "score")) }));
+  const pricePointList = chronological.map((row, index) => ({ x: xFor(index), y: closeY(numericValue(row, "close")) }));
+  const scorePath = linePath(scorePointList);
+  const pricePath = linePath(pricePointList);
+  const scoreArea = `${scorePath} L ${xFor(chronological.length - 1).toFixed(1)} ${(pad.top + plotHeight).toFixed(1)} L ${pad.left.toFixed(1)} ${(pad.top + plotHeight).toFixed(1)} Z`;
   const latest = chronological.at(-1);
   const first = chronological[0];
   const scoreMove = numericValue(latest, "score") - numericValue(first, "score");
@@ -377,7 +385,7 @@ function renderHistoryVisual(rows) {
     const x = xFor(index);
     const nextX = index === chronological.length - 1 ? width - pad.right : xFor(index + 1);
     const segmentWidth = Math.max(8, nextX - x);
-    return `<rect x="${x.toFixed(1)}" y="${pad.top}" width="${segmentWidth.toFixed(1)}" height="${plotHeight}" fill="${ACTION_TONE[actionKind(row.action)]}" opacity="0.1" />`;
+    return `<rect x="${x.toFixed(1)}" y="${pad.top}" width="${segmentWidth.toFixed(1)}" height="${plotHeight}" fill="${ACTION_TONE[actionKind(row.action)]}" opacity="0.08" />`;
   }).join("");
   const markers = chronological.map((row, index) => {
     const kind = actionKind(row.action);
@@ -387,10 +395,10 @@ function renderHistoryVisual(rows) {
     `;
   }).join("");
   const dateTicks = chronological
-    .filter((_, index) => index === 0 || index === chronological.length - 1 || index % 7 === 0)
-    .map((row, index, ticks) => {
-      const realIndex = chronological.indexOf(row);
-      return `<text x="${xFor(realIndex).toFixed(1)}" y="${height - 14}" text-anchor="${index === 0 ? "start" : index === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
+    .map((row, index) => ({ row, index }))
+    .filter(({ index }) => index === 0 || index === chronological.length - 1 || (index % 7 === 0 && index < chronological.length - 3))
+    .map(({ row, index }, tickIndex, ticks) => {
+      return `<text x="${xFor(index).toFixed(1)}" y="${height - 18}" text-anchor="${index === 0 ? "start" : tickIndex === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
     }).join("");
 
   visual.innerHTML = `
@@ -409,17 +417,29 @@ function renderHistoryVisual(rows) {
       </div>
     </div>
     <div class="chart-card">
+      <div class="chart-heading">
+        <div>
+          <span>30-day map</span>
+          <strong>Score path vs. price shape</strong>
+        </div>
+        <div class="chart-latest">
+          <span>Latest</span>
+          <strong>${fmtNumber(latest.score, 1)}</strong>
+        </div>
+      </div>
       <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day score and price chart">
+        <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
         <line x1="${pad.left}" y1="${scoreY(75).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(75).toFixed(1)}" class="guide buy-guide" />
         <line x1="${pad.left}" y1="${scoreY(50).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(50).toFixed(1)}" class="guide" />
         <line x1="${pad.left}" y1="${scoreY(25).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(25).toFixed(1)}" class="guide exit-guide" />
         ${segments}
-        <polyline points="${pricePoints}" class="price-line" />
-        <polyline points="${scorePoints}" class="score-line" />
+        <path d="${scoreArea}" class="score-area" />
+        <path d="${pricePath}" class="price-line" />
+        <path d="${scorePath}" class="score-line" />
         ${markers}
-        <text x="12" y="${scoreY(75).toFixed(1) + 4}" class="axis-label">buy</text>
-        <text x="12" y="${scoreY(50).toFixed(1) + 4}" class="axis-label">mid</text>
-        <text x="12" y="${scoreY(25).toFixed(1) + 4}" class="axis-label">exit</text>
+        <text x="16" y="${scoreY(75).toFixed(1) + 4}" class="axis-label">BUY</text>
+        <text x="16" y="${scoreY(50).toFixed(1) + 4}" class="axis-label">MID</text>
+        <text x="16" y="${scoreY(25).toFixed(1) + 4}" class="axis-label">EXIT</text>
         ${dateTicks}
       </svg>
       <div class="chart-legend">
@@ -485,7 +505,7 @@ function renderHistoryRows() {
 async function loadHistory(ticker) {
   state.ticker = normaliseTicker(ticker);
   document.querySelector("#ticker").value = state.ticker;
-  document.querySelector("#history-title").textContent = `${state.ticker} 30-Day History`;
+  document.querySelector("#history-title").textContent = `${state.ticker} History`;
   document.title = `${state.ticker} History`;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
