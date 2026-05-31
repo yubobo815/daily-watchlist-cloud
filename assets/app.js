@@ -55,6 +55,14 @@ const SUMMARY_CARDS = [
   ["avoid", "AVOID"]
 ];
 
+const ACTION_TONE = {
+  buy: "#14914d",
+  setup: "#d69b00",
+  watch: "#3f6fd5",
+  exit: "#c93b32",
+  avoid: "#777777"
+};
+
 const state = {
   rows: [],
   visibleRows: [],
@@ -93,6 +101,38 @@ function fmtNumber(value, digits = 1) {
   if (value === null || value === undefined || value === "") return "";
   const number = Number(value);
   return Number.isFinite(number) ? number.toFixed(digits) : String(value);
+}
+
+function fmtCompactDate(value) {
+  if (!value) return "";
+  const [, month, day] = String(value).split("-");
+  return month && day ? `${month}/${day}` : String(value);
+}
+
+function numericValue(row, key) {
+  const number = Number(row?.[key]);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function scalePoint(value, min, max, start, end) {
+  if (max === min) return (start + end) / 2;
+  return start + ((value - min) / (max - min)) * (end - start);
+}
+
+function describeHistoryChange(row, previous) {
+  if (!previous) return "Latest scanner state";
+  const changes = [];
+  if (row.action !== previous.action) {
+    changes.push(`Signal changed from ${ACTION_LABELS[previous.action] || previous.action} to ${ACTION_LABELS[row.action] || row.action}`);
+  }
+  if (row.setup !== previous.setup) {
+    changes.push(`Setup shifted from ${previous.setup || "NONE"} to ${row.setup || "NONE"}`);
+  }
+  const scoreMove = numericValue(row, "score") - numericValue(previous, "score");
+  if (Math.abs(scoreMove) >= 5) {
+    changes.push(`Score ${scoreMove > 0 ? "improved" : "faded"} ${Math.abs(scoreMove).toFixed(1)} pts`);
+  }
+  return changes.join(". ") || "Behavior held steady";
 }
 
 function csvEscape(value) {
@@ -279,25 +319,139 @@ function renderLatestHistoryPanel(latest) {
   `;
 }
 
+function renderHistoryVisual(rows) {
+  const visual = document.querySelector("#history-visual");
+  const chronological = [...rows].reverse();
+  if (!chronological.length) {
+    visual.innerHTML = "<div class=\"empty\">No visual history found.</div>";
+    return;
+  }
+
+  const width = 920;
+  const height = 310;
+  const pad = { left: 46, right: 26, top: 24, bottom: 44 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const scores = chronological.map((row) => numericValue(row, "score"));
+  const closes = chronological.map((row) => numericValue(row, "close"));
+  const minClose = Math.min(...closes);
+  const maxClose = Math.max(...closes);
+  const xFor = (index) => pad.left + (chronological.length === 1 ? plotWidth / 2 : (index / (chronological.length - 1)) * plotWidth);
+  const scoreY = (score) => pad.top + plotHeight - (Math.max(0, Math.min(100, score)) / 100) * plotHeight;
+  const closeY = (close) => scalePoint(close, minClose, maxClose, pad.top + plotHeight, pad.top);
+  const scorePoints = chronological.map((row, index) => `${xFor(index).toFixed(1)},${scoreY(numericValue(row, "score")).toFixed(1)}`).join(" ");
+  const pricePoints = chronological.map((row, index) => `${xFor(index).toFixed(1)},${closeY(numericValue(row, "close")).toFixed(1)}`).join(" ");
+  const latest = chronological.at(-1);
+  const first = chronological[0];
+  const scoreMove = numericValue(latest, "score") - numericValue(first, "score");
+  const priceMove = numericValue(latest, "close") - numericValue(first, "close");
+  const segments = chronological.map((row, index) => {
+    const x = xFor(index);
+    const nextX = index === chronological.length - 1 ? width - pad.right : xFor(index + 1);
+    const segmentWidth = Math.max(8, nextX - x);
+    return `<rect x="${x.toFixed(1)}" y="${pad.top}" width="${segmentWidth.toFixed(1)}" height="${plotHeight}" fill="${ACTION_TONE[actionKind(row.action)]}" opacity="0.1" />`;
+  }).join("");
+  const markers = chronological.map((row, index) => {
+    const kind = actionKind(row.action);
+    return `
+      <circle cx="${xFor(index).toFixed(1)}" cy="${scoreY(numericValue(row, "score")).toFixed(1)}" r="${index === chronological.length - 1 ? 6 : 4}" fill="${ACTION_TONE[kind]}" />
+      <title>${escapeHtml(row.history_date)} · ${escapeHtml(row.action)} · score ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
+    `;
+  }).join("");
+  const dateTicks = chronological
+    .filter((_, index) => index === 0 || index === chronological.length - 1 || index % 7 === 0)
+    .map((row, index, ticks) => {
+      const realIndex = chronological.indexOf(row);
+      return `<text x="${xFor(realIndex).toFixed(1)}" y="${height - 14}" text-anchor="${index === 0 ? "start" : index === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
+    }).join("");
+
+  visual.innerHTML = `
+    <div class="visual-summary">
+      <div>
+        <span class="subtle">Latest signal</span>
+        <strong><span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span></strong>
+      </div>
+      <div>
+        <span class="subtle">Score move</span>
+        <strong class="${scoreMove >= 0 ? "up" : "down"}">${scoreMove >= 0 ? "+" : ""}${fmtNumber(scoreMove, 1)}</strong>
+      </div>
+      <div>
+        <span class="subtle">Price move</span>
+        <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
+      </div>
+    </div>
+    <div class="chart-card">
+      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day score and price chart">
+        <line x1="${pad.left}" y1="${scoreY(75).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(75).toFixed(1)}" class="guide buy-guide" />
+        <line x1="${pad.left}" y1="${scoreY(50).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(50).toFixed(1)}" class="guide" />
+        <line x1="${pad.left}" y1="${scoreY(25).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(25).toFixed(1)}" class="guide exit-guide" />
+        ${segments}
+        <polyline points="${pricePoints}" class="price-line" />
+        <polyline points="${scorePoints}" class="score-line" />
+        ${markers}
+        <text x="12" y="${scoreY(75).toFixed(1) + 4}" class="axis-label">buy</text>
+        <text x="12" y="${scoreY(50).toFixed(1) + 4}" class="axis-label">mid</text>
+        <text x="12" y="${scoreY(25).toFixed(1) + 4}" class="axis-label">exit</text>
+        ${dateTicks}
+      </svg>
+      <div class="chart-legend">
+        <span><i class="legend-score"></i> scanner score</span>
+        <span><i class="legend-price"></i> close price shape</span>
+        <span><i class="legend-band"></i> signal zones</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderHistoryRows() {
   const timeline = document.querySelector("#timeline");
   if (!state.historyRows.length) {
     timeline.innerHTML = "<div class=\"empty\">No history found for this ticker.</div>";
+    document.querySelector("#history-visual").innerHTML = "<div class=\"empty\">No visual history found.</div>";
     renderLatestHistoryPanel(null);
     return;
   }
   renderLatestHistoryPanel(state.historyRows[0]);
-  timeline.innerHTML = [...state.historyRows].reverse().map((row) => `
-    <div class="timeline-row">
-      <strong>${escapeHtml(row.history_date)}</strong>
-      <div>
-        <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        <span class="subtle"> ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
-        <div class="bar"><span style="width: ${Math.max(2, Math.min(100, Number(row.score) || 0))}%"></span></div>
+  renderHistoryVisual(state.historyRows);
+  const chronological = [...state.historyRows].reverse();
+  const moments = chronological
+    .map((row, index) => ({ row, previous: chronological[index - 1], index }))
+    .filter(({ row, previous, index }) => {
+      if (index === chronological.length - 1) return true;
+      if (!previous) return actionKind(row.action) !== "avoid";
+      return row.action !== previous.action || row.setup !== previous.setup || Math.abs(numericValue(row, "score") - numericValue(previous, "score")) >= 8;
+    })
+    .slice(-8)
+    .reverse();
+
+  timeline.innerHTML = `
+    <h3>Key Behavior Moments</h3>
+    ${moments.map(({ row, previous, index }) => `
+      <div class="moment-card tone-${actionKind(row.action)}">
+        <div class="moment-date">${index === chronological.length - 1 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</div>
+        <div class="moment-body">
+          <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+          <strong>${escapeHtml(describeHistoryChange(row, previous))}</strong>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} · Score ${fmtNumber(row.score, 1)} · ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
+        </div>
       </div>
-      <span class="num">${fmtNumber(row.close, 2)}</span>
-    </div>
-  `).join("");
+    `).join("")}
+    <details class="raw-history">
+      <summary>Show daily rows</summary>
+      ${chronological.map((row) => `
+        <div class="timeline-row">
+          <strong>${escapeHtml(row.history_date)}</strong>
+          <div>
+            <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+            <span class="subtle"> ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
+            <div class="bar"><span style="width: ${Math.max(2, Math.min(100, Number(row.score) || 0))}%"></span></div>
+          </div>
+          <span class="num">${fmtNumber(row.close, 2)}</span>
+        </div>
+      `).join("")}
+    </details>
+  `;
 }
 
 async function loadHistory(ticker) {
