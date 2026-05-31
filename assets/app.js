@@ -24,12 +24,12 @@ const WATCHLIST_COLUMNS = [
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
   ["setup", "Pattern"],
-  ["adaptive_mode", "Mode"],
+  ["adaptive_mode", "Market Behavior"],
   ["psychology", "Tape"],
   ["entry_est", "Entry"],
   ["stop_est", "Stop"],
   ["target_est", "Target"],
-  ["notes", "Behavior"]
+  ["notes", "Behavior Note"]
 ];
 
 const HISTORY_COLUMNS = [
@@ -269,6 +269,7 @@ const SECURITY_NAME_FALLBACKS = {
 
 const state = {
   rows: [],
+  previousRows: [],
   visibleRows: [],
   filter: "all",
   query: "",
@@ -385,6 +386,90 @@ function behaviorDetail(row) {
   return `${mode} behavior with no clear edge yet.`;
 }
 
+function payloadValue(row, key) {
+  return row?.payload?.[key] ?? row?.[key];
+}
+
+function dataDateSummary(rows) {
+  const dates = [...new Set(rows.map((row) => row.data_date || row.date || row.history_date).filter(Boolean))].sort();
+  if (!dates.length) return "";
+  const latest = dates.at(-1);
+  const earliest = dates[0];
+  return earliest === latest ? `Market data: ${latest}` : `Market data: ${earliest} to ${latest}`;
+}
+
+function isStaleMarketDate(runDate, rows) {
+  const dates = rows.map((row) => row.data_date || row.date || row.history_date).filter(Boolean).sort();
+  const latestDataDate = dates.at(-1);
+  return Boolean(runDate && latestDataDate && latestDataDate < runDate);
+}
+
+function rowByTicker(rows) {
+  return new Map(rows.map((row) => [row.ticker, row]));
+}
+
+function dailyChangeItems(rows, previousRows) {
+  if (!rows.length || !previousRows.length) return [];
+  const previousByTicker = rowByTicker(previousRows);
+  return rows
+    .map((row) => {
+      const previous = previousByTicker.get(row.ticker);
+      if (!previous) return null;
+      const scoreMove = numericValue(row, "score") - numericValue(previous, "score");
+      const actionChanged = row.action !== previous.action;
+      const setupChanged = row.setup !== previous.setup;
+      const priceMove = numericValue(row, "close") - numericValue(previous, "close");
+      const previousClose = numericValue(previous, "close");
+      const pricePct = previousClose ? (priceMove / previousClose) * 100 : 0;
+      const priority =
+        (actionChanged ? 40 : 0) +
+        (setupChanged ? 20 : 0) +
+        Math.min(Math.abs(scoreMove), 30) +
+        Math.min(Math.abs(pricePct), 10);
+      if (!actionChanged && !setupChanged && Math.abs(scoreMove) < 8 && Math.abs(pricePct) < 3) return null;
+      return { row, previous, scoreMove, pricePct, actionChanged, setupChanged, priority };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 8);
+}
+
+function renderScoreBreakdown(row) {
+  const trend = Number(payloadValue(row, "trend_efficiency"));
+  const atrPct = Number(payloadValue(row, "atr_pct"));
+  const buyer = Number(payloadValue(row, "buyer_score"));
+  const seller = Number(payloadValue(row, "seller_score"));
+  const volume = payloadValue(row, "volume_state") || "NEUTRAL";
+  const items = [
+    ["Trend", row.adaptive_mode || "Mixed"],
+    ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
+    ["Volume", volume],
+    ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
+    ["Pattern", setupLabel(row.setup)],
+    ["Score", fmtNumber(row.score, 1)]
+  ];
+  const trendWidth = Number.isFinite(trend) ? Math.max(4, Math.min(100, trend * 100)) : 4;
+  return `
+    <div class="score-explainer">
+      <div class="score-explainer-head">
+        <span>Score Read</span>
+        <strong>${escapeHtml(behaviorDetail(row))}</strong>
+      </div>
+      <div class="score-factors">
+        ${items.map(([label, value]) => `
+          <div>
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+          </div>
+        `).join("")}
+      </div>
+      <div class="trend-meter" aria-label="Trend efficiency">
+        <span style="width: ${trendWidth}%"></span>
+      </div>
+    </div>
+  `;
+}
+
 function renderHistoryChangeChips(row, previous) {
   if (!previous) return `<span class="change-chip quiet">Latest state</span>`;
   const chips = [];
@@ -474,6 +559,15 @@ async function supabaseFetch(path) {
 async function latestRunDate() {
   const rows = await supabaseFetch("watchlist_snapshots?select=run_date&order=run_date.desc&limit=1");
   return rows[0]?.run_date || null;
+}
+
+async function recentRunDates(limit = 2) {
+  const rows = await supabaseFetch("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
+  const dates = [];
+  rows.forEach((row) => {
+    if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
+  });
+  return dates.slice(0, limit);
 }
 
 function renderWatchlistCell(row, key) {
@@ -569,6 +663,48 @@ function renderTodayFocus() {
   `;
 }
 
+function renderChangedToday() {
+  const panel = document.querySelector("#changed-today");
+  if (!panel) return;
+  const changes = dailyChangeItems(state.rows, state.previousRows);
+  if (!changes.length) {
+    panel.innerHTML = `
+      <div class="section-heading">
+        <div>
+          <span>Changed Today</span>
+          <strong>No major scanner changes versus the previous run.</strong>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <span>Changed Today</span>
+        <strong>Largest signal, pattern, score, and price shifts.</strong>
+      </div>
+    </div>
+    <div class="change-grid">
+      ${changes.map(({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }) => `
+        <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+          <div class="change-card-head">
+            <strong>${escapeHtml(row.ticker)}</strong>
+            <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
+          </div>
+          <div class="change-card-body">
+            ${actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>` : ""}
+            ${setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : ""}
+            <span class="change-chip ${moveClass(scoreMove)}">Score ${fmtSignedNumber(scoreMove, 1)}</span>
+            <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
+          </div>
+        </a>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderWatchlist() {
   const counts = { buy: 0, setup: 0, watch: 0, exit: 0, avoid: 0 };
   state.rows.forEach((row) => {
@@ -576,6 +712,7 @@ function renderWatchlist() {
   });
   renderCards(counts);
   renderTodayFocus();
+  renderChangedToday();
 
   const needle = state.query.trim().toLowerCase();
   const [sortKey, direction] = state.sort.split("-");
@@ -620,12 +757,17 @@ async function initWatchlist() {
   }
 
   try {
-    const latest = await latestRunDate();
+    const [latest, previous] = await recentRunDates(2);
     if (!latest) throw new Error("No Supabase run found yet.");
     state.rows = (await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(latest)}&order=score.desc`))
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
+    state.previousRows = previous
+      ? await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(previous)}&order=score.desc`)
+      : [];
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    setStatus(`Last refresh date: ${latest}. ${APP_DISCLAIMER}`);
+    const marketData = dataDateSummary(state.rows);
+    const staleText = isStaleMarketDate(latest, state.rows) ? " Latest market session may be earlier than the refresh date." : "";
+    setStatus(`Last refresh date: ${latest}. ${marketData}.${staleText} ${APP_DISCLAIMER}`);
     renderWatchlist();
   } catch (error) {
     setStatus(error.message, false);
@@ -650,6 +792,7 @@ function renderLatestHistoryPanel(latest) {
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
+      ${renderScoreBreakdown(latest)}
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
     </div>
   `;
@@ -663,9 +806,9 @@ function renderHistoryVisual(rows) {
     return;
   }
 
-  const width = 1040;
-  const height = 200;
-  const pad = { left: 54, right: 28, top: 18, bottom: 32 };
+  const width = 960;
+  const height = 146;
+  const pad = { left: 34, right: 22, top: 16, bottom: 26 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -688,9 +831,9 @@ function renderHistoryVisual(rows) {
   }, {});
   const dominantSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "watch";
   const priceRange = maxClose - minClose;
-  const gridLines = [100, 75, 50, 25, 0].map((score) => `
+  const gridLines = [75, 50, 25].map((score) => `
     <line x1="${pad.left}" y1="${scoreY(score).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(score).toFixed(1)}" class="chart-grid" />
-    <text x="${pad.left - 14}" y="${scoreY(score).toFixed(1) + 4}" text-anchor="end" class="score-tick">${score}</text>
+    <text x="${pad.left - 10}" y="${scoreY(score).toFixed(1) + 3}" text-anchor="end" class="score-tick">${score}</text>
   `).join("");
   const barSlot = chronological.length > 1 ? plotWidth / chronological.length : plotWidth;
   const barWidth = Math.max(6, Math.min(18, barSlot * 0.58));
@@ -729,15 +872,15 @@ function renderHistoryVisual(rows) {
     </div>
     <details class="chart-details">
       <summary>
-        <span>Show 30-day score detail</span>
-        <strong>Daily score bars and close direction</strong>
+        <span>Show Score Detail</span>
+        <strong>Daily bars, compact view</strong>
       </summary>
       <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>30-day score detail</span>
+          <span>Score Detail</span>
           <strong>Daily scanner score bars</strong>
-          <p class="chart-note">Bars show actual daily scanner score. The dotted line shows close-price direction, scaled only for shape comparison.</p>
+          <p class="chart-note">Bars are daily scanner scores. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
@@ -839,7 +982,9 @@ async function loadHistory(ticker) {
     document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    setStatus(`Last refresh date: ${latest}. ${APP_DISCLAIMER}`);
+    const marketData = dataDateSummary(state.historyRows);
+    const staleText = isStaleMarketDate(latest, state.historyRows) ? " Latest market session may be earlier than the refresh date." : "";
+    setStatus(`Last refresh date: ${latest}. ${marketData}.${staleText} ${APP_DISCLAIMER}`);
     renderHistoryRows();
   } catch (error) {
     state.historyRows = [];
