@@ -273,6 +273,7 @@ h2 {
 }
 
 .card strong {
+  color: var(--ink);
   font-size: 30px;
   line-height: 1;
 }

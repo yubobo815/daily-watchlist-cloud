@@ -321,6 +321,10 @@ function displaySecurityName(name, ticker) {
   return SECURITY_NAME_FALLBACKS[ticker] || "";
 }
 
+function historyDisplayTitle() {
+  return `${state.tickerName || state.ticker} 30-day history`;
+}
+
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -722,9 +726,9 @@ async function loadHistory(ticker) {
   state.ticker = normaliseTicker(ticker);
   state.tickerName = "";
   document.querySelector("#ticker").value = state.ticker;
-  document.querySelector("#history-title").textContent = `${state.ticker} History`;
+  document.querySelector("#history-title").textContent = `${state.ticker} 30-day history`;
   document.querySelector("#ticker-name").textContent = "";
-  document.title = `${state.ticker} History`;
+  document.title = `${state.ticker} 30-day history`;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
   document.querySelector("#run-status").textContent = "No history loaded";
@@ -735,9 +739,9 @@ async function loadHistory(ticker) {
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
     const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
     state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
-    document.querySelector("#history-title").textContent = `${state.ticker} History`;
-    document.querySelector("#ticker-name").textContent = state.tickerName;
-    document.title = state.tickerName ? `${state.ticker} History · ${state.tickerName}` : `${state.ticker} History`;
+    document.querySelector("#history-title").textContent = historyDisplayTitle();
+    document.querySelector("#ticker-name").textContent = "";
+    document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
     setStatus(`Last refresh date: ${latest}. ${APP_DISCLAIMER}`);
