@@ -517,7 +517,7 @@ async function loadHistory(ticker) {
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     document.querySelector("#run-status").textContent = `Database run: ${latest}`;
-    setStatus(`Last refresh date: ${latest}. Reference only; not for trade confirmation.`);
+    setStatus(`Last refresh date: ${latest}. This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.`);
     renderHistoryRows();
   } catch (error) {
     state.historyRows = [];

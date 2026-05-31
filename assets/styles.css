@@ -11,6 +11,7 @@
   --exit: #ffddd8;
   --avoid: #eaebe5;
   --shadow: 0 24px 80px rgba(54, 67, 40, 0.16);
+  --font-app: "Avenir Next", "Gill Sans", ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -21,7 +22,7 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--ink);
-  font-family: "Avenir Next", "Gill Sans", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-app);
   background:
     radial-gradient(circle at 10% -5%, rgba(255, 207, 83, 0.4), transparent 31%),
     radial-gradient(circle at 90% 5%, rgba(82, 154, 255, 0.28), transparent 34%),
@@ -110,8 +111,8 @@ select {
 h1 {
   margin: 0;
   max-width: 980px;
-  font-family: Charter, Georgia, serif;
   font-size: clamp(42px, 8vw, 92px);
+  font-weight: 950;
   letter-spacing: -0.075em;
   line-height: 0.86;
 }
@@ -125,7 +126,6 @@ body[data-page="watchlist"] h1 {
 
 body[data-page="history"] h1 {
   max-width: 760px;
-  font-family: "Avenir Next", "Gill Sans", ui-sans-serif, system-ui, sans-serif;
   font-size: clamp(42px, 7vw, 72px);
   font-weight: 950;
   letter-spacing: -0.065em;
@@ -134,8 +134,8 @@ body[data-page="history"] h1 {
 
 h2 {
   margin: 0 0 12px;
-  font-family: Charter, Georgia, serif;
   font-size: 30px;
+  font-weight: 950;
   letter-spacing: -0.04em;
 }
 

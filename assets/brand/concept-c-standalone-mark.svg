@@ -1,0 +1,31 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Concept C Trading Logo Mark</title>
+  <desc>Standalone trading logo mark with navy angular market stroke and green rising arrow.</desc>
+
+  <defs>
+    <linearGradient id="navyMark" x1="240" y1="700" x2="520" y2="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#061A35"/>
+      <stop offset="1" stop-color="#082A55"/>
+    </linearGradient>
+
+    <linearGradient id="arrowGreen" x1="500" y1="700" x2="810" y2="285" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#049F69"/>
+      <stop offset="0.45" stop-color="#10C878"/>
+      <stop offset="1" stop-color="#18F285"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#000000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <!-- left navy angular stroke -->
+    <path d="M250 690 L442 450 C448 443 459 443 465 450 L556 551 C562 558 562 568 556 575 L522 613 C515 620 505 620 499 613 L456 564 C450 557 439 557 433 565 L323 690 Z"
+          fill="url(#navyMark)"/>
+
+    <!-- right green rising arrow -->
+    <path d="M502 690 L687 417 L645 393 C634 387 636 371 648 367 L805 316 C818 312 830 324 827 337 L793 492 C790 505 774 509 766 499 L732 457 L572 690 Z"
+          fill="url(#arrowGreen)"/>
+  </g>
+</svg>
