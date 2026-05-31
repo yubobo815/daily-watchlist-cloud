@@ -7,8 +7,8 @@
     <meta name="description" content="Daily trading copilot powered by Supabase watchlist data.">
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
-    <link rel="stylesheet" href="./assets/styles.css?v=company-title-20260531">
-    <script defer src="./assets/app.js?v=company-title-20260531"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=focus-behavior-20260531">
+    <script defer src="./assets/app.js?v=focus-behavior-20260531"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -32,7 +32,7 @@
       <section id="cards" class="cards"></section>
 
       <section class="controls">
-        <input id="search" class="search" placeholder="Search ticker, setup, note, mode...">
+        <input id="search" class="search" placeholder="Search ticker, candle behavior, note, mode...">
         <button id="all-filter" class="chip active" type="button">All</button>
         <select id="sort" class="control">
           <option value="score-desc">Score high to low</option>
@@ -42,6 +42,8 @@
         </select>
         <div id="count" class="count">0 / 0 shown</div>
       </section>
+
+      <section id="today-focus" class="today-focus"></section>
 
       <section class="table-wrap">
         <table>

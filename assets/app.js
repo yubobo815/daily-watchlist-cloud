@@ -8,12 +8,12 @@ const ACTION_LABELS = {
 };
 
 const SETUP_LABELS = {
-  "BREAKOUT BUY": "BO",
-  "MOMENTUM BUY": "MOM",
-  "PULLBACK BUY": "PB",
-  "EARLY PULLBACK BUY": "EPB",
-  "REVERSAL BUY": "REV",
-  "NONE": "-"
+  "BREAKOUT BUY": "Breakout",
+  "MOMENTUM BUY": "Momentum",
+  "PULLBACK BUY": "Pullback",
+  "EARLY PULLBACK BUY": "Early Pullback",
+  "REVERSAL BUY": "Reversal",
+  "NONE": "None"
 };
 
 const WATCHLIST_COLUMNS = [
@@ -21,9 +21,9 @@ const WATCHLIST_COLUMNS = [
   ["name", "Name"],
   ["action", "Signal"],
   ["score", "Score"],
-  ["close", "Last"],
+  ["close", "Close"],
   ["day_change_pct", "Chg%"],
-  ["setup", "Setup"],
+  ["setup", "Candle Behavior"],
   ["adaptive_mode", "Mode"],
   ["psychology", "Tape"],
   ["entry_est", "Entry"],
@@ -347,7 +347,7 @@ function linePath(points) {
 }
 
 function setupLabel(value) {
-  if (!value || value === "NONE") return "NONE";
+  if (!value) return "None";
   return SETUP_LABELS[value] || value;
 }
 
@@ -454,7 +454,7 @@ function renderWatchlistCell(row, key) {
     return `<span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`;
   }
   if (key === "setup") {
-    return SETUP_LABELS[row.setup] ? `<span class="badge">${escapeHtml(SETUP_LABELS[row.setup])}</span>` : escapeHtml(row.setup);
+    return `<span class="behavior-label">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
   if (["score", "day_change_pct"].includes(key)) return escapeHtml(fmtNumber(row[key], 1));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
@@ -479,12 +479,66 @@ function renderCards(counts) {
   });
 }
 
+function securityDisplay(row) {
+  const name = displaySecurityName(row.name, row.ticker);
+  return name ? `${row.ticker} · ${name}` : row.ticker;
+}
+
+function focusItem(row, reason) {
+  if (!row) return "";
+  const kind = actionKind(row.action);
+  return `
+    <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+      <span class="focus-kicker">${escapeHtml(reason)}</span>
+      <strong>${escapeHtml(securityDisplay(row))}</strong>
+      <span class="focus-meta">
+        <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+        <span>Score ${fmtNumber(row.score, 1)}</span>
+        <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
+        <span>${escapeHtml(setupLabel(row.setup))}</span>
+      </span>
+    </a>
+  `;
+}
+
+function renderTodayFocus() {
+  const panel = document.querySelector("#today-focus");
+  if (!panel) return;
+  const ranked = [...state.rows].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  const strongest = ranked.find((row) => actionKind(row.action) === "buy");
+  const building = ranked.find((row) => actionKind(row.action) === "setup");
+  const pressure = [...state.rows]
+    .filter((row) => actionKind(row.action) === "exit")
+    .sort((a, b) => Number(a.score || 0) - Number(b.score || 0))[0];
+  const bestDay = [...state.rows]
+    .filter((row) => ["buy", "setup", "watch"].includes(actionKind(row.action)))
+    .sort((a, b) => Number(b.day_change_pct || 0) - Number(a.day_change_pct || 0))[0];
+
+  const items = [
+    focusItem(strongest, "Strongest buy candidate"),
+    focusItem(building, "Best forming behavior"),
+    focusItem(pressure, "Most exit pressure"),
+    focusItem(bestDay, "Strongest daily move")
+  ].filter(Boolean);
+
+  panel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <span>Today’s Focus</span>
+        <strong>Start here, then drill into the table.</strong>
+      </div>
+    </div>
+    <div class="focus-grid">${items.join("")}</div>
+  `;
+}
+
 function renderWatchlist() {
   const counts = { buy: 0, setup: 0, watch: 0, exit: 0, avoid: 0 };
   state.rows.forEach((row) => {
     counts[actionKind(row.action)] += 1;
   });
   renderCards(counts);
+  renderTodayFocus();
 
   const needle = state.query.trim().toLowerCase();
   const [sortKey, direction] = state.sort.split("-");
@@ -556,6 +610,7 @@ function renderLatestHistoryPanel(latest) {
       <div class="latest-metrics">
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
         <div><span>Score</span><strong>${fmtNumber(latest.score, 1)}</strong></div>
+        <div><span>Candle</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
@@ -618,6 +673,11 @@ function renderHistoryVisual(rows) {
     .map(({ row, index }, tickIndex, ticks) => {
       return `<text x="${xFor(index).toFixed(1)}" y="${height - 18}" text-anchor="${index === 0 ? "start" : tickIndex === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
     }).join("");
+  const behaviorRibbon = chronological.map((row) => `
+    <div class="ribbon-day tone-${actionKind(row.action)}" title="${escapeHtml(row.history_date)} · ${escapeHtml(ACTION_LABELS[row.action] || row.action)} · ${escapeHtml(setupLabel(row.setup))}">
+      <span>${escapeHtml(fmtCompactDate(row.history_date))}</span>
+    </div>
+  `).join("");
 
   visual.innerHTML = `
     <div class="visual-summary">
@@ -634,12 +694,15 @@ function renderHistoryVisual(rows) {
         <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
       </div>
     </div>
+    <div class="behavior-ribbon" aria-label="${escapeHtml(state.ticker)} daily scanner signal ribbon">
+      ${behaviorRibbon}
+    </div>
     <div class="chart-card">
       <div class="chart-heading">
         <div>
           <span>score zones</span>
           <strong>Where the scanner moved over 30 days</strong>
-          <p class="chart-note">Green top zone = stronger setup. Red bottom zone = exit pressure. The dotted blue line shows price direction only.</p>
+          <p class="chart-note">Green top zone = stronger scanner behavior. Red bottom zone = exit pressure. The dotted blue line shows price direction only.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
@@ -665,7 +728,7 @@ function renderHistoryVisual(rows) {
       <div class="chart-legend">
         <span><i class="legend-score"></i> scanner score</span>
         <span><i class="legend-price"></i> price direction</span>
-        <span><i class="legend-band"></i> score zones</span>
+        <span><i class="legend-band"></i> signal zones</span>
       </div>
     </div>
   `;
@@ -700,7 +763,7 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previous)}</div>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Score ${fmtNumber(row.score, 1)} · ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Score ${fmtNumber(row.score, 1)} · Candle ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
@@ -712,7 +775,7 @@ function renderHistoryRows() {
           <strong>${escapeHtml(row.history_date)}</strong>
           <div>
             <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-            <span class="subtle"> ${escapeHtml(row.setup || "NONE")} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
+            <span class="subtle"> ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
             <div class="bar"><span style="width: ${Math.max(2, Math.min(100, Number(row.score) || 0))}%"></span></div>
           </div>
           <span class="num">${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
