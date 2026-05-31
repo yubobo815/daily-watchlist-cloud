@@ -656,8 +656,8 @@ function renderHistoryVisual(rows) {
   }
 
   const width = 1040;
-  const height = 260;
-  const pad = { left: 66, right: 34, top: 24, bottom: 42 };
+  const height = 220;
+  const pad = { left: 66, right: 34, top: 22, bottom: 34 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const scores = chronological.map((row) => numericValue(row, "score"));
@@ -717,11 +717,11 @@ function renderHistoryVisual(rows) {
         <strong><span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span></strong>
       </div>
       <div>
-        <span class="subtle">Score move</span>
+        <span class="subtle">30-day score move</span>
         <strong class="${scoreMove >= 0 ? "up" : "down"}">${scoreMove >= 0 ? "+" : ""}${fmtNumber(scoreMove, 1)}</strong>
       </div>
       <div>
-        <span class="subtle">Price move</span>
+        <span class="subtle">30-day price move</span>
         <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
       </div>
     </div>

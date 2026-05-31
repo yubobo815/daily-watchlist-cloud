@@ -931,6 +931,26 @@ th:first-child {
   font-weight: 650;
 }
 
+@media (min-width: 961px) {
+  .chart-note,
+  .chart-legend {
+    display: none;
+  }
+
+  .chart-heading {
+    padding-bottom: 4px;
+  }
+
+  .chart-insights {
+    gap: 6px;
+    padding: 0 12px 12px;
+  }
+
+  .chart-insights > div {
+    padding: 7px 9px;
+  }
+}
+
 .timeline h3 {
   margin: 6px 0 4px;
   font-size: 14px;
