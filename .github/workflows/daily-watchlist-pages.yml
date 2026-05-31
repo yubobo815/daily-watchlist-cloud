@@ -8,6 +8,8 @@ on:
   schedule:
     # GitHub schedules use UTC. Running at both 21:00 and 22:00 UTC lets
     # the timezone gate below handle Australia/Melbourne daylight saving.
+    # The gate accepts 08:xx and 09:xx local time so GitHub queue delays do
+    # not accidentally skip the daily refresh.
     - cron: "0 21,22 * * *"
 
 permissions:
@@ -37,7 +39,7 @@ jobs:
           fi
 
           local_hour="$(TZ=Australia/Melbourne date +%H)"
-          if [ "$local_hour" = "08" ]; then
+          if [ "$local_hour" = "08" ] || [ "$local_hour" = "09" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

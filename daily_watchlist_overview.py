@@ -10,6 +10,7 @@ from urllib.error import URLError
 from typing import Optional
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,8 @@ ETF_HINTS = {
     "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "ARKK", "SOXX", "IBB",
     "TLT", "GLD", "SLV", "USO", "DRAM",
 }
+
+RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -109,6 +112,10 @@ def read_watchlist(path: Path) -> list[str]:
             tickers.append(ticker)
             seen.add(ticker)
     return tickers
+
+
+def local_run_date() -> str:
+    return datetime.now(RUN_TIMEZONE).strftime("%Y-%m-%d")
 
 
 def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFrame:
@@ -1594,7 +1601,7 @@ def main() -> None:
     report = pd.DataFrame(rows)
     report = report.sort_values(["score", "action", "ticker"], ascending=[False, True, True]).reset_index(drop=True)
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = local_run_date()
     csv_path = Path(f"daily_watchlist_overview_{today}.csv")
     html_path = Path(f"daily_watchlist_overview_{today}.html")
     report.to_csv(csv_path, index=False)
