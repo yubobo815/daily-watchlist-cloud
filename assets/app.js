@@ -963,18 +963,31 @@ function renderHistoryRows() {
       </div>
     `).join("")}
     <details class="raw-history">
-      <summary>Show daily rows</summary>
-      ${chronological.map((row) => `
-        <div class="timeline-row">
-          <strong>${escapeHtml(row.history_date)}</strong>
-          <div>
-            <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-            <span class="subtle"> ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</span>
-            <div class="bar"><span style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
+      <summary>Show Daily Lookback</summary>
+      <div class="lookback-grid">
+      ${state.historyRows.map((row, index) => `
+        <article class="lookback-card tone-${actionKind(row.action)}">
+          <div class="lookback-date">
+            <strong>${index === 0 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</strong>
+            <span>${escapeHtml(row.history_date)}</span>
           </div>
-          <span class="num">${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
-        </div>
+          <div class="lookback-main">
+            <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+            <strong>${fmtConviction(row)}</strong>
+            <span>Conviction</span>
+          </div>
+          <div class="lookback-meta">
+            <span>${escapeHtml(setupLabel(row.setup))}</span>
+            <span>${escapeHtml(row.adaptive_mode || "Mixed")}</span>
+          </div>
+          <div class="bar"><span style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
+          <div class="lookback-price">
+            <strong>${fmtNumber(row.close, 2)}</strong>
+            ${renderMovePct(row.day_change_pct)}
+          </div>
+        </article>
       `).join("")}
+      </div>
     </details>
   `;
 }

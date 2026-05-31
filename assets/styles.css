@@ -1237,31 +1237,142 @@ th:first-child {
 .raw-history {
   margin-top: 6px;
   padding: 11px;
-  border: 1px dashed var(--line);
-  border-radius: 16px;
-  background: rgba(2, 6, 23, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.36);
 }
 
 .raw-history summary {
   cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.raw-history summary::-webkit-details-marker {
+  display: none;
+}
+
+.raw-history summary::after {
+  content: "+";
+  float: right;
   color: var(--muted);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.raw-history[open] summary::after {
+  content: "-";
+}
+
+.lookback-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.lookback-card {
+  display: grid;
+  gap: 9px;
+  min-height: 162px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--tone-avoid);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(8, 13, 23, 0.7));
+}
+
+.lookback-card.tone-buy {
+  border-top-color: var(--tone-buy);
+}
+
+.lookback-card.tone-setup {
+  border-top-color: var(--tone-setup);
+}
+
+.lookback-card.tone-watch {
+  border-top-color: var(--tone-watch);
+}
+
+.lookback-card.tone-exit {
+  border-top-color: var(--tone-exit);
+}
+
+.lookback-card.tone-avoid {
+  border-top-color: var(--tone-avoid);
+}
+
+.lookback-date {
+  display: grid;
+  gap: 2px;
+}
+
+.lookback-date strong {
+  color: var(--ink);
   font-size: 13px;
   font-weight: 650;
 }
 
-.raw-history .timeline-row {
-  margin-top: 8px;
+.lookback-date span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 620;
 }
 
-.timeline-row {
+.lookback-main {
   display: grid;
-  grid-template-columns: 98px minmax(0, 1fr) 78px;
-  gap: 10px;
+  gap: 4px;
+  justify-items: start;
+}
+
+.lookback-main strong {
+  color: var(--ink);
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
+.lookback-main > span:not(.badge) {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lookback-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.lookback-meta span {
+  padding: 3px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.08);
+  color: #c6d1df;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.lookback-price {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   align-items: center;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.82);
+  justify-content: space-between;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lookback-price strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .bar {
@@ -1348,13 +1459,17 @@ th:first-child {
     max-height: none;
   }
 
-  .timeline-row {
-    grid-template-columns: 1fr;
-  }
-
   .visual-summary,
   .moment-card {
     grid-template-columns: 1fr;
+  }
+
+  .lookback-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lookback-card {
+    min-height: 148px;
   }
 
   .latest-metrics {
