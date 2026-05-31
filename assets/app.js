@@ -65,6 +65,10 @@ const ACTION_TONE = {
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
 
+const SECURITY_NAME_FALLBACKS = {
+  CSCO: "Cisco Systems"
+};
+
 const state = {
   rows: [],
   visibleRows: [],
@@ -119,6 +123,12 @@ function moveClass(value) {
 function renderMovePct(value) {
   const text = fmtSignedNumber(value, 1);
   return text ? `<span class="move-pct ${moveClass(value)}">${text}%</span>` : "";
+}
+
+function displaySecurityName(name, ticker) {
+  const cleanName = String(name || "").trim();
+  if (cleanName && cleanName.toUpperCase() !== ticker) return cleanName;
+  return SECURITY_NAME_FALLBACKS[ticker] || "";
 }
 
 function fmtCompactDate(value) {
@@ -530,7 +540,7 @@ async function loadHistory(ticker) {
     const latest = runRows[0]?.run_date;
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
     const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
-    state.tickerName = snapshotRows[0]?.name || "";
+    state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
     document.querySelector("#history-title").textContent = `${state.ticker} History`;
     document.querySelector("#ticker-name").textContent = state.tickerName;
     document.title = state.tickerName ? `${state.ticker} History · ${state.tickerName}` : `${state.ticker} History`;

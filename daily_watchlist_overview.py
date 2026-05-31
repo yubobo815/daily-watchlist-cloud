@@ -39,6 +39,7 @@ STOCK_NAMES = {
     "COST": "Costco",
     "COHR": "Coherent",
     "CRM": "Salesforce",
+    "CSCO": "Cisco Systems",
     "CRWV": "CoreWeave",
     "DELL": "Dell Technologies",
     "DIS": "Disney",
