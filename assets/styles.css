@@ -1821,6 +1821,13 @@ body[data-page="history"] .raw-history summary {
   }
 
   body[data-page="history"] .score-explainer {
+    gap: 0;
+    padding-top: 6px;
+    border-top: 0;
+  }
+
+  body[data-page="history"] .score-explainer-head,
+  body[data-page="history"] .score-factors {
     display: none;
   }
 
@@ -1835,13 +1842,13 @@ body[data-page="history"] .raw-history summary {
   }
 
   .conviction-gauge {
-    min-height: 116px;
+    min-height: 104px;
     padding: 8px 8px 4px;
     border-radius: 18px;
   }
 
   .conviction-gauge svg {
-    width: min(100%, 190px);
+    width: min(100%, 172px);
   }
 
   .chart-insights {
