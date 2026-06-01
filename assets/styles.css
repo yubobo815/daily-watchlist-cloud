@@ -1710,21 +1710,6 @@ body[data-page="history"] .raw-history summary {
     box-shadow: inset 0 1px 0 rgba(242, 245, 236, 0.04);
   }
 
-  #watchlist-body tr::after {
-    content: "";
-    position: absolute;
-    right: 9px;
-    bottom: 7px;
-    left: 9px;
-    height: 4px;
-    overflow: hidden;
-    border-radius: 999px;
-    background:
-      linear-gradient(90deg, currentColor var(--score-pct, 0%), transparent 0),
-      rgba(242, 245, 236, 0.08);
-    opacity: 0.78;
-  }
-
   #watchlist-body tr.row-buy {
     border-top: 4px solid var(--tone-buy);
   }
@@ -1756,11 +1741,8 @@ body[data-page="history"] .raw-history summary {
   #watchlist-body td:first-child,
   #watchlist-body td:nth-child(2),
   #watchlist-body td:nth-child(3),
-  #watchlist-body td:nth-child(4),
-  #watchlist-body td:nth-child(5),
   #watchlist-body td:nth-child(6),
-  #watchlist-body td:nth-child(7),
-  #watchlist-body td:nth-child(13) {
+  #watchlist-body td:nth-child(7) {
     display: block;
     position: static;
     min-width: 0;
@@ -1786,8 +1768,6 @@ body[data-page="history"] .raw-history summary {
     margin-top: 10px;
   }
 
-  #watchlist-body td:nth-child(4),
-  #watchlist-body td:nth-child(5),
   #watchlist-body td:nth-child(6),
   #watchlist-body td:nth-child(7) {
     display: inline-flex;
@@ -1799,35 +1779,14 @@ body[data-page="history"] .raw-history summary {
     font-weight: 650;
   }
 
-  #watchlist-body td:nth-child(4)::before {
-    content: "Conviction ";
-    color: var(--muted);
-  }
-
-  #watchlist-body td:nth-child(5)::before {
-    content: "Close ";
-    color: var(--muted);
-  }
-
   #watchlist-body td:nth-child(6)::before {
-    content: "Chg ";
+    content: "Day ";
     color: var(--muted);
   }
 
   #watchlist-body td:nth-child(7)::before {
     content: "Pattern ";
     color: var(--muted);
-  }
-
-  #watchlist-body td:nth-child(13) {
-    margin-top: 7px;
-    margin-bottom: 8px;
-  }
-
-  #watchlist-body .behavior-detail {
-    max-width: none;
-    font-size: 11px;
-    line-height: 1.34;
   }
 
   .focus-item,
