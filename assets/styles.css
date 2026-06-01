@@ -955,7 +955,7 @@ th:first-child {
 
 .gauge-readout {
   position: absolute;
-  bottom: 16px;
+  bottom: 17px;
   left: 50%;
   display: flex;
   align-items: baseline;
@@ -963,17 +963,6 @@ th:first-child {
   transform: translateX(-50%);
   font-family: var(--font-data);
   font-variant-numeric: tabular-nums;
-}
-
-.gauge-readout span {
-  position: absolute;
-  bottom: 34px;
-  left: 50%;
-  color: var(--muted);
-  font-size: 8px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  transform: translateX(-50%);
 }
 
 .gauge-readout strong {

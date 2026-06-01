@@ -531,17 +531,16 @@ function renderGauge(row) {
   const band = scoreBand(gauge);
   return `
     <div class="conviction-gauge score-${band}">
-      <svg viewBox="0 0 180 104" role="img" aria-label="Conviction gauge ${fmtConviction(row)} out of 100">
+      <svg viewBox="0 0 180 104" role="img" aria-label="Conviction score ${fmtConviction(row)} out of 100">
         <path class="gauge-track" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-risk" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-weak" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-constructive" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-strong" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <line class="gauge-needle" x1="90" y1="84" x2="${point.x.toFixed(1)}" y2="${point.y.toFixed(1)}" />
-        <circle class="gauge-hub" cx="90" cy="84" r="5" />
+        <line class="gauge-needle" x1="90" y1="70" x2="${point.x.toFixed(1)}" y2="${point.y.toFixed(1)}" />
+        <circle class="gauge-hub" cx="90" cy="70" r="4.5" />
       </svg>
       <div class="gauge-readout">
-        <span>Gauge</span>
         <strong>${fmtConviction(row)}</strong>
         <small>/100</small>
       </div>
