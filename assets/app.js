@@ -1046,7 +1046,7 @@ function renderHistoryRows() {
             <span>${escapeHtml(setupLabel(row.setup))}</span>
             <span>${escapeHtml(row.adaptive_mode || "Mixed")}</span>
           </div>
-          <div class="bar"><span style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
+          <div class="bar"><span class="score-${scoreBand(convictionScore(row))}" style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
           <div class="lookback-price">
             <strong>${fmtNumber(row.close, 2)}</strong>
             ${renderMovePct(row.day_change_pct)}

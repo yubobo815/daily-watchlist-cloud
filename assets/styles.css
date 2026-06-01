@@ -2337,3 +2337,157 @@ body[data-page="history"] .lookback-meta span {
 body[data-page="history"] .lookback-card .badge {
   border: 0;
 }
+
+/* Product cleanup pass: fewer wrappers, softer controls, and denser movement cards. */
+.shell::before {
+  display: none;
+}
+
+.shell {
+  padding-top: 18px;
+}
+
+.button,
+.chip,
+.control,
+.search,
+.ticker-input,
+.status,
+.status.bad {
+  border-radius: 16px;
+}
+
+.status,
+.status.bad {
+  padding: 8px 12px;
+  border-color: var(--line-soft);
+  background: rgba(242, 184, 75, 0.1);
+  box-shadow: none;
+}
+
+.cards {
+  gap: 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.card {
+  border: 1px solid var(--line-soft);
+  border-top: 4px solid var(--tone-avoid);
+  border-radius: 20px;
+  background: rgba(16, 21, 29, 0.62);
+}
+
+.controls {
+  grid-template-columns: minmax(230px, 1fr) auto auto auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.search,
+.control,
+.chip {
+  border: 1px solid var(--line-soft);
+  background: rgba(16, 21, 29, 0.72);
+}
+
+.today-focus,
+.changed-today {
+  padding: 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.focus-grid,
+.change-grid {
+  gap: 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.focus-item,
+.change-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: rgba(16, 21, 29, 0.58);
+}
+
+.focus-item,
+.change-card {
+  min-height: 0;
+}
+
+.change-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.change-card {
+  gap: 8px;
+  padding: 11px;
+}
+
+.change-chips {
+  gap: 5px;
+}
+
+.change-chip {
+  min-height: 23px;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+body[data-page="history"] .actions {
+  min-width: 0;
+}
+
+body[data-page="history"] .actions .button {
+  padding: 9px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: rgba(21, 27, 37, 0.72);
+}
+
+body[data-page="history"] .ticker-input {
+  border: 1px solid var(--line-soft);
+  box-shadow: none;
+}
+
+.bar > span.score-strong {
+  background: linear-gradient(90deg, #28d38d, #6df0b0);
+}
+
+.bar > span.score-constructive {
+  background: linear-gradient(90deg, #4d8dff, #72a9ff);
+}
+
+.bar > span.score-weak {
+  background: linear-gradient(90deg, #d79a23, #f2b84b);
+}
+
+.bar > span.score-risk {
+  background: linear-gradient(90deg, #e85c53, #ff7167);
+}
+
+@media (max-width: 960px) {
+  .controls {
+    display: grid;
+    gap: 8px;
+  }
+
+  .focus-grid,
+  .change-grid {
+    border-bottom: 0;
+  }
+
+  .focus-item,
+  .change-card {
+    border: 1px solid var(--line-soft);
+  }
+}
