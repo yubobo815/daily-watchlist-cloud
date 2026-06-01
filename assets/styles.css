@@ -1982,32 +1982,60 @@ body[data-page="history"] .raw-history summary {
   }
 
   .lookback-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
   }
 
   .lookback-card {
-    gap: 7px;
-    min-height: 120px;
-    padding: 9px;
-    border-top-width: 3px;
-    border-radius: 16px;
+    gap: 4px;
+    min-height: 94px;
+    padding: 6px;
+    border-top-width: 2px;
+    border-radius: 12px;
   }
 
   .lookback-date strong {
-    font-size: 12px;
-  }
-
-  .lookback-main strong {
-    font-size: 22px;
-  }
-
-  .lookback-meta span {
     font-size: 9px;
   }
 
+  .lookback-date span {
+    display: none;
+  }
+
+  .lookback-main strong {
+    font-size: 17px;
+  }
+
+  .lookback-meta span {
+    padding: 1px 4px;
+    font-size: 7px;
+  }
+
   .lookback-price strong {
-    font-size: 12px;
+    font-size: 9px;
+  }
+
+  .lookback-main {
+    gap: 2px;
+  }
+
+  .lookback-main > span:not(.badge) {
+    display: none;
+  }
+
+  .lookback-price {
+    gap: 3px;
+  }
+
+  .lookback-card .badge,
+  .lookback-card .move-pct {
+    min-height: 15px;
+    padding: 1px 4px;
+    font-size: 7px;
+  }
+
+  .lookback-card .bar {
+    height: 3px;
   }
 
   .app-tabbar {
@@ -2091,12 +2119,12 @@ body[data-page="history"] .raw-history summary {
   }
 
   .lookback-grid {
-    gap: 6px;
+    gap: 4px;
   }
 
   .lookback-card {
-    min-height: 112px;
-    padding: 8px;
+    min-height: 88px;
+    padding: 5px;
   }
 
   .app-tabbar {

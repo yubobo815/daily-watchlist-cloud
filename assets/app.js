@@ -1069,7 +1069,7 @@ function renderHistoryRows() {
         </div>
       </div>
     `).join("")}
-    <details class="raw-history">
+    <details class="raw-history" open>
       <summary>Show Daily Lookback</summary>
       <div class="lookback-grid">
       ${state.historyRows.map((row, index) => `
