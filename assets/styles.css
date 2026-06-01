@@ -1568,37 +1568,37 @@ th:first-child {
   }
 }
 
-/* Paper-terminal theme inspired by compact market dashboards. */
+/* Dark terminal theme inspired by compact market dashboards. */
 :root {
-  --bg: #f4efe3;
-  --ink: #191711;
-  --muted: #766f62;
-  --line: rgba(25, 23, 17, 0.92);
-  --panel: #fbf8ef;
-  --strong: #fffdf6;
-  --buy: rgba(0, 150, 95, 0.1);
-  --setup: rgba(204, 130, 0, 0.12);
-  --watch: rgba(28, 88, 160, 0.1);
-  --exit: rgba(186, 48, 38, 0.1);
-  --avoid: rgba(25, 23, 17, 0.04);
-  --tone-buy: #078a5c;
-  --tone-setup: #b87500;
-  --tone-watch: #245da5;
-  --tone-exit: #b8322a;
-  --tone-avoid: #736c60;
-  --shadow: 6px 6px 0 rgba(25, 23, 17, 0.12);
+  --bg: #070a0f;
+  --ink: #f2f5ec;
+  --muted: #a9b1a7;
+  --line: rgba(226, 232, 218, 0.72);
+  --panel: #10151d;
+  --strong: #151b25;
+  --buy: rgba(31, 185, 127, 0.14);
+  --setup: rgba(230, 165, 51, 0.15);
+  --watch: rgba(92, 157, 245, 0.14);
+  --exit: rgba(240, 83, 72, 0.15);
+  --avoid: rgba(226, 232, 218, 0.05);
+  --tone-buy: #2ee69f;
+  --tone-setup: #f2b84b;
+  --tone-watch: #72a9ff;
+  --tone-exit: #ff7167;
+  --tone-avoid: #a9b1a7;
+  --shadow: 7px 7px 0 rgba(0, 0, 0, 0.42);
   --font-app: "Avenir Next", "Gill Sans", ui-sans-serif, system-ui, sans-serif;
   --font-data: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-display: Georgia, "Times New Roman", serif;
+  --font-display: var(--font-app);
 }
 
 body {
   color: var(--ink);
   background:
-    linear-gradient(rgba(25, 23, 17, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(25, 23, 17, 0.035) 1px, transparent 1px),
-    radial-gradient(circle at 14% 4%, rgba(7, 138, 92, 0.08), transparent 28%),
-    radial-gradient(circle at 90% 0%, rgba(36, 93, 165, 0.08), transparent 32%),
+    linear-gradient(rgba(226, 232, 218, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(226, 232, 218, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 14% 4%, rgba(46, 230, 159, 0.13), transparent 28%),
+    radial-gradient(circle at 90% 0%, rgba(114, 169, 255, 0.12), transparent 32%),
     var(--bg);
   background-size: 28px 28px, 28px 28px, auto, auto, auto;
 }
@@ -1611,7 +1611,7 @@ body {
   padding: 18px;
   border-right: 2px solid var(--line);
   border-left: 2px solid var(--line);
-  background: rgba(251, 248, 239, 0.72);
+  background: rgba(7, 10, 15, 0.78);
 }
 
 .shell::before {
@@ -1649,7 +1649,7 @@ body {
   border: 2px solid var(--line);
   border-radius: 12px;
   background: #081327;
-  box-shadow: 3px 3px 0 rgba(25, 23, 17, 0.16);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.38);
 }
 
 .brand-name {
@@ -1713,7 +1713,7 @@ h2,
 .search,
 .ticker-input {
   border: 2px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--strong);
   color: var(--ink);
   box-shadow: none;
@@ -1721,16 +1721,16 @@ h2,
 
 .status,
 .status.bad {
-  background: #fff1cf;
-  color: #8a3e00;
+  background: rgba(242, 184, 75, 0.16);
+  color: #ffe0a1;
   font-family: var(--font-data);
   font-size: 12px;
 }
 
 .button.primary,
 .chip.active {
-  background: var(--ink);
-  color: var(--panel);
+  background: #f2f5ec;
+  color: #070a0f;
 }
 
 .cards {
@@ -1767,7 +1767,7 @@ h2,
 
 .card.active {
   outline: 0;
-  background: #fff4d8;
+  background: rgba(242, 245, 236, 0.08);
 }
 
 .card span,
@@ -1867,24 +1867,24 @@ h2,
 .badge.buy,
 .change-chip.up,
 .move-pct.up {
-  background: rgba(7, 138, 92, 0.12);
+  background: rgba(46, 230, 159, 0.14);
   color: var(--tone-buy);
 }
 
 .badge.setup {
-  background: rgba(184, 117, 0, 0.13);
+  background: rgba(242, 184, 75, 0.16);
   color: var(--tone-setup);
 }
 
 .badge.watch {
-  background: rgba(36, 93, 165, 0.13);
+  background: rgba(114, 169, 255, 0.16);
   color: var(--tone-watch);
 }
 
 .badge.exit,
 .change-chip.down,
 .move-pct.down {
-  background: rgba(184, 50, 42, 0.12);
+  background: rgba(255, 113, 103, 0.16);
   color: var(--tone-exit);
 }
 
@@ -1899,13 +1899,13 @@ table {
 
 th,
 td {
-  border-bottom: 1px solid rgba(25, 23, 17, 0.22);
+  border-bottom: 1px solid rgba(226, 232, 218, 0.14);
   background: inherit;
 }
 
 th {
-  background: var(--ink);
-  color: var(--panel);
+  background: #f2f5ec;
+  color: #070a0f;
   font-family: var(--font-data);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1917,12 +1917,12 @@ td:first-child {
 }
 
 th:first-child {
-  background: var(--ink);
+  background: #f2f5ec;
 }
 
 .ticker-link,
 .company-facts a {
-  color: #164b8f;
+  color: #9fc4ff;
 }
 
 .panel {
@@ -1979,16 +1979,16 @@ th:first-child {
 }
 
 .chart-card {
-  background: #fffaf0;
+  background: #0d1219;
 }
 
 .plot-bg {
-  fill: #fffaf0;
-  stroke: rgba(25, 23, 17, 0.4);
+  fill: #0d1219;
+  stroke: rgba(226, 232, 218, 0.28);
 }
 
 .chart-grid {
-  stroke: rgba(25, 23, 17, 0.16);
+  stroke: rgba(226, 232, 218, 0.13);
 }
 
 .history-chart text,
