@@ -32,21 +32,6 @@ const WATCHLIST_COLUMNS = [
   ["notes", "Behavior Note"]
 ];
 
-const HISTORY_COLUMNS = [
-  "history_date",
-  "action",
-  "setup",
-  "adaptive_mode",
-  "psychology",
-  "score",
-  "close",
-  "day_change_pct",
-  "entry_est",
-  "stop_est",
-  "target_est",
-  "notes"
-];
-
 const SUMMARY_CARDS = [
   ["buy", "BUY"],
   ["setup", "SETUP"],
@@ -627,25 +612,6 @@ function renderHistoryChangeChips(row, previous) {
   return chips.join(" ") || `<span class="change-chip quiet">Steady</span>`;
 }
 
-function csvEscape(value) {
-  const text = value === null || value === undefined ? "" : String(value);
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function downloadCsv(filename, rows, columns) {
-  const csv = [
-    columns.join(","),
-    ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(","))
-  ].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 function setStatus(message, ok = true) {
   const status = document.querySelector("#status");
   const runStatus = document.querySelector("#run-status");
@@ -695,11 +661,6 @@ async function supabaseFetch(path) {
     throw new Error(`Supabase returned HTTP ${response.status}.`);
   }
   return response.json();
-}
-
-async function latestRunDate() {
-  const rows = await supabaseFetch("watchlist_snapshots?select=run_date&order=run_date.desc&limit=1");
-  return rows[0]?.run_date || null;
 }
 
 async function recentRunDates(limit = 2) {
@@ -895,13 +856,6 @@ async function initWatchlist() {
     document.querySelector("#all-filter").classList.add("active");
     renderWatchlist();
   });
-  const downloadButton = document.querySelector("#download-csv");
-  if (downloadButton) {
-    downloadButton.addEventListener("click", () => {
-      downloadCsv("daily_watchlist_vercel.csv", state.visibleRows, WATCHLIST_COLUMNS.map(([key]) => key));
-    });
-  }
-
   try {
     const [latest, previous] = await recentRunDates(2);
     if (!latest) throw new Error("No Supabase run found yet.");
@@ -1167,12 +1121,6 @@ function initHistory() {
     event.preventDefault();
     loadHistory(document.querySelector("#ticker").value);
   });
-  const downloadButton = document.querySelector("#download-csv");
-  if (downloadButton) {
-    downloadButton.addEventListener("click", () => {
-      downloadCsv(`${state.ticker}_history.csv`, state.historyRows, HISTORY_COLUMNS);
-    });
-  }
   loadHistory(ticker);
 }
 
