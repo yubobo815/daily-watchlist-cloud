@@ -697,7 +697,7 @@ function renderWatchlistCell(row, key) {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
   if (key === "score") return escapeHtml(fmtConviction(row));
-  if (key === "day_change_pct") return escapeHtml(fmtNumber(row[key], 1));
+  if (key === "day_change_pct") return escapeHtml(`${fmtSignedNumber(row[key], 1)}%`);
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }

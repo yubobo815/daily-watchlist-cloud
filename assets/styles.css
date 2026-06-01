@@ -1702,6 +1702,10 @@ body[data-page="history"] .raw-history summary {
 
   #watchlist-body tr {
     position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0;
     padding: 9px;
     overflow: hidden;
     border: 1px solid var(--line-soft);
@@ -1741,6 +1745,7 @@ body[data-page="history"] .raw-history summary {
   #watchlist-body td:first-child,
   #watchlist-body td:nth-child(2),
   #watchlist-body td:nth-child(3),
+  #watchlist-body td:nth-child(4),
   #watchlist-body td:nth-child(6),
   #watchlist-body td:nth-child(7) {
     display: block;
@@ -1749,12 +1754,14 @@ body[data-page="history"] .raw-history summary {
   }
 
   #watchlist-body td:first-child {
-    float: left;
+    order: 1;
     margin-right: 7px;
     font-size: 14px;
   }
 
   #watchlist-body td:nth-child(2) {
+    order: 2;
+    flex: 1 1 calc(100% - 58px);
     overflow: hidden;
     color: var(--muted);
     font-family: var(--font-app);
@@ -1764,8 +1771,12 @@ body[data-page="history"] .raw-history summary {
   }
 
   #watchlist-body td:nth-child(3) {
-    clear: both;
+    order: 3;
     margin-top: 10px;
+  }
+
+  #watchlist-body td:nth-child(4) {
+    order: 6;
   }
 
   #watchlist-body td:nth-child(6),
@@ -1779,14 +1790,12 @@ body[data-page="history"] .raw-history summary {
     font-weight: 650;
   }
 
-  #watchlist-body td:nth-child(6)::before {
-    content: "Day ";
-    color: var(--muted);
+  #watchlist-body td:nth-child(6) {
+    order: 4;
   }
 
-  #watchlist-body td:nth-child(7)::before {
-    content: "Pattern ";
-    color: var(--muted);
+  #watchlist-body td:nth-child(7) {
+    order: 5;
   }
 
   .focus-item,
