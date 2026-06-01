@@ -12,8 +12,8 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=signal-filter-20260602">
-    <script defer src="./assets/app.js?v=signal-filter-20260602"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=bottom-nav-fix-20260602">
+    <script defer src="./assets/app.js?v=bottom-nav-fix-20260602"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -38,14 +38,6 @@
 
       <section class="controls">
         <input id="search" class="search" placeholder="Search ticker, candle behavior, note, mode...">
-        <div id="signal-filter" class="signal-filter" aria-label="Filter by signal">
-          <button class="chip active" type="button" data-signal-filter="all">All</button>
-          <button class="chip" type="button" data-signal-filter="buy">BUY</button>
-          <button class="chip" type="button" data-signal-filter="setup">Setup</button>
-          <button class="chip" type="button" data-signal-filter="watch">Watch</button>
-          <button class="chip" type="button" data-signal-filter="exit">Exit</button>
-          <button class="chip" type="button" data-signal-filter="avoid">Avoid</button>
-        </div>
         <select id="sort" class="control">
           <option value="score-desc">Conviction high to low</option>
           <option value="day_change_pct-desc">Best day change</option>

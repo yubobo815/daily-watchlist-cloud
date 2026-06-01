@@ -386,36 +386,6 @@ body[data-page="watchlist"] .meta {
   grid-row: 1;
 }
 
-.signal-filter {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.signal-filter .chip {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border-radius: 999px;
-}
-
-.signal-filter .chip strong {
-  color: var(--ink);
-  font-family: var(--font-data);
-  font-size: 11px;
-}
-
-.signal-filter .chip.active {
-  border-color: rgba(46, 230, 159, 0.42);
-  background: rgba(46, 230, 159, 0.12);
-  color: var(--tone-buy);
-}
-
 .count {
   grid-column: 3;
   grid-row: 1;
@@ -1669,36 +1639,6 @@ body[data-page="history"] .raw-history summary {
   .control {
     grid-column: 1 / -1;
     grid-row: auto;
-  }
-
-  .signal-filter {
-    grid-column: 1 / -1;
-    grid-row: auto;
-    flex-wrap: nowrap;
-    gap: 6px;
-    margin-right: -8px;
-    padding-right: 8px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .signal-filter::-webkit-scrollbar {
-    display: none;
-  }
-
-  .signal-filter .chip {
-    flex: 0 0 auto;
-    min-height: 32px;
-    padding: 5px 9px;
-    font-size: 10px;
-  }
-
-  .signal-filter .chip strong {
-    font-size: 10px;
-  }
-
-  .count {
-    display: none;
   }
 
   .search,

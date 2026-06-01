@@ -40,15 +40,6 @@ const SUMMARY_CARDS = [
   ["avoid", "AVOID"]
 ];
 
-const SIGNAL_FILTERS = [
-  ["all", "All"],
-  ["buy", "BUY"],
-  ["setup", "Setup"],
-  ["watch", "Watch"],
-  ["exit", "Exit"],
-  ["avoid", "Avoid"]
-];
-
 const ACTION_TONE = {
   buy: "#0f8a5f",
   setup: "#b7791f",
@@ -728,19 +719,6 @@ function renderCards(counts) {
   });
 }
 
-function renderSignalFilters(counts) {
-  const filters = document.querySelector("#signal-filter");
-  if (!filters) return;
-  const total = state.rows.length;
-  filters.querySelectorAll("[data-signal-filter]").forEach((button) => {
-    const kind = button.dataset.signalFilter;
-    const label = SIGNAL_FILTERS.find(([value]) => value === kind)?.[1] || kind;
-    const count = kind === "all" ? total : counts[kind] || 0;
-    button.classList.toggle("active", state.filter === kind);
-    button.innerHTML = `<span>${label}</span><strong>${count}</strong>`;
-  });
-}
-
 function securityDisplay(row) {
   const name = displaySecurityName(row.name, row.ticker);
   return name ? `${row.ticker} · ${name}` : row.ticker;
@@ -849,7 +827,6 @@ function renderWatchlist() {
     counts[actionKind(row.action)] += 1;
   });
   renderCards(counts);
-  renderSignalFilters(counts);
   renderTodayFocus();
   renderChangedToday();
 
@@ -875,6 +852,28 @@ function renderWatchlist() {
   document.querySelector("#empty").classList.toggle("hidden", state.visibleRows.length > 0);
 }
 
+function initTabNavigation() {
+  const tabs = [...document.querySelectorAll(".app-tabbar a")];
+  if (!tabs.length) return;
+  const setActive = (hash) => {
+    tabs.forEach((tab) => tab.classList.toggle("active", tab.getAttribute("href") === hash));
+  };
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", (event) => {
+      const hash = tab.getAttribute("href");
+      const target = hash ? document.querySelector(hash) : null;
+      if (!target) return;
+      event.preventDefault();
+      setActive(hash);
+      const stickyOffset = window.matchMedia("(max-width: 960px)").matches ? 150 : 24;
+      const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY - stickyOffset);
+      window.history.replaceState(null, "", hash);
+      window.scrollTo({ top, behavior: "smooth" });
+    });
+  });
+  if (window.location.hash) setActive(window.location.hash);
+}
+
 async function initWatchlist() {
   document.querySelector("#search").addEventListener("input", (event) => {
     state.query = event.target.value;
@@ -884,12 +883,7 @@ async function initWatchlist() {
     state.sort = event.target.value;
     renderWatchlist();
   });
-  document.querySelectorAll("[data-signal-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.filter = button.dataset.signalFilter || "all";
-      renderWatchlist();
-    });
-  });
+  initTabNavigation();
   try {
     const [latest, previous] = await recentRunDates(2);
     if (!latest) throw new Error("No Supabase run found yet.");
