@@ -908,6 +908,8 @@ function renderHistoryVisual(rows) {
   const latest = chronological.at(-1);
   const first = chronological[0];
   const priceMove = numericValue(latest, "close") - numericValue(first, "close");
+  const firstClose = numericValue(first, "close");
+  const priceMovePct = firstClose ? (priceMove / firstClose) * 100 : 0;
   const signalCounts = chronological.reduce((counts, row) => {
     const kind = actionKind(row.action);
     counts[kind] = (counts[kind] || 0) + 1;
@@ -947,7 +949,10 @@ function renderHistoryVisual(rows) {
       </div>
       <div>
         <span class="subtle">30-day price move</span>
-        <strong class="${priceMove >= 0 ? "up" : "down"}">${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}</strong>
+        <strong class="${priceMove >= 0 ? "up" : "down"}">
+          ${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}
+          <span>${fmtSignedNumber(priceMovePct, 1)}%</span>
+        </strong>
       </div>
     </div>
     <details class="chart-details">
