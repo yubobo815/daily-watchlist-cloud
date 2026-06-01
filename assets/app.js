@@ -691,13 +691,13 @@ function renderWatchlistCell(row, key) {
     return `<span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`;
   }
   if (key === "setup") {
-    return `<span class="pattern-label">${escapeHtml(setupLabel(row.setup))}</span>`;
+    return `<span class="badge pattern-pill">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
   if (key === "notes") {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
-  if (key === "score") return escapeHtml(fmtConviction(row));
-  if (key === "day_change_pct") return escapeHtml(`${fmtSignedNumber(row[key], 1)}%`);
+  if (key === "score") return `<span class="badge conviction-pill">${escapeHtml(fmtConviction(row))}</span>`;
+  if (key === "day_change_pct") return renderMovePct(row[key]);
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }

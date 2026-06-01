@@ -670,6 +670,16 @@ th:first-child {
   color: #cbd5e1;
 }
 
+.badge.pattern-pill,
+.badge.conviction-pill {
+  background: var(--panel-strong);
+  color: var(--ink);
+}
+
+.badge.conviction-pill {
+  min-width: 38px;
+}
+
 .change-chip.signal {
   background: rgba(46, 230, 159, 0.1);
 }
@@ -1705,7 +1715,7 @@ body[data-page="history"] .raw-history summary {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0;
+    gap: 0 7px;
     padding: 9px;
     overflow: hidden;
     border: 1px solid var(--line-soft);
@@ -1777,13 +1787,13 @@ body[data-page="history"] .raw-history summary {
 
   #watchlist-body td:nth-child(4) {
     order: 6;
+    margin-top: 8px;
   }
 
   #watchlist-body td:nth-child(6),
   #watchlist-body td:nth-child(7) {
     display: inline-flex;
     margin-top: 8px;
-    margin-right: 8px;
     color: var(--ink);
     font-family: var(--font-data);
     font-size: 11px;
@@ -1796,6 +1806,14 @@ body[data-page="history"] .raw-history summary {
 
   #watchlist-body td:nth-child(7) {
     order: 5;
+  }
+
+  #watchlist-body .badge,
+  #watchlist-body .move-pct {
+    min-height: 23px;
+    padding: 3px 8px;
+    font-size: 10px;
+    letter-spacing: 0.01em;
   }
 
   .focus-item,
