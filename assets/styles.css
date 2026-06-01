@@ -560,6 +560,11 @@ body[data-page="watchlist"] .meta {
   box-shadow: var(--shadow);
 }
 
+.watchlist-heading {
+  margin: 0;
+  padding: 12px 13px 0;
+}
+
 table {
   width: 100%;
   border-collapse: separate;
@@ -1701,6 +1706,11 @@ body[data-page="history"] .raw-history summary {
     border-radius: 0;
     background: transparent;
     box-shadow: none;
+  }
+
+  .watchlist-heading {
+    margin: 10px 0 6px;
+    padding: 0;
   }
 
   table,
