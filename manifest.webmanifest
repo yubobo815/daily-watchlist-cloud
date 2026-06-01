@@ -1,0 +1,26 @@
+{
+  "name": "Daily Trade Copilot",
+  "short_name": "Trade Copilot",
+  "description": "Daily scanner watchlist and ticker behavior history.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#070a0f",
+  "theme_color": "#070a0f",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/brand/app-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/brand/apple-touch-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

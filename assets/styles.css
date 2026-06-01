@@ -1395,9 +1395,13 @@ body[data-page="history"] .raw-history summary {
   display: none;
 }
 
+.app-tabbar {
+  display: none;
+}
+
 @media (max-width: 960px) {
   .shell {
-    padding: 10px;
+    padding: 10px 10px calc(82px + env(safe-area-inset-bottom));
     border-right: 0;
     border-left: 0;
   }
@@ -1408,27 +1412,68 @@ body[data-page="history"] .raw-history summary {
   }
 
   .hero {
-    padding: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 12px;
+    border-color: var(--line-soft);
+    background: rgba(7, 10, 15, 0.84);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(18px);
   }
 
   h1,
   body[data-page="watchlist"] h1,
   body[data-page="history"] h1 {
-    font-size: 30px;
+    font-size: 25px;
+    letter-spacing: -0.018em;
+  }
+
+  .brand {
+    gap: 9px;
+    margin-bottom: 10px;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
   }
 
   .brand-name {
-    font-size: 16px;
+    font-size: 15px;
+  }
+
+  .brand-subtitle {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+  }
+
+  .meta {
+    margin-top: 9px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .status {
+    max-width: 100%;
+    padding: 7px 10px;
+    overflow: hidden;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .cards {
-    grid-template-columns: repeat(5, minmax(58px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
+    margin-top: 10px;
   }
 
   .card {
-    min-height: 60px;
-    padding: 9px 7px;
+    min-height: 58px;
+    padding: 9px 6px;
+    border-radius: 16px;
   }
 
   .card span {
@@ -1438,13 +1483,19 @@ body[data-page="history"] .raw-history summary {
   }
 
   .card strong {
-    font-size: 22px;
+    font-size: 21px;
   }
 
   .controls {
+    position: sticky;
+    top: 114px;
+    z-index: 7;
     display: grid;
     grid-template-columns: 1fr;
     gap: 8px;
+    padding: 8px 0 10px;
+    background: linear-gradient(180deg, rgba(7, 10, 15, 0.94), rgba(7, 10, 15, 0.78));
+    backdrop-filter: blur(16px);
   }
 
   .controls > * {
@@ -1453,6 +1504,15 @@ body[data-page="history"] .raw-history summary {
 
   .count {
     text-align: left;
+  }
+
+  .search,
+  .control,
+  .chip,
+  .button,
+  .ticker-input {
+    min-height: 44px;
+    border-radius: 16px;
   }
 
   .section-heading {
@@ -1466,6 +1526,138 @@ body[data-page="history"] .raw-history summary {
 
   .table-wrap {
     max-height: none;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  table,
+  thead,
+  tbody,
+  tr,
+  td {
+    display: block;
+  }
+
+  thead {
+    display: none;
+  }
+
+  #watchlist-body {
+    display: grid;
+    gap: 10px;
+  }
+
+  #watchlist-body tr {
+    padding: 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: 20px;
+    background: rgba(16, 21, 29, 0.7);
+    box-shadow: inset 0 1px 0 rgba(242, 245, 236, 0.04);
+  }
+
+  #watchlist-body tr.row-buy {
+    border-top: 4px solid var(--tone-buy);
+  }
+
+  #watchlist-body tr.row-setup {
+    border-top: 4px solid var(--tone-setup);
+  }
+
+  #watchlist-body tr.row-watch {
+    border-top: 4px solid var(--tone-watch);
+  }
+
+  #watchlist-body tr.row-exit {
+    border-top: 4px solid var(--tone-exit);
+  }
+
+  #watchlist-body tr.row-avoid {
+    border-top: 4px solid var(--tone-avoid);
+  }
+
+  #watchlist-body td {
+    display: none;
+    padding: 0;
+    border: 0;
+    white-space: normal;
+    background: transparent;
+  }
+
+  #watchlist-body td:first-child,
+  #watchlist-body td:nth-child(2),
+  #watchlist-body td:nth-child(3),
+  #watchlist-body td:nth-child(4),
+  #watchlist-body td:nth-child(5),
+  #watchlist-body td:nth-child(6),
+  #watchlist-body td:nth-child(7),
+  #watchlist-body td:nth-child(13) {
+    display: block;
+    position: static;
+    min-width: 0;
+  }
+
+  #watchlist-body td:first-child {
+    float: left;
+    margin-right: 8px;
+    font-size: 17px;
+  }
+
+  #watchlist-body td:nth-child(2) {
+    overflow: hidden;
+    color: var(--muted);
+    font-family: var(--font-app);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #watchlist-body td:nth-child(3) {
+    clear: both;
+    margin-top: 12px;
+  }
+
+  #watchlist-body td:nth-child(4),
+  #watchlist-body td:nth-child(5),
+  #watchlist-body td:nth-child(6),
+  #watchlist-body td:nth-child(7) {
+    display: inline-flex;
+    margin-top: 10px;
+    margin-right: 10px;
+    color: var(--ink);
+    font-family: var(--font-data);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  #watchlist-body td:nth-child(4)::before {
+    content: "Conviction ";
+    color: var(--muted);
+  }
+
+  #watchlist-body td:nth-child(5)::before {
+    content: "Close ";
+    color: var(--muted);
+  }
+
+  #watchlist-body td:nth-child(6)::before {
+    content: "Chg ";
+    color: var(--muted);
+  }
+
+  #watchlist-body td:nth-child(7)::before {
+    content: "Pattern ";
+    color: var(--muted);
+  }
+
+  #watchlist-body td:nth-child(13) {
+    margin-top: 10px;
+  }
+
+  #watchlist-body .behavior-detail {
+    max-width: none;
   }
 
   .company-facts,
@@ -1489,5 +1681,85 @@ body[data-page="history"] .raw-history summary {
 
   .lookback-card {
     min-height: 148px;
+  }
+
+  .app-tabbar {
+    position: fixed;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: 10px;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    padding: 7px;
+    border: 1px solid var(--line-soft);
+    border-radius: 22px;
+    background: rgba(7, 10, 15, 0.84);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.44);
+    backdrop-filter: blur(20px);
+  }
+
+  .app-tabbar a {
+    display: grid;
+    min-height: 42px;
+    place-items: center;
+    border-radius: 16px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .app-tabbar a.active {
+    background: rgba(242, 245, 236, 0.1);
+    color: var(--ink);
+  }
+}
+
+@media (display-mode: standalone) {
+  body {
+    overscroll-behavior-y: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  input,
+  textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .shell {
+    min-height: 100dvh;
+  }
+}
+
+@media (max-width: 420px) {
+  .shell {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .hero {
+    border-radius: 20px;
+  }
+
+  .cards {
+    gap: 5px;
+  }
+
+  .card span {
+    font-size: 8px;
+  }
+
+  .card strong {
+    font-size: 19px;
+  }
+
+  .focus-item,
+  .change-card,
+  #watchlist-body tr {
+    border-radius: 18px;
   }
 }

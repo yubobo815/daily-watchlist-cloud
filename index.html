@@ -5,10 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Daily Trade Copilot</title>
     <meta name="description" content="Daily trading copilot powered by Supabase watchlist data.">
+    <meta name="theme-color" content="#070a0f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Trade Copilot">
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
-    <link rel="stylesheet" href="./assets/styles.css?v=clean-theme-20260601">
-    <script defer src="./assets/app.js?v=clean-theme-20260601"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="stylesheet" href="./assets/styles.css?v=pwa-app-20260601">
+    <script defer src="./assets/app.js?v=pwa-app-20260601"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -47,7 +52,7 @@
 
       <section id="changed-today" class="changed-today"></section>
 
-      <section class="table-wrap">
+      <section id="watchlist-table" class="table-wrap">
         <table>
           <thead id="watchlist-head"></thead>
           <tbody id="watchlist-body"></tbody>
@@ -55,5 +60,11 @@
         <div id="empty" class="empty hidden">No matching rows yet.</div>
       </section>
     </main>
+    <nav class="app-tabbar" aria-label="App navigation">
+      <a href="#cards" class="active"><span>Focus</span></a>
+      <a href="#today-focus"><span>Today</span></a>
+      <a href="#changed-today"><span>Changes</span></a>
+      <a href="#watchlist-table"><span>List</span></a>
+    </nav>
   </body>
 </html>

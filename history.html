@@ -5,10 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Ticker Detail</title>
     <meta name="description" content="30-day watchlist behavior history by ticker.">
+    <meta name="theme-color" content="#070a0f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Trade Copilot">
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
-    <link rel="stylesheet" href="./assets/styles.css?v=clean-theme-20260601">
-    <script defer src="./assets/app.js?v=clean-theme-20260601"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="stylesheet" href="./assets/styles.css?v=pwa-app-20260601">
+    <script defer src="./assets/app.js?v=pwa-app-20260601"></script>
   </head>
   <body data-page="history">
     <main class="shell">
@@ -31,7 +36,7 @@
       </section>
 
       <section class="history-grid">
-        <aside class="panel">
+        <aside id="snapshot" class="panel">
           <form id="ticker-form">
             <label class="subtle" for="ticker">Ticker</label>
             <input id="ticker" class="ticker-input" autocomplete="off">
@@ -40,7 +45,7 @@
           <div id="latest-panel" class="timeline"></div>
         </aside>
 
-        <section class="panel">
+        <section id="behavior" class="panel">
           <h2>Behavior Journey</h2>
           <div id="history-visual" class="history-visual">
             <div class="empty">Loading visual history...</div>
@@ -51,5 +56,11 @@
         </section>
       </section>
     </main>
+    <nav class="app-tabbar" aria-label="App navigation">
+      <a href="./"><span>Home</span></a>
+      <a href="#snapshot" class="active"><span>Signal</span></a>
+      <a href="#behavior"><span>Journey</span></a>
+      <a href="#timeline"><span>Lookback</span></a>
+    </nav>
   </body>
 </html>
