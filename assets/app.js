@@ -517,7 +517,6 @@ function dailyChangeItems(rows, previousRows) {
 }
 
 function renderScoreBreakdown(row) {
-  const trend = Number(payloadValue(row, "trend_efficiency"));
   const atrPct = Number(payloadValue(row, "atr_pct"));
   const buyer = Number(payloadValue(row, "buyer_score"));
   const seller = Number(payloadValue(row, "seller_score"));
@@ -528,10 +527,9 @@ function renderScoreBreakdown(row) {
     ["Volume", volume],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
     ["Pattern", setupLabel(row.setup)],
-    ["Conviction", `${fmtConviction(row)}/100`],
-    ["Raw Rank", fmtNumber(row.score, 1)]
+    ["Gauge", `${fmtConviction(row)}/100`]
   ];
-  const trendWidth = Number.isFinite(trend) ? Math.max(4, Math.min(100, trend * 100)) : 4;
+  const gaugeWidth = Math.max(4, Math.min(100, convictionScore(row)));
   return `
     <div class="score-explainer">
       <div class="score-explainer-head">
@@ -546,8 +544,8 @@ function renderScoreBreakdown(row) {
           </div>
         `).join("")}
       </div>
-      <div class="trend-meter" aria-label="Trend efficiency">
-        <span style="width: ${trendWidth}%"></span>
+      <div class="trend-meter" aria-label="Conviction gauge">
+        <span style="width: ${gaugeWidth}%"></span>
       </div>
     </div>
   `;
