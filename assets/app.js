@@ -516,6 +516,39 @@ function dailyChangeItems(rows, previousRows) {
     .slice(0, 8);
 }
 
+function gaugePoint(score, radius = 58) {
+  const clamped = Math.max(0, Math.min(100, score));
+  const angle = Math.PI + (clamped / 100) * Math.PI;
+  return {
+    x: 90 + radius * Math.cos(angle),
+    y: 84 + radius * Math.sin(angle)
+  };
+}
+
+function renderGauge(row) {
+  const gauge = convictionScore(row);
+  const point = gaugePoint(gauge);
+  const band = scoreBand(gauge);
+  return `
+    <div class="conviction-gauge score-${band}">
+      <svg viewBox="0 0 180 104" role="img" aria-label="Conviction gauge ${fmtConviction(row)} out of 100">
+        <path class="gauge-track" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
+        <path class="gauge-zone zone-risk" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
+        <path class="gauge-zone zone-weak" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
+        <path class="gauge-zone zone-constructive" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
+        <path class="gauge-zone zone-strong" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
+        <line class="gauge-needle" x1="90" y1="84" x2="${point.x.toFixed(1)}" y2="${point.y.toFixed(1)}" />
+        <circle class="gauge-hub" cx="90" cy="84" r="5" />
+      </svg>
+      <div class="gauge-readout">
+        <span>Gauge</span>
+        <strong>${fmtConviction(row)}</strong>
+        <small>/100</small>
+      </div>
+    </div>
+  `;
+}
+
 function renderScoreBreakdown(row) {
   const atrPct = Number(payloadValue(row, "atr_pct"));
   const buyer = Number(payloadValue(row, "buyer_score"));
@@ -526,10 +559,8 @@ function renderScoreBreakdown(row) {
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
     ["Volume", volume],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
-    ["Pattern", setupLabel(row.setup)],
-    ["Gauge", `${fmtConviction(row)}/100`]
+    ["Pattern", setupLabel(row.setup)]
   ];
-  const gaugeWidth = Math.max(4, Math.min(100, convictionScore(row)));
   return `
     <div class="score-explainer">
       <div class="score-explainer-head">
@@ -544,9 +575,7 @@ function renderScoreBreakdown(row) {
           </div>
         `).join("")}
       </div>
-      <div class="trend-meter" aria-label="Conviction gauge">
-        <span style="width: ${gaugeWidth}%"></span>
-      </div>
+      ${renderGauge(row)}
     </div>
   `;
 }
