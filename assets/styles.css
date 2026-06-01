@@ -2211,3 +2211,73 @@ th:first-child {
 .lookback-meta span {
   border-color: var(--line-soft);
 }
+
+body[data-page="history"] .company-brief {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-page="history"] .panel {
+  background: rgba(16, 21, 29, 0.56);
+  box-shadow: none;
+}
+
+body[data-page="history"] .ticker-input {
+  border-color: var(--line-soft);
+  background: rgba(7, 10, 15, 0.2);
+}
+
+body[data-page="history"] .latest-card {
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: linear-gradient(90deg, rgba(21, 27, 37, 0.74), rgba(21, 27, 37, 0.28));
+}
+
+body[data-page="history"] .latest-metrics {
+  gap: 0;
+  border: 0;
+  background: transparent;
+}
+
+body[data-page="history"] .latest-metrics > div {
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+}
+
+body[data-page="history"] .latest-metrics > div:first-child,
+body[data-page="history"] .latest-metrics > div:nth-child(2) {
+  border-top: 0;
+}
+
+body[data-page="history"] .score-explainer {
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-page="history"] .score-factors > div,
+body[data-page="history"] .chart-insights > div {
+  background: rgba(7, 10, 15, 0.18);
+}
+
+body[data-page="history"] .visual-summary {
+  border: 0;
+  background: transparent;
+}
+
+body[data-page="history"] .visual-summary > div {
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+}
+
+@media (max-width: 960px) {
+  body[data-page="history"] .latest-metrics > div:nth-child(2) {
+    border-top: 1px solid var(--line-soft);
+  }
+}
