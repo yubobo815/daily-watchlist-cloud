@@ -2068,6 +2068,8 @@ th:first-child {
   --line: rgba(226, 232, 218, 0.34);
   --line-soft: rgba(226, 232, 218, 0.12);
   --shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+  --radius-ios: 22px;
+  --radius-tile: 18px;
 }
 
 .shell {
@@ -2091,6 +2093,7 @@ th:first-child {
 .chart-details,
 .raw-history {
   border: 1px solid var(--line);
+  border-radius: var(--radius-ios);
   box-shadow: var(--shadow);
 }
 
@@ -2099,6 +2102,7 @@ th:first-child {
 .change-grid,
 .lookback-grid {
   border: 1px solid var(--line);
+  border-radius: var(--radius-ios);
   background: rgba(16, 21, 29, 0.72);
 }
 
@@ -2112,6 +2116,7 @@ th:first-child {
 .latest-card,
 .moment-card {
   border-width: 0;
+  border-radius: var(--radius-tile);
   border-left: 4px solid var(--line);
   background: rgba(21, 27, 37, 0.74);
   box-shadow: none;
@@ -2152,6 +2157,7 @@ th:first-child {
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--line-soft);
+  border-radius: var(--radius-tile);
   background: var(--line-soft);
 }
 
@@ -2168,6 +2174,7 @@ th:first-child {
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--line-soft);
+  border-radius: var(--radius-tile);
   background: var(--line-soft);
 }
 
@@ -2202,6 +2209,7 @@ th:first-child {
 
 .lookback-card {
   border: 0;
+  border-radius: var(--radius-tile);
   background: rgba(21, 27, 37, 0.72);
 }
 
@@ -2215,6 +2223,7 @@ th:first-child {
 body[data-page="history"] .company-brief {
   padding: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
@@ -2225,6 +2234,7 @@ body[data-page="history"] .panel {
 }
 
 body[data-page="history"] .ticker-input {
+  border-radius: 16px;
   border-color: var(--line-soft);
   background: rgba(7, 10, 15, 0.2);
 }
@@ -2233,12 +2243,14 @@ body[data-page="history"] .latest-card {
   border-top: 0;
   border-right: 0;
   border-bottom: 0;
+  border-radius: var(--radius-ios);
   background: linear-gradient(90deg, rgba(21, 27, 37, 0.74), rgba(21, 27, 37, 0.28));
 }
 
 body[data-page="history"] .latest-metrics {
   gap: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
@@ -2256,6 +2268,7 @@ body[data-page="history"] .latest-metrics > div:nth-child(2) {
 body[data-page="history"] .score-explainer {
   padding: 12px 0 0;
   border: 0;
+  border-radius: 0;
   border-top: 1px solid var(--line-soft);
   background: transparent;
   box-shadow: none;
@@ -2268,6 +2281,7 @@ body[data-page="history"] .chart-insights > div {
 
 body[data-page="history"] .visual-summary {
   border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
@@ -2280,4 +2294,46 @@ body[data-page="history"] .visual-summary > div {
   body[data-page="history"] .latest-metrics > div:nth-child(2) {
     border-top: 1px solid var(--line-soft);
   }
+}
+
+body[data-page="history"] .raw-history {
+  margin-top: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-page="history"] .raw-history summary {
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink);
+}
+
+body[data-page="history"] .lookback-grid {
+  gap: 10px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+body[data-page="history"] .lookback-card {
+  min-height: 144px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-ios);
+  background: rgba(21, 27, 37, 0.58);
+  box-shadow: inset 0 1px 0 rgba(242, 245, 236, 0.04);
+}
+
+body[data-page="history"] .lookback-meta span {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(242, 245, 236, 0.06);
+}
+
+body[data-page="history"] .lookback-card .badge {
+  border: 0;
 }
