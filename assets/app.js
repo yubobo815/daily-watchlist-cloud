@@ -619,6 +619,17 @@ function setStatus(message, ok = true) {
   if (runStatus) runStatus.classList.toggle("bad", !ok);
 }
 
+function setRefreshSummary(latest, marketData, rows) {
+  const status = document.querySelector("#status");
+  const runStatus = document.querySelector("#run-status");
+  if (runStatus) {
+    const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
+    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}`;
+  }
+  if (status) status.textContent = APP_DISCLAIMER;
+  if (runStatus) runStatus.classList.remove("bad");
+}
+
 async function getSupabaseConfig() {
   if (window.WATCHLIST_SUPABASE?.url && window.WATCHLIST_SUPABASE?.anonKey) {
     return window.WATCHLIST_SUPABASE;
@@ -864,10 +875,8 @@ async function initWatchlist() {
     state.previousRows = previous
       ? await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(previous)}&order=score.desc`)
       : [];
-    document.querySelector("#run-status").textContent = `Database run: ${latest}`;
     const marketData = dataDateSummary(state.rows);
-    const staleText = isStaleMarketDate(latest, state.rows) ? " Latest market session may be earlier than the refresh date." : "";
-    setStatus(`Last refresh date: ${latest}. ${marketData}.${staleText} ${APP_DISCLAIMER}`);
+    setRefreshSummary(latest, marketData, state.rows);
     renderWatchlist();
   } catch (error) {
     setStatus(error.message, false);
@@ -1102,10 +1111,8 @@ async function loadHistory(ticker) {
     }
     document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
-    document.querySelector("#run-status").textContent = `Database run: ${latest}`;
     const marketData = historyDateSummary(state.historyRows);
-    const staleText = isStaleMarketDate(latest, state.historyRows) ? " Latest market session may be earlier than the refresh date." : "";
-    setStatus(`Last refresh date: ${latest}. ${marketData}.${staleText} ${APP_DISCLAIMER}`);
+    setRefreshSummary(latest, marketData, state.historyRows);
     renderHistoryRows();
   } catch (error) {
     state.historyRows = [];
