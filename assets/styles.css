@@ -942,16 +942,16 @@ th:first-child {
 
 .gauge-pointer {
   fill: var(--ink);
-  stroke: rgba(7, 10, 15, 0.66);
+  stroke: rgba(7, 10, 15, 0.58);
   stroke-linejoin: round;
-  stroke-width: 1.2;
+  stroke-width: 1;
   filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.42));
 }
 
 .gauge-hub {
   fill: var(--ink);
   stroke: rgba(7, 10, 15, 0.8);
-  stroke-width: 3;
+  stroke-width: 2.6;
 }
 
 .gauge-readout {

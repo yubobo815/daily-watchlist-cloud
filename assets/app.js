@@ -526,7 +526,7 @@ function gaugePoint(score, radius = 58) {
 }
 
 function gaugePointerPath(point) {
-  const base = { x: 90, y: 70 };
+  const base = { x: 90, y: 63 };
   const dx = point.x - base.x;
   const dy = point.y - base.y;
   const length = Math.hypot(dx, dy) || 1;
@@ -535,21 +535,23 @@ function gaugePointerPath(point) {
   const px = -uy;
   const py = ux;
   const tip = {
-    x: base.x + ux * Math.max(0, length - 2),
-    y: base.y + uy * Math.max(0, length - 2)
+    x: base.x + ux * Math.max(0, length - 4),
+    y: base.y + uy * Math.max(0, length - 4)
   };
-  const neck = {
-    x: base.x + ux * 9,
-    y: base.y + uy * 9
+  const head = {
+    x: tip.x - ux * 9,
+    y: tip.y - uy * 9
   };
-  const baseWidth = 4.8;
-  const neckWidth = 2.2;
+  const shaftWidth = 2.4;
+  const headWidth = 6.2;
   return [
-    `M ${(base.x + px * baseWidth).toFixed(1)} ${(base.y + py * baseWidth).toFixed(1)}`,
-    `L ${(neck.x + px * neckWidth).toFixed(1)} ${(neck.y + py * neckWidth).toFixed(1)}`,
+    `M ${(base.x + px * shaftWidth).toFixed(1)} ${(base.y + py * shaftWidth).toFixed(1)}`,
+    `L ${(head.x + px * shaftWidth).toFixed(1)} ${(head.y + py * shaftWidth).toFixed(1)}`,
+    `L ${(head.x + px * headWidth).toFixed(1)} ${(head.y + py * headWidth).toFixed(1)}`,
     `L ${tip.x.toFixed(1)} ${tip.y.toFixed(1)}`,
-    `L ${(neck.x - px * neckWidth).toFixed(1)} ${(neck.y - py * neckWidth).toFixed(1)}`,
-    `L ${(base.x - px * baseWidth).toFixed(1)} ${(base.y - py * baseWidth).toFixed(1)}`,
+    `L ${(head.x - px * headWidth).toFixed(1)} ${(head.y - py * headWidth).toFixed(1)}`,
+    `L ${(head.x - px * shaftWidth).toFixed(1)} ${(head.y - py * shaftWidth).toFixed(1)}`,
+    `L ${(base.x - px * shaftWidth).toFixed(1)} ${(base.y - py * shaftWidth).toFixed(1)}`,
     "Z"
   ].join(" ");
 }
@@ -568,7 +570,7 @@ function renderGauge(row) {
         <path class="gauge-zone zone-constructive" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-strong" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-pointer" d="${pointer}" />
-        <circle class="gauge-hub" cx="90" cy="70" r="4.5" />
+        <circle class="gauge-hub" cx="90" cy="63" r="4.2" />
       </svg>
       <div class="gauge-readout">
         <strong>${fmtConviction(row)}</strong>
