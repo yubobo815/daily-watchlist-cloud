@@ -1959,6 +1959,21 @@ th:first-child {
   font-family: var(--font-data);
 }
 
+.score-explainer-head strong,
+.score-factors strong,
+.moment-body strong,
+.chart-heading strong,
+.chart-insights strong,
+.pattern-label,
+.behavior-detail,
+.company-facts strong {
+  color: var(--ink);
+}
+
+.chart-note {
+  color: var(--muted);
+}
+
 .history-grid {
   gap: 14px;
 }
