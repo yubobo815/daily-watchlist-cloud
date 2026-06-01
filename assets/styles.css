@@ -1036,21 +1036,24 @@ body[data-page="history"] .company-brief {
   left: 50%;
   display: flex;
   align-items: baseline;
-  gap: 3px;
+  gap: 2px;
   transform: translateX(-50%);
   font-family: var(--font-data);
+  font-size: 30px;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .gauge-readout strong {
   color: var(--ink);
-  font-size: 30px;
-  line-height: 1;
+  font-size: inherit;
+  font-weight: 760;
 }
 
 .gauge-readout small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: inherit;
+  font-weight: 520;
 }
 
 .history-visual {
