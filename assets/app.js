@@ -728,16 +728,20 @@ function securityDisplay(row) {
 function focusItem(row, reason) {
   if (!row) return "";
   const kind = actionKind(row.action);
+  const score = fmtConviction(row);
   return `
-    <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+    <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}" style="--score-pct: ${score}%">
       <span class="focus-kicker">${escapeHtml(reason)}</span>
-      <strong>${escapeHtml(securityDisplay(row))}</strong>
+      <span class="focus-main">
+        <strong>${escapeHtml(row.ticker)}</strong>
+        <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
+      </span>
       <span class="focus-meta">
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        <span>Conviction ${fmtConviction(row)}/100</span>
+        <span>${score}/100</span>
         <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
-        <span>${escapeHtml(setupLabel(row.setup))}</span>
       </span>
+      <span class="focus-meter" aria-hidden="true"><i></i></span>
     </a>
   `;
 }
@@ -757,10 +761,10 @@ function renderTodayFocus() {
     .sort((a, b) => Number(b.day_change_pct || 0) - Number(a.day_change_pct || 0))[0];
 
   const items = [
-    focusItem(strongest, "Strongest buy candidate"),
-    focusItem(building, "Best forming behavior"),
-    focusItem(pressure, "Most exit pressure"),
-    focusItem(bestDay, "Strongest daily move")
+    focusItem(strongest, "Buy"),
+    focusItem(building, "Setup"),
+    focusItem(pressure, "Exit"),
+    focusItem(bestDay, "Move")
   ].filter(Boolean);
 
   panel.innerHTML = `
@@ -841,7 +845,7 @@ function renderWatchlist() {
 
   document.querySelector("#watchlist-head").innerHTML = `<tr>${WATCHLIST_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("")}</tr>`;
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
-    <tr class="row-${actionKind(row.action)}">
+    <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
       ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "close", "day_change_pct", "entry_est", "stop_est", "target_est"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
     </tr>
   `).join("");
