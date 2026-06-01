@@ -802,6 +802,7 @@ function renderChangedToday() {
       </div>
       ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
     </div>
+    <div class="section-note">Signal, pattern, conviction, and price changes since the previous refresh.</div>
     <div class="change-grid">
       ${changes.map(({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }) => `
         <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
