@@ -1039,7 +1039,7 @@ body[data-page="history"] .company-brief {
   gap: 2px;
   transform: translateX(-50%);
   font-family: var(--font-data);
-  font-size: 30px;
+  font-size: 22px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
