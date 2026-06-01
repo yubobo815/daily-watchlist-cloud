@@ -940,11 +940,12 @@ th:first-child {
   stroke-dashoffset: -76;
 }
 
-.gauge-needle {
-  stroke: var(--ink);
-  stroke-linecap: round;
-  stroke-width: 2;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+.gauge-pointer {
+  fill: var(--ink);
+  stroke: rgba(7, 10, 15, 0.66);
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.42));
 }
 
 .gauge-hub {

@@ -525,10 +525,40 @@ function gaugePoint(score, radius = 58) {
   };
 }
 
+function gaugePointerPath(point) {
+  const base = { x: 90, y: 70 };
+  const dx = point.x - base.x;
+  const dy = point.y - base.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+  const tip = {
+    x: base.x + ux * Math.max(0, length - 2),
+    y: base.y + uy * Math.max(0, length - 2)
+  };
+  const neck = {
+    x: base.x + ux * 9,
+    y: base.y + uy * 9
+  };
+  const baseWidth = 4.8;
+  const neckWidth = 2.2;
+  return [
+    `M ${(base.x + px * baseWidth).toFixed(1)} ${(base.y + py * baseWidth).toFixed(1)}`,
+    `L ${(neck.x + px * neckWidth).toFixed(1)} ${(neck.y + py * neckWidth).toFixed(1)}`,
+    `L ${tip.x.toFixed(1)} ${tip.y.toFixed(1)}`,
+    `L ${(neck.x - px * neckWidth).toFixed(1)} ${(neck.y - py * neckWidth).toFixed(1)}`,
+    `L ${(base.x - px * baseWidth).toFixed(1)} ${(base.y - py * baseWidth).toFixed(1)}`,
+    "Z"
+  ].join(" ");
+}
+
 function renderGauge(row) {
   const gauge = convictionScore(row);
   const point = gaugePoint(gauge);
   const band = scoreBand(gauge);
+  const pointer = gaugePointerPath(point);
   return `
     <div class="conviction-gauge score-${band}">
       <svg viewBox="0 0 180 104" role="img" aria-label="Conviction score ${fmtConviction(row)} out of 100">
@@ -537,7 +567,7 @@ function renderGauge(row) {
         <path class="gauge-zone zone-weak" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-constructive" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-strong" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <line class="gauge-needle" x1="90" y1="70" x2="${point.x.toFixed(1)}" y2="${point.y.toFixed(1)}" />
+        <path class="gauge-pointer" d="${pointer}" />
         <circle class="gauge-hub" cx="90" cy="70" r="4.5" />
       </svg>
       <div class="gauge-readout">
