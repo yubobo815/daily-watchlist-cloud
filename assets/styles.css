@@ -1438,7 +1438,7 @@ body[data-page="history"] .raw-history summary {
     position: sticky;
     top: 0;
     z-index: 8;
-    padding: calc(8px + env(safe-area-inset-top)) 10px 10px;
+    padding: calc(7px + env(safe-area-inset-top)) 10px 9px;
     border-color: var(--line-soft);
     border-radius: 22px;
     background: rgba(7, 10, 15, 0.84);
@@ -1479,12 +1479,67 @@ body[data-page="history"] .raw-history summary {
     line-height: 1.38;
   }
 
+  body[data-page="watchlist"] .meta,
+  body[data-page="history"] .meta {
+    display: none;
+  }
+
+  body[data-page="history"] .ticker-name {
+    margin-top: 7px;
+  }
+
   .status {
     max-width: 100%;
     padding: 6px 9px;
     overflow: hidden;
     font-size: 10px;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body[data-page="history"] .panel {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  body[data-page="history"] #snapshot {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  body[data-page="history"] #latest-panel {
+    order: 1;
+    margin-top: 0;
+  }
+
+  body[data-page="history"] #ticker-form {
+    order: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+    padding: 9px;
+    border: 1px solid var(--line-soft);
+    border-radius: 18px;
+    background: rgba(16, 21, 29, 0.56);
+  }
+
+  body[data-page="history"] #ticker-form label {
+    display: none;
+  }
+
+  body[data-page="history"] #ticker-form .ticker-input {
+    min-height: 38px;
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 16px;
+  }
+
+  body[data-page="history"] #ticker-form .button {
+    min-height: 38px;
+    padding: 8px 11px;
     white-space: nowrap;
   }
 
@@ -1763,6 +1818,10 @@ body[data-page="history"] .raw-history summary {
   .score-explainer {
     gap: 7px;
     padding-top: 9px;
+  }
+
+  body[data-page="history"] .score-explainer {
+    display: none;
   }
 
   .score-factors {

@@ -346,11 +346,7 @@ function renderCompanyBrief(profile) {
   const industry = [profile?.sector, profile?.industry].filter(Boolean).join(" · ");
 
   if (!summary && !highlights && !nextReport && !website && !industry) {
-    target.innerHTML = `
-      <div class="company-brief muted-brief">
-        <p>Company brief will appear after the next cloud refresh.</p>
-      </div>
-    `;
+    target.innerHTML = "";
     return;
   }
 
