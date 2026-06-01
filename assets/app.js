@@ -40,6 +40,15 @@ const SUMMARY_CARDS = [
   ["avoid", "AVOID"]
 ];
 
+const SIGNAL_FILTERS = [
+  ["all", "All"],
+  ["buy", "BUY"],
+  ["setup", "Setup"],
+  ["watch", "Watch"],
+  ["exit", "Exit"],
+  ["avoid", "Avoid"]
+];
+
 const ACTION_TONE = {
   buy: "#0f8a5f",
   setup: "#b7791f",
@@ -714,9 +723,21 @@ function renderCards(counts) {
     card.addEventListener("click", () => {
       const next = card.dataset.filter;
       state.filter = state.filter === next ? "all" : next;
-      document.querySelector("#all-filter").classList.toggle("active", state.filter === "all");
       renderWatchlist();
     });
+  });
+}
+
+function renderSignalFilters(counts) {
+  const filters = document.querySelector("#signal-filter");
+  if (!filters) return;
+  const total = state.rows.length;
+  filters.querySelectorAll("[data-signal-filter]").forEach((button) => {
+    const kind = button.dataset.signalFilter;
+    const label = SIGNAL_FILTERS.find(([value]) => value === kind)?.[1] || kind;
+    const count = kind === "all" ? total : counts[kind] || 0;
+    button.classList.toggle("active", state.filter === kind);
+    button.innerHTML = `<span>${label}</span><strong>${count}</strong>`;
   });
 }
 
@@ -828,6 +849,7 @@ function renderWatchlist() {
     counts[actionKind(row.action)] += 1;
   });
   renderCards(counts);
+  renderSignalFilters(counts);
   renderTodayFocus();
   renderChangedToday();
 
@@ -862,10 +884,11 @@ async function initWatchlist() {
     state.sort = event.target.value;
     renderWatchlist();
   });
-  document.querySelector("#all-filter").addEventListener("click", () => {
-    state.filter = "all";
-    document.querySelector("#all-filter").classList.add("active");
-    renderWatchlist();
+  document.querySelectorAll("[data-signal-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.filter = button.dataset.signalFilter || "all";
+      renderWatchlist();
+    });
   });
   try {
     const [latest, previous] = await recentRunDates(2);

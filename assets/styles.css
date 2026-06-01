@@ -360,7 +360,7 @@ body[data-page="watchlist"] .meta {
 
 .controls {
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) auto auto auto;
+  grid-template-columns: minmax(230px, 1fr) minmax(180px, 240px) auto;
   gap: 10px;
   align-items: center;
   margin: 12px 0;
@@ -376,10 +376,49 @@ body[data-page="watchlist"] .meta {
 }
 
 .search {
+  grid-column: 1;
+  grid-row: 1;
   width: 100%;
 }
 
+.control {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.signal-filter {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.signal-filter .chip {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.signal-filter .chip strong {
+  color: var(--ink);
+  font-family: var(--font-data);
+  font-size: 11px;
+}
+
+.signal-filter .chip.active {
+  border-color: rgba(46, 230, 159, 0.42);
+  background: rgba(46, 230, 159, 0.12);
+  color: var(--tone-buy);
+}
+
 .count {
+  grid-column: 3;
+  grid-row: 1;
   color: var(--muted);
   font-size: 13px;
   font-weight: 650;
@@ -1611,7 +1650,7 @@ body[data-page="history"] .raw-history summary {
     top: 96px;
     z-index: 7;
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(116px, 38vw);
     gap: 6px;
     padding: 6px 0 8px;
     background: linear-gradient(180deg, rgba(7, 10, 15, 0.94), rgba(7, 10, 15, 0.78));
@@ -1624,11 +1663,38 @@ body[data-page="history"] .raw-history summary {
 
   .search {
     grid-column: 1 / -1;
+    grid-row: auto;
   }
 
-  #all-filter {
+  .control {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .signal-filter {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin-right: -8px;
     padding-right: 8px;
-    padding-left: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .signal-filter::-webkit-scrollbar {
+    display: none;
+  }
+
+  .signal-filter .chip {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 5px 9px;
+    font-size: 10px;
+  }
+
+  .signal-filter .chip strong {
+    font-size: 10px;
   }
 
   .count {

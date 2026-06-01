@@ -12,8 +12,8 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=stock-pills-20260602">
-    <script defer src="./assets/app.js?v=stock-pills-20260602"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=signal-filter-20260602">
+    <script defer src="./assets/app.js?v=signal-filter-20260602"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -38,7 +38,14 @@
 
       <section class="controls">
         <input id="search" class="search" placeholder="Search ticker, candle behavior, note, mode...">
-        <button id="all-filter" class="chip active" type="button">All</button>
+        <div id="signal-filter" class="signal-filter" aria-label="Filter by signal">
+          <button class="chip active" type="button" data-signal-filter="all">All</button>
+          <button class="chip" type="button" data-signal-filter="buy">BUY</button>
+          <button class="chip" type="button" data-signal-filter="setup">Setup</button>
+          <button class="chip" type="button" data-signal-filter="watch">Watch</button>
+          <button class="chip" type="button" data-signal-filter="exit">Exit</button>
+          <button class="chip" type="button" data-signal-filter="avoid">Avoid</button>
+        </div>
         <select id="sort" class="control">
           <option value="score-desc">Conviction high to low</option>
           <option value="day_change_pct-desc">Best day change</option>
@@ -61,10 +68,10 @@
       </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
-      <a href="#cards" class="active"><span>Focus</span></a>
-      <a href="#today-focus"><span>Today</span></a>
+      <a href="#cards" class="active"><span>Signals</span></a>
+      <a href="#today-focus"><span>Focus</span></a>
       <a href="#changed-today"><span>Changes</span></a>
-      <a href="#watchlist-table"><span>List</span></a>
+      <a href="#watchlist-table"><span>Stocks</span></a>
     </nav>
   </body>
 </html>
