@@ -2491,3 +2491,158 @@ body[data-page="history"] .ticker-input {
     border: 1px solid var(--line-soft);
   }
 }
+
+/* Readability pass for section cards and type scale. */
+h1,
+body[data-page="watchlist"] h1,
+body[data-page="history"] h1 {
+  font-size: clamp(27px, 3.2vw, 38px);
+  line-height: 1.05;
+}
+
+h2 {
+  font-size: clamp(20px, 2.2vw, 24px);
+}
+
+.brand-name {
+  font-size: 18px;
+}
+
+.section-heading {
+  align-items: center;
+  margin: 18px 0 10px;
+}
+
+.section-heading span:not(.section-date) {
+  color: var(--ink);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}
+
+.section-heading strong {
+  display: none;
+}
+
+.section-date {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(16, 21, 29, 0.72);
+  color: var(--muted);
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.focus-grid,
+.change-grid {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.focus-item,
+.change-card {
+  align-content: start;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line-soft);
+  border-top: 4px solid var(--tone-avoid);
+  border-left: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: rgba(16, 21, 29, 0.62);
+  box-shadow: none;
+}
+
+.focus-item.tone-buy,
+.change-card.tone-buy,
+.card.tone-buy {
+  border-top-color: var(--tone-buy);
+}
+
+.focus-item.tone-setup,
+.change-card.tone-setup,
+.card.tone-setup {
+  border-top-color: var(--tone-setup);
+}
+
+.focus-item.tone-watch,
+.change-card.tone-watch,
+.card.tone-watch {
+  border-top-color: var(--tone-watch);
+}
+
+.focus-item.tone-exit,
+.change-card.tone-exit,
+.card.tone-exit {
+  border-top-color: var(--tone-exit);
+}
+
+.focus-item.tone-avoid,
+.change-card.tone-avoid,
+.card.tone-avoid {
+  border-top-color: var(--tone-avoid);
+}
+
+.card {
+  min-height: 76px;
+  padding: 12px;
+}
+
+.card strong {
+  font-size: clamp(24px, 3vw, 30px);
+}
+
+.focus-kicker {
+  font-size: 10px;
+}
+
+.focus-item strong,
+.change-card-head strong {
+  font-size: 16px;
+}
+
+.focus-meta,
+.change-card-head span,
+.behavior-detail {
+  font-size: 12px;
+}
+
+.change-card-body {
+  gap: 6px;
+}
+
+.compact-empty {
+  padding: 14px 0;
+  text-align: left;
+}
+
+@media (max-width: 960px) {
+  h1,
+  body[data-page="watchlist"] h1,
+  body[data-page="history"] h1 {
+    font-size: 30px;
+  }
+
+  .brand-name {
+    font-size: 16px;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+  }
+
+  .cards {
+    grid-template-columns: repeat(5, minmax(58px, 1fr));
+  }
+
+  .card {
+    min-height: 60px;
+    padding: 9px 7px;
+  }
+
+  .card strong {
+    font-size: 22px;
+  }
+}

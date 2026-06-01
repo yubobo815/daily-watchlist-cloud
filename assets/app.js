@@ -719,6 +719,7 @@ function focusItem(row, reason) {
 function renderTodayFocus() {
   const panel = document.querySelector("#today-focus");
   if (!panel) return;
+  const runDate = state.rows[0]?.run_date || "";
   const ranked = [...state.rows].sort((a, b) => convictionScore(b) - convictionScore(a));
   const strongest = ranked.find((row) => actionKind(row.action) === "buy");
   const building = ranked.find((row) => actionKind(row.action) === "setup");
@@ -740,8 +741,8 @@ function renderTodayFocus() {
     <div class="section-heading">
       <div>
         <span>Today’s Focus</span>
-        <strong>Start here, then drill into the table.</strong>
       </div>
+      ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
     </div>
     <div class="focus-grid">${items.join("")}</div>
   `;
@@ -750,15 +751,17 @@ function renderTodayFocus() {
 function renderChangedToday() {
   const panel = document.querySelector("#changed-today");
   if (!panel) return;
+  const runDate = state.rows[0]?.run_date || "";
   const changes = dailyChangeItems(state.rows, state.previousRows);
   if (!changes.length) {
     panel.innerHTML = `
       <div class="section-heading">
         <div>
           <span>Changed Today</span>
-          <strong>No major scanner changes versus the previous run.</strong>
         </div>
+        ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
       </div>
+      <div class="empty compact-empty">No major scanner changes versus the previous run.</div>
     `;
     return;
   }
@@ -767,8 +770,8 @@ function renderChangedToday() {
     <div class="section-heading">
       <div>
         <span>Changed Today</span>
-        <strong>Largest signal, pattern, conviction, and price shifts.</strong>
       </div>
+      ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
     </div>
     <div class="change-grid">
       ${changes.map(({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }) => `
