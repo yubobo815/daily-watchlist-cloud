@@ -1673,21 +1673,12 @@ body[data-page="history"] .raw-history summary {
 
   .focus-grid,
   .change-grid {
-    display: flex;
-    grid-template-columns: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
-    margin-right: -8px;
-    margin-left: -8px;
-    padding: 0 8px 3px;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
-  }
-
-  .focus-grid::-webkit-scrollbar,
-  .change-grid::-webkit-scrollbar {
-    display: none;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
   }
 
   .table-wrap {
@@ -1824,18 +1815,17 @@ body[data-page="history"] .raw-history summary {
 
   .focus-item,
   .change-card {
-    flex: 0 0 min(64vw, 236px);
     gap: 5px;
-    min-height: 92px;
-    padding: 8px;
+    min-width: 0;
+    min-height: 82px;
+    padding: 7px;
     border-top-width: 3px;
     border-radius: 16px;
-    scroll-snap-align: start;
   }
 
   .focus-item strong,
   .change-card-head strong {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .focus-main span {
@@ -1846,11 +1836,16 @@ body[data-page="history"] .raw-history summary {
   .change-card-head span,
   .change-card-body,
   .change-chips {
-    font-size: 10px;
+    font-size: 9px;
   }
 
   .focus-meta {
-    gap: 4px 5px;
+    gap: 4px;
+  }
+
+  .change-card-body,
+  .change-chips {
+    gap: 4px;
   }
 
   .focus-kicker {
@@ -1860,9 +1855,9 @@ body[data-page="history"] .raw-history summary {
   .change-chip,
   .badge,
   .move-pct {
-    min-height: 20px;
-    padding: 2px 6px;
-    font-size: 10px;
+    min-height: 18px;
+    padding: 2px 5px;
+    font-size: 9px;
   }
 
   .focus-meter {
