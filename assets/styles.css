@@ -2360,7 +2360,7 @@ body[data-page="history"] .lookback-card .badge {
 .status,
 .status.bad {
   padding: 8px 12px;
-  border-color: var(--line-soft);
+  border: 1px solid var(--line-soft);
   background: rgba(242, 184, 75, 0.1);
   box-shadow: none;
 }
