@@ -2549,7 +2549,7 @@ h2 {
   padding: 13px;
   border: 1px solid var(--line-soft);
   border-top: 4px solid var(--tone-avoid);
-  border-left: 1px solid var(--line-soft);
+  border-left-color: var(--line-soft);
   border-radius: 20px;
   background: rgba(16, 21, 29, 0.62);
   box-shadow: none;
@@ -2583,6 +2583,14 @@ h2 {
 .change-card.tone-avoid,
 .card.tone-avoid {
   border-top-color: var(--tone-avoid);
+}
+
+.change-card.tone-buy,
+.change-card.tone-setup,
+.change-card.tone-watch,
+.change-card.tone-exit,
+.change-card.tone-avoid {
+  border-left-color: var(--line-soft);
 }
 
 .card {
