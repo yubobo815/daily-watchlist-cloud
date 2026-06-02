@@ -31,10 +31,32 @@ function decodeHtml(value) {
 }
 
 function stripHtml(value) {
-  return decodeHtml(String(value || "")
+  const html = String(value || "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " "))
+    .replace(/<style[\s\S]*?<\/style>/gi, " ");
+  let output = "";
+  let inTag = false;
+  let quote = "";
+  for (const char of html) {
+    if (!inTag && char === "<") {
+      inTag = true;
+      quote = "";
+      output += " ";
+      continue;
+    }
+    if (inTag) {
+      if (quote) {
+        if (char === quote) quote = "";
+      } else if (char === "\"" || char === "'") {
+        quote = char;
+      } else if (char === ">") {
+        inTag = false;
+      }
+      continue;
+    }
+    output += char;
+  }
+  return decodeHtml(output)
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -137,25 +159,28 @@ function firstMatch(text, patterns) {
 function toStockAnalysisProfile(ticker, html) {
   const text = stripHtml(html);
   const description = textBetween(text, "Company Description", "Contact Details");
+  const details = textBetween(text, "Country ", "Contact Details") || text;
   const businessSummary = description
     .replace(/\s+[A-Z][A-Za-z0-9.,&' -]+ Country\s+.*$/s, "")
     .trim();
-  const industry = firstMatch(text, [
+  const industry = firstMatch(details, [
     /Industry\s+(.+?)\s+Sector\s+/,
     /Industry\s+(.+?)\s+Employees\s+/,
   ]);
-  const sector = firstMatch(text, [
+  const sector = firstMatch(details, [
     /Sector\s+(.+?)\s+Employees\s+/,
     /Sector\s+(.+?)\s+CEO\s+/,
   ]);
   const filing = firstMatch(text, [
     /Latest SEC Filings\s+Date Type Title\s+([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\S+\s+.+?)(?:\s+[A-Z][a-z]{2}\s+\d{1,2},|\s+View All SEC Filings)/,
   ]);
-  const websiteStart = html.search(/Website/i);
+  const contactStart = html.search(/Contact Details/i);
+  const websiteStart = contactStart === -1 ? -1 : html.slice(contactStart).search(/Website/i);
   const stockDetailsStart = html.search(/Stock Details/i);
-  const websiteHtml = websiteStart === -1
+  const absoluteWebsiteStart = websiteStart === -1 ? -1 : contactStart + websiteStart;
+  const websiteHtml = absoluteWebsiteStart === -1
     ? ""
-    : html.slice(websiteStart, stockDetailsStart === -1 ? undefined : stockDetailsStart);
+    : html.slice(absoluteWebsiteStart, stockDetailsStart === -1 ? undefined : stockDetailsStart);
   const websiteMatch = websiteHtml.match(/href="(https?:\/\/[^"]+)"/i);
 
   return {
