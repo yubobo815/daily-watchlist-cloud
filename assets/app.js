@@ -899,14 +899,30 @@ function initTabNavigation() {
 }
 
 async function initWatchlist() {
-  document.querySelector("#search").addEventListener("input", (event) => {
+  const searchInput = document.querySelector("#search");
+  const clearSearch = document.querySelector("#clear-search");
+  const syncSearchClear = () => {
+    if (clearSearch) clearSearch.classList.toggle("hidden", !searchInput.value);
+  };
+  searchInput.addEventListener("input", (event) => {
     state.query = event.target.value;
+    syncSearchClear();
     renderWatchlist();
   });
+  if (clearSearch) {
+    clearSearch.addEventListener("click", () => {
+      searchInput.value = "";
+      state.query = "";
+      syncSearchClear();
+      renderWatchlist();
+      searchInput.focus();
+    });
+  }
   document.querySelector("#sort").addEventListener("change", (event) => {
     state.sort = event.target.value;
     renderWatchlist();
   });
+  syncSearchClear();
   initTabNavigation();
   try {
     const [latest, previous] = await recentRunDates(2);
