@@ -702,6 +702,27 @@ function renderWatchlistCell(row, key) {
   return escapeHtml(row[key]);
 }
 
+function renderMobileWatchlistSummary(row) {
+  const kind = actionKind(row.action);
+  return `
+    <a class="mobile-watch-row" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+      <span class="mobile-watch-main">
+        <strong>${escapeHtml(row.ticker)}</strong>
+        <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || row.ticker)}</span>
+        <span class="mobile-watch-tags">
+          <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+          <span class="badge pattern-pill">${escapeHtml(setupLabel(row.setup))}</span>
+          <span class="badge conviction-pill">${escapeHtml(fmtConviction(row))}</span>
+        </span>
+      </span>
+      <span class="mobile-watch-price">
+        <strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>
+        ${renderMovePct(row.day_change_pct)}
+      </span>
+    </a>
+  `;
+}
+
 function renderCards(counts) {
   const cards = document.querySelector("#cards");
   cards.innerHTML = SUMMARY_CARDS.map(([kind, label]) => `
@@ -846,6 +867,7 @@ function renderWatchlist() {
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
     <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
       ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "close", "day_change_pct", "entry_est", "stop_est", "target_est"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
+      <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");
   document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} shown`;
