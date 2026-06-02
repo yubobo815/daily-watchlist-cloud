@@ -20,8 +20,8 @@
   --shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
   --radius-ios: 22px;
   --radius-tile: 18px;
-  --font-app: "Noto Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-data: "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-app: "SFMono-Regular", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+  --font-data: "SFMono-Regular", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
 }
 
 * {
