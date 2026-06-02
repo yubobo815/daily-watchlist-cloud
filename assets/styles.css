@@ -492,6 +492,7 @@ body[data-page="watchlist"] .meta {
 .change-card {
   display: grid;
   align-content: start;
+  grid-template-rows: auto minmax(38px, auto) auto;
   min-height: 0;
   padding: 13px;
   border: 1px solid var(--line-soft);
@@ -508,6 +509,10 @@ body[data-page="watchlist"] .meta {
 
 .change-card {
   gap: 9px;
+}
+
+.change-card {
+  grid-template-rows: minmax(38px, auto) auto;
 }
 
 .focus-kicker {
@@ -541,6 +546,7 @@ body[data-page="watchlist"] .meta {
   flex-wrap: wrap;
   gap: 6px 9px;
   align-items: center;
+  min-height: 29px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 620;
@@ -584,6 +590,7 @@ body[data-page="watchlist"] .meta {
   flex-wrap: wrap;
   gap: 6px;
   align-content: start;
+  min-height: 29px;
 }
 
 .compact-empty {
@@ -1871,6 +1878,7 @@ body[data-page="history"] .raw-history summary {
   .focus-item,
   .change-card {
     gap: 5px;
+    grid-template-rows: auto minmax(30px, auto) auto;
     min-width: 0;
     min-height: 82px;
     padding: 7px;
@@ -1901,6 +1909,7 @@ body[data-page="history"] .raw-history summary {
   .change-card-body,
   .change-chips {
     gap: 4px;
+    min-height: 22px;
   }
 
   .focus-kicker {
@@ -2012,20 +2021,20 @@ body[data-page="history"] .raw-history summary {
   }
 
   .lookback-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 5px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .lookback-card {
-    gap: 4px;
-    min-height: 94px;
-    padding: 6px;
+    gap: 5px;
+    min-height: 98px;
+    padding: 7px;
     border-top-width: 2px;
     border-radius: 12px;
   }
 
   .lookback-date strong {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .lookback-date span {
@@ -2033,16 +2042,16 @@ body[data-page="history"] .raw-history summary {
   }
 
   .lookback-main strong {
-    font-size: 17px;
+    font-size: 18px;
   }
 
   .lookback-meta span {
     padding: 1px 4px;
-    font-size: 7px;
+    font-size: 8px;
   }
 
   .lookback-price strong {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .lookback-main {
@@ -2061,7 +2070,7 @@ body[data-page="history"] .raw-history summary {
   .lookback-card .move-pct {
     min-height: 15px;
     padding: 1px 4px;
-    font-size: 7px;
+    font-size: 8px;
   }
 
   .lookback-card .bar {
@@ -2149,12 +2158,13 @@ body[data-page="history"] .raw-history summary {
   }
 
   .lookback-grid {
-    gap: 4px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
   }
 
   .lookback-card {
-    min-height: 88px;
-    padding: 5px;
+    min-height: 96px;
+    padding: 6px;
   }
 
   .app-tabbar {

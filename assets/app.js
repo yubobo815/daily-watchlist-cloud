@@ -809,7 +809,7 @@ function renderChangedToday() {
     panel.innerHTML = `
       <div class="section-heading">
         <div>
-          <span>Changed Today</span>
+          <span>Today’s Movers</span>
         </div>
         ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
       </div>
@@ -821,7 +821,7 @@ function renderChangedToday() {
   panel.innerHTML = `
     <div class="section-heading">
       <div>
-        <span>Changed Today</span>
+        <span>Today’s Movers</span>
       </div>
       ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
     </div>
@@ -1070,6 +1070,7 @@ function renderHistoryRows() {
   renderLatestHistoryPanel(state.historyRows[0]);
   renderHistoryVisual(state.historyRows);
   const chronological = [...state.historyRows].reverse();
+  const lookbackRows = state.historyRows.slice(1);
   const moments = chronological
     .map((row, index) => ({ row, previous: chronological[index - 1], index }))
     .filter(({ row, previous, index }) => {
@@ -1094,12 +1095,12 @@ function renderHistoryRows() {
       </div>
     `).join("")}
     <details class="raw-history" open>
-      <summary>Show Daily Lookback</summary>
+      <summary>Show Earlier Days</summary>
       <div class="lookback-grid">
-      ${state.historyRows.map((row, index) => `
+      ${lookbackRows.length ? lookbackRows.map((row) => `
         <article class="lookback-card tone-${actionKind(row.action)}">
           <div class="lookback-date">
-            <strong>${index === 0 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</strong>
+            <strong>${escapeHtml(fmtCompactDate(row.history_date))}</strong>
             <span>${escapeHtml(row.history_date)}</span>
           </div>
           <div class="lookback-main">
@@ -1117,7 +1118,7 @@ function renderHistoryRows() {
             ${renderMovePct(row.day_change_pct)}
           </div>
         </article>
-      `).join("")}
+      `).join("") : "<div class=\"empty compact-empty\">No earlier look-back days available.</div>"}
       </div>
     </details>
   `;
