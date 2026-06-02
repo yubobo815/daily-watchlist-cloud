@@ -1070,7 +1070,6 @@ function renderHistoryRows() {
   renderLatestHistoryPanel(state.historyRows[0]);
   renderHistoryVisual(state.historyRows);
   const chronological = [...state.historyRows].reverse();
-  const lookbackRows = state.historyRows.slice(1);
   const moments = chronological
     .map((row, index) => ({ row, previous: chronological[index - 1], index }))
     .filter(({ row, previous, index }) => {
@@ -1080,6 +1079,10 @@ function renderHistoryRows() {
     })
     .slice(-8)
     .reverse();
+  const oldestMomentDate = moments[moments.length - 1]?.row.history_date;
+  const lookbackRows = oldestMomentDate
+    ? state.historyRows.filter((row) => row.history_date < oldestMomentDate)
+    : state.historyRows.slice(1);
 
   timeline.innerHTML = `
     <h3>Key Behavior Moments</h3>
