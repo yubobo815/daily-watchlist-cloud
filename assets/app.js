@@ -1141,15 +1141,6 @@ async function loadHistory(ticker) {
     const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name,payload&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
     state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
-    const snapshotProfile = snapshotRows[0]?.payload || {};
-    renderCompanyBrief(snapshotProfile);
-    if (!hasCompanyBrief(snapshotProfile)) {
-      fetchCompanyBrief(state.ticker)
-        .then((profile) => {
-          if (hasCompanyBrief(profile)) renderCompanyBrief(profile);
-        })
-        .catch(() => {});
-    }
     document.title = historyDisplayTitle();
     state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
     const marketData = historyDateSummary(state.historyRows);
