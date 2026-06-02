@@ -114,7 +114,7 @@ input:-webkit-autofill:focus {
 }
 
 .shell {
-  width: min(100%, 1520px);
+  width: min(100%, 1240px);
   min-height: 100vh;
   margin: 0 auto;
   padding: 18px;
