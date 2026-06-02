@@ -748,13 +748,14 @@ td:nth-child(2) {
 }
 
 td:nth-child(8),
-td:nth-child(9) {
+td:nth-child(9),
+td:nth-child(10) {
   max-width: 128px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-td:nth-child(13) {
+td:nth-child(14) {
   max-width: 230px;
   white-space: normal;
 }
@@ -799,6 +800,7 @@ td:nth-child(13) {
 
 .badge,
 .move-pct,
+.move-chip,
 .change-chip,
 .lookback-meta span {
   display: inline-flex;
@@ -817,6 +819,7 @@ td:nth-child(13) {
 }
 
 .badge.buy,
+.move-chip.up,
 .change-chip.up,
 .move-pct.up {
   background: var(--buy);
@@ -824,6 +827,7 @@ td:nth-child(13) {
 }
 
 .badge.setup,
+.move-chip.setup,
 .change-chip.setup {
   background: var(--setup);
   color: var(--tone-setup);
@@ -835,6 +839,7 @@ td:nth-child(13) {
 }
 
 .badge.exit,
+.move-chip.down,
 .change-chip.down,
 .move-pct.down {
   background: var(--exit);
@@ -842,9 +847,29 @@ td:nth-child(13) {
 }
 
 .badge.avoid,
+.move-chip.quiet,
 .change-chip.quiet {
   background: var(--avoid);
   color: #cbd5e1;
+}
+
+.daily-move {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 116px;
+}
+
+.move-chip {
+  min-height: 20px;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+.move-chip.signal {
+  border-color: rgba(46, 230, 159, 0.3);
+  background: rgba(46, 230, 159, 0.12);
+  color: #61f0b7;
 }
 
 .badge.pattern-pill,
@@ -2039,6 +2064,7 @@ body[data-page="history"] .raw-history summary {
   }
 
   .mobile-watch-tags .badge,
+  .mobile-watch-tags .move-chip,
   .mobile-watch-price .move-pct {
     min-height: 20px;
     padding: 2px 7px;

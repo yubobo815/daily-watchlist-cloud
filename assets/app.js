@@ -23,6 +23,7 @@ const WATCHLIST_COLUMNS = [
   ["score", "Conviction"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
+  ["daily_move", "Move"],
   ["setup", "Pattern"],
   ["adaptive_mode", "Market Behavior"],
   ["psychology", "Tape"],
@@ -507,6 +508,33 @@ function dailyChangeItems(rows, previousRows) {
     .slice(0, 8);
 }
 
+function dailyChangeForRow(row) {
+  const previous = rowByTicker(state.previousRows).get(row.ticker);
+  if (!previous) return null;
+  const scoreMove = convictionScore(row) - convictionScore(previous);
+  const actionChanged = row.action !== previous.action;
+  const setupChanged = row.setup !== previous.setup;
+  const priceMove = numericValue(row, "close") - numericValue(previous, "close");
+  const previousClose = numericValue(previous, "close");
+  const pricePct = previousClose ? (priceMove / previousClose) * 100 : 0;
+  return { row, previous, scoreMove, pricePct, actionChanged, setupChanged };
+}
+
+function renderDailyMove(row, compact = false) {
+  const change = dailyChangeForRow(row);
+  if (!change) return `<span class="move-chip quiet">New</span>`;
+  const chips = [];
+  if (change.actionChanged) chips.push(`<span class="move-chip signal">${compact ? "Sig" : "Signal"}</span>`);
+  if (change.setupChanged) chips.push(`<span class="move-chip setup">${compact ? "Pat" : "Pattern"}</span>`);
+  if (Math.abs(change.scoreMove) >= 4) {
+    chips.push(`<span class="move-chip ${moveClass(change.scoreMove)}">Conv ${fmtSignedNumber(change.scoreMove, 0)}</span>`);
+  }
+  if (Math.abs(change.pricePct) >= 1.5) {
+    chips.push(`<span class="move-chip ${moveClass(change.pricePct)}">${fmtSignedNumber(change.pricePct, 1)}%</span>`);
+  }
+  return chips.length ? `<span class="daily-move">${chips.join("")}</span>` : `<span class="move-chip quiet">Steady</span>`;
+}
+
 function gaugePoint(score, radius = 58) {
   const clamped = Math.max(0, Math.min(100, score));
   const angle = Math.PI + (clamped / 100) * Math.PI;
@@ -707,6 +735,7 @@ function renderWatchlistCell(row, key) {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
   if (key === "score") return `<span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(fmtConviction(row))}</span>`;
+  if (key === "daily_move") return renderDailyMove(row);
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
@@ -724,6 +753,7 @@ function renderMobileWatchlistSummary(row) {
           <span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>
           <span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(fmtConviction(row))}</span>
           <span class="badge entry-pill">Entry ${escapeHtml(fmtNumber(row.entry_est, 2))}</span>
+          ${renderDailyMove(row, true)}
         </span>
       </span>
       <span class="mobile-watch-price">
