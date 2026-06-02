@@ -1886,6 +1886,10 @@ body[data-page="history"] .raw-history summary {
     border-radius: 16px;
   }
 
+  .change-card {
+    grid-template-rows: minmax(30px, auto) auto;
+  }
+
   .focus-item strong,
   .change-card-head strong {
     font-size: 13px;
