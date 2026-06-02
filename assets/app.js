@@ -416,6 +416,15 @@ function scoreBand(value) {
   return "risk";
 }
 
+function setupTone(value) {
+  const label = setupLabel(value).toUpperCase();
+  if (!label || label === "NONE") return "neutral";
+  if (label.includes("BUY") && label.includes("PULLBACK")) return "constructive";
+  if (label.includes("BUY")) return "strong";
+  if (label.includes("AVOID") || label.includes("WEAK") || label.includes("EXIT")) return "risk";
+  return "watch";
+}
+
 function convictionScore(rowOrScore) {
   const raw = typeof rowOrScore === "object" ? numericValue(rowOrScore, "score") : Number(rowOrScore);
   if (!Number.isFinite(raw)) return 0;
@@ -692,12 +701,12 @@ function renderWatchlistCell(row, key) {
     return `<span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`;
   }
   if (key === "setup") {
-    return `<span class="badge pattern-pill">${escapeHtml(setupLabel(row.setup))}</span>`;
+    return `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
   if (key === "notes") {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
-  if (key === "score") return `<span class="badge conviction-pill">${escapeHtml(fmtConviction(row))}</span>`;
+  if (key === "score") return `<span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(fmtConviction(row))}</span>`;
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
@@ -712,8 +721,8 @@ function renderMobileWatchlistSummary(row) {
         <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || row.ticker)}</span>
         <span class="mobile-watch-tags">
           <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-          <span class="badge pattern-pill">${escapeHtml(setupLabel(row.setup))}</span>
-          <span class="badge conviction-pill">${escapeHtml(fmtConviction(row))}</span>
+          <span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>
+          <span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(fmtConviction(row))}</span>
           <span class="badge entry-pill">Entry ${escapeHtml(fmtNumber(row.entry_est, 2))}</span>
         </span>
       </span>
@@ -752,7 +761,7 @@ function focusItem(row, reason) {
   const kind = actionKind(row.action);
   const score = fmtConviction(row);
   return `
-    <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}" style="--score-pct: ${score}%">
+    <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
       <span class="focus-kicker">${escapeHtml(reason)}</span>
       <span class="focus-main">
         <strong>${escapeHtml(row.ticker)}</strong>
@@ -763,7 +772,6 @@ function focusItem(row, reason) {
         <span>${score}/100</span>
         <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
       </span>
-      <span class="focus-meter" aria-hidden="true"><i></i></span>
     </a>
   `;
 }

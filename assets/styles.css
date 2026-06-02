@@ -613,22 +613,6 @@ body.search-active .changed-today {
   font-weight: 620;
 }
 
-.focus-meter {
-  display: block;
-  height: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(242, 245, 236, 0.08);
-}
-
-.focus-meter i {
-  display: block;
-  width: var(--score-pct, 0%);
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, currentColor, rgba(242, 245, 236, 0.72));
-}
-
 .change-rail {
   overflow: hidden;
   border-radius: 22px;
@@ -872,6 +856,40 @@ td:nth-child(13) {
 
 .badge.conviction-pill {
   min-width: 38px;
+}
+
+.badge.conviction-pill.score-strong,
+.badge.pattern-pill.pattern-strong {
+  border-color: rgba(46, 230, 159, 0.3);
+  background: rgba(46, 230, 159, 0.13);
+  color: #61f0b7;
+}
+
+.badge.conviction-pill.score-constructive,
+.badge.pattern-pill.pattern-constructive {
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(96, 165, 250, 0.14);
+  color: #9fc4ff;
+}
+
+.badge.conviction-pill.score-weak,
+.badge.pattern-pill.pattern-watch {
+  border-color: rgba(251, 191, 36, 0.32);
+  background: rgba(251, 191, 36, 0.13);
+  color: #f6cf6f;
+}
+
+.badge.conviction-pill.score-risk,
+.badge.pattern-pill.pattern-risk {
+  border-color: rgba(248, 113, 113, 0.32);
+  background: rgba(248, 113, 113, 0.13);
+  color: #ff9a9a;
+}
+
+.badge.pattern-pill.pattern-neutral {
+  border-color: rgba(226, 232, 218, 0.14);
+  background: rgba(242, 245, 236, 0.07);
+  color: var(--muted);
 }
 
 .change-chip.signal {
@@ -2031,9 +2049,9 @@ body[data-page="history"] .raw-history summary {
   .focus-item,
   .change-card {
     gap: 5px;
-    grid-template-rows: auto minmax(30px, 1fr) auto auto;
+    grid-template-rows: auto minmax(30px, 1fr) auto;
     min-width: 0;
-    min-height: 104px;
+    min-height: 96px;
     padding: 7px;
     border-top-width: 3px;
     border-radius: 16px;
@@ -2112,11 +2130,6 @@ body[data-page="history"] .raw-history summary {
     min-height: 20px;
     padding: 2px 6px;
     font-size: 10px;
-  }
-
-  .focus-meter {
-    align-self: end;
-    height: 4px;
   }
 
   .company-facts,
