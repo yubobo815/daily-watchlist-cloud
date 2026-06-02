@@ -156,14 +156,16 @@ body[data-page="watchlist"] .hero {
     width: min(calc(100vw - 28px), 1540px);
   }
 
-  body[data-page="watchlist"] .hero,
-  body[data-page="watchlist"] .cards,
-  body[data-page="watchlist"] .controls,
-  body[data-page="watchlist"] .today-focus,
-  body[data-page="watchlist"] .changed-today {
-    max-width: 1240px;
-    margin-right: auto;
-    margin-left: auto;
+  body[data-page="watchlist"] .cards {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  body[data-page="watchlist"] .focus-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  body[data-page="watchlist"] .change-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
