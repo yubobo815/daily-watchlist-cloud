@@ -38,12 +38,10 @@ body {
   color: var(--ink);
   font-family: var(--font-app);
   background:
-    linear-gradient(rgba(226, 232, 218, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(226, 232, 218, 0.035) 1px, transparent 1px),
     radial-gradient(circle at 14% 4%, rgba(46, 230, 159, 0.13), transparent 28%),
     radial-gradient(circle at 90% 0%, rgba(114, 169, 255, 0.12), transparent 32%),
     var(--bg);
-  background-size: 28px 28px, 28px 28px, auto, auto, auto;
+  background-size: auto, auto, auto;
 }
 
 a {
