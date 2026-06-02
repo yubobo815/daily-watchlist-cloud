@@ -713,6 +713,7 @@ function renderMobileWatchlistSummary(row) {
           <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <span class="badge pattern-pill">${escapeHtml(setupLabel(row.setup))}</span>
           <span class="badge conviction-pill">${escapeHtml(fmtConviction(row))}</span>
+          <span class="badge entry-pill">Entry ${escapeHtml(fmtNumber(row.entry_est, 2))}</span>
         </span>
       </span>
       <span class="mobile-watch-price">

@@ -697,7 +697,8 @@ th:first-child {
 }
 
 .badge.pattern-pill,
-.badge.conviction-pill {
+.badge.conviction-pill,
+.badge.entry-pill {
   background: var(--panel-strong);
   color: var(--ink);
 }
