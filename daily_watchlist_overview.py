@@ -887,6 +887,25 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     high_beta_no_chase = not high_vol or (range_atr <= 2.5 * (0.90 if is_etf else 0.75) and close_above_setup_low_atr <= 2.5 * (0.90 if is_etf else 0.75))
     personality_entry_ok = mode != "MEAN REVERSION" or fear_rejected or quiet_absorption or buyer_control
     filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and no_chase and high_beta_no_chase and personality_entry_ok and not avoid and not seller_control and not fomo and not greed_rejected
+    continuation_ok = (
+        setup_forming
+        and not filters_ok
+        and mode in {"POWER TREND", "STEADY TREND"}
+        and volume_ok
+        and setup_atr_ok
+        and close_ok
+        and high_beta_no_chase
+        and personality_entry_ok
+        and close > row.ema_fast
+        and row.ema_fast >= row.ema_slow
+        and row.rsi <= 85
+        and row.close_loc >= 0.58
+        and buyer_score >= 55
+        and not avoid
+        and not seller_control
+        and not fomo
+        and not greed_rejected
+    )
 
     sell_rsi = row.rsi > 75
     close_off_high = row.close_loc < 0.55
@@ -929,6 +948,9 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     if filters_ok:
         action = "BUY CANDIDATE"
         rank = 100
+    elif continuation_ok:
+        action = "STRONG CONTINUATION"
+        rank = 85
     elif setup_forming:
         action = "SETUP FORMING"
         rank = 70
@@ -958,6 +980,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         notes.append("Quiet absorption")
     if breakout:
         notes.append("Breakout attempt")
+    if continuation_ok:
+        notes.append("Strong continuation")
     if entry_note:
         notes.append(entry_note)
     if exit_pressure:
@@ -1000,6 +1024,7 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
 def action_class(action: str) -> str:
     return {
         "BUY CANDIDATE": "buy",
+        "STRONG CONTINUATION": "continue",
         "SETUP FORMING": "setup",
         "EXIT PRESSURE": "exit",
         "WATCH TREND": "watch",
@@ -1094,13 +1119,14 @@ def write_history_html(path: Path) -> None:
       text-transform: uppercase;
       background: white;
     }
-    .cards { display: grid; grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .cards { display: grid; grid-template-columns: repeat(5, minmax(125px, 1fr)); gap: 12px; margin-bottom: 16px; }
     .card { background: var(--panel); border: 1px solid rgba(17,20,15,.10); border-radius: 22px; padding: 16px; box-shadow: 0 16px 50px rgba(50,56,42,.10); }
     .card span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
     .card strong { display: block; margin-top: 6px; font-size: 24px; letter-spacing: -.04em; }
     .timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); gap: 8px; margin-bottom: 18px; }
     .day { border: 1px solid rgba(17,20,15,.10); border-radius: 16px; padding: 10px; min-height: 90px; background: white; }
     .day.buy { background: var(--buy); }
+    .day.continue { background: #d7f4ff; }
     .day.setup { background: var(--setup); }
     .day.watch { background: var(--watch); }
     .day.exit { background: var(--exit); }
@@ -1185,6 +1211,7 @@ def write_history_html(path: Path) -> None:
 
     function actionKind(action) {
       if (action === "BUY CANDIDATE") return "buy";
+      if (action === "STRONG CONTINUATION") return "continue";
       if (action === "SETUP FORMING") return "setup";
       if (action === "WATCH TREND") return "watch";
       if (action === "EXIT PRESSURE") return "exit";
@@ -1194,6 +1221,7 @@ def write_history_html(path: Path) -> None:
     function shortAction(action) {
       return {
         "BUY CANDIDATE": "BUY",
+        "STRONG CONTINUATION": "CONT",
         "SETUP FORMING": "SETUP",
         "WATCH TREND": "WATCH",
         "EXIT PRESSURE": "EXIT",
@@ -1333,6 +1361,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
 
     summary_items = [
         ("BUY", int((df["action"] == "BUY CANDIDATE").sum()), "buy"),
+        ("CONT", int((df["action"] == "STRONG CONTINUATION").sum()), "continue"),
         ("SETUP", int((df["action"] == "SETUP FORMING").sum()), "setup"),
         ("WATCH", int((df["action"] == "WATCH TREND").sum()), "watch"),
         ("EXIT", int((df["action"] == "EXIT PRESSURE").sum()), "exit"),
@@ -1363,6 +1392,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     }
     action_labels = {
         "BUY CANDIDATE": "BUY",
+        "STRONG CONTINUATION": "CONT",
         "SETUP FORMING": "SETUP",
         "EXIT PRESSURE": "EXIT",
         "WATCH TREND": "WATCH",
@@ -1558,6 +1588,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     .card span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .12em; margin-bottom: 6px; }}
     .card strong {{ font-size: 32px; line-height: 1; }}
     .card.buy {{ border-top-color: #1d9a55; }}
+    .card.continue {{ border-top-color: #0891b2; }}
     .card.setup {{ border-top-color: #d69b00; }}
     .card.watch {{ border-top-color: #3f6fd5; }}
     .card.exit {{ border-top-color: #c93b32; }}
@@ -1646,6 +1677,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     td[data-col="score"] {{ font-weight: 800; color: #111; }}
     td[data-col="setup"], td[data-col="adaptive_mode"], td[data-col="psychology"] {{ text-align: center; }}
     tr.buy {{ background: var(--buy); }}
+    tr.continue {{ background: #d7f4ff; }}
     tr.setup {{ background: var(--setup); }}
     tr.exit {{ background: var(--exit); }}
     tr.watch {{ background: var(--watch); }}
@@ -1666,6 +1698,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       background: #f4f4f1;
     }}
     .badge.buy {{ color: #0b6b39; background: #ccefd9; }}
+    .badge.continue {{ color: #075985; background: #cff3ff; }}
     .badge.setup {{ color: #866000; background: #ffe5a3; }}
     .badge.watch {{ color: #214eaa; background: #d7e4ff; }}
     .badge.exit {{ color: #9b2018; background: #ffd0cc; }}

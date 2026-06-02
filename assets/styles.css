@@ -48,11 +48,13 @@
   --panel-strong: rgba(21, 27, 37, 0.82);
   --field: rgba(7, 10, 15, 0.38);
   --buy: rgba(46, 230, 159, 0.14);
+  --continue: rgba(34, 211, 238, 0.14);
   --setup: rgba(242, 184, 75, 0.16);
   --watch: rgba(114, 169, 255, 0.16);
   --exit: rgba(255, 113, 103, 0.16);
   --avoid: rgba(226, 232, 218, 0.06);
   --tone-buy: #2ee69f;
+  --tone-continue: #22d3ee;
   --tone-setup: #f2b84b;
   --tone-watch: #72a9ff;
   --tone-exit: #ff7167;
@@ -157,7 +159,7 @@ body[data-page="watchlist"] .hero {
   }
 
   body[data-page="watchlist"] .cards {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   body[data-page="watchlist"] .focus-grid {
@@ -335,7 +337,7 @@ body[data-page="watchlist"] .meta {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(5, minmax(112px, 1fr));
+  grid-template-columns: repeat(6, minmax(92px, 1fr));
   gap: 10px;
   margin: 12px 0;
 }
@@ -383,6 +385,14 @@ body[data-page="watchlist"] .meta {
 .change-card.tone-buy,
 .lookback-card.tone-buy {
   border-top-color: var(--tone-buy);
+}
+
+.tone-continue,
+.card.tone-continue,
+.focus-item.tone-continue,
+.change-card.tone-continue,
+.lookback-card.tone-continue {
+  border-top-color: var(--tone-continue);
 }
 
 .tone-setup,
@@ -768,6 +778,10 @@ td:nth-child(13) {
   background: var(--buy);
 }
 
+.row-continue {
+  background: var(--continue);
+}
+
 .row-setup {
   background: var(--setup);
 }
@@ -821,6 +835,11 @@ td:nth-child(13) {
 .move-pct.up {
   background: var(--buy);
   color: var(--tone-buy);
+}
+
+.badge.continue {
+  background: var(--continue);
+  color: var(--tone-continue);
 }
 
 .badge.setup,
@@ -1025,6 +1044,11 @@ body[data-page="history"] .company-brief {
 .latest-card.tone-buy,
 .moment-card.tone-buy {
   border-left-color: var(--tone-buy);
+}
+
+.latest-card.tone-continue,
+.moment-card.tone-continue {
+  border-left-color: var(--tone-continue);
 }
 
 .latest-card.tone-setup,
@@ -1799,7 +1823,7 @@ body[data-page="history"] .raw-history summary {
   }
 
   .cards {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     margin-top: 7px;
   }

@@ -1,5 +1,6 @@
 const ACTION_LABELS = {
   "BUY CANDIDATE": "BUY",
+  "STRONG CONTINUATION": "CONT",
   "SETUP FORMING": "SETUP",
   "WATCH TREND": "WATCH",
   "EXIT PRESSURE": "EXIT",
@@ -34,6 +35,7 @@ const WATCHLIST_COLUMNS = [
 
 const SUMMARY_CARDS = [
   ["buy", "BUY"],
+  ["continue", "CONT"],
   ["setup", "SETUP"],
   ["watch", "WATCH"],
   ["exit", "EXIT"],
@@ -42,6 +44,7 @@ const SUMMARY_CARDS = [
 
 const ACTION_TONE = {
   buy: "#0f8a5f",
+  continue: "#0891b2",
   setup: "#b7791f",
   watch: "#2f5fb3",
   exit: "#b42318",
@@ -50,6 +53,7 @@ const ACTION_TONE = {
 
 const KIND_LABELS = {
   buy: "BUY",
+  continue: "CONT",
   setup: "SETUP",
   watch: "WATCH",
   exit: "EXIT",
@@ -280,6 +284,7 @@ function normaliseTicker(value) {
 function actionKind(action) {
   return {
     "BUY CANDIDATE": "buy",
+    "STRONG CONTINUATION": "continue",
     "SETUP FORMING": "setup",
     "WATCH TREND": "watch",
     "EXIT PRESSURE": "exit",
@@ -446,6 +451,7 @@ function behaviorDetail(row) {
 
   if (note) return note;
   if (kind === "buy") return `${pattern} behavior with strong conviction and ${tape.toLowerCase()} tape.`;
+  if (kind === "continue") return `Strong continuation: leadership behavior remains constructive, but fresh entry quality may be extended.`;
   if (kind === "setup") return `${pattern} is forming; conviction is constructive but still developing.`;
   if (kind === "watch") return `${mode} behavior; monitor for conviction expansion or cleaner entry.`;
   if (kind === "exit") return `Exit pressure: weak conviction with ${move < 0 ? "negative" : "unstable"} price action.`;
@@ -787,7 +793,7 @@ function renderTodayFocus() {
     .filter((row) => actionKind(row.action) === "exit")
     .sort((a, b) => convictionScore(a) - convictionScore(b))[0];
   const bestDay = [...state.rows]
-    .filter((row) => ["buy", "setup", "watch"].includes(actionKind(row.action)))
+    .filter((row) => ["buy", "continue", "setup", "watch"].includes(actionKind(row.action)))
     .sort((a, b) => Number(b.day_change_pct || 0) - Number(a.day_change_pct || 0))[0];
 
   const items = [
@@ -863,7 +869,7 @@ function renderChangedToday() {
 }
 
 function renderWatchlist() {
-  const counts = { buy: 0, setup: 0, watch: 0, exit: 0, avoid: 0 };
+  const counts = { buy: 0, continue: 0, setup: 0, watch: 0, exit: 0, avoid: 0 };
   state.rows.forEach((row) => {
     counts[actionKind(row.action)] += 1;
   });
