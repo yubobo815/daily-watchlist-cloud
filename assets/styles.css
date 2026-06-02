@@ -20,8 +20,8 @@
   --shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
   --radius-ios: 22px;
   --radius-tile: 18px;
-  --font-app: "Avenir Next", "Gill Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-data: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-app: "Avenir Next", "Avenir", ui-sans-serif, system-ui, sans-serif;
+  --font-data: "Avenir Next", "Avenir", ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -37,6 +37,7 @@ body {
   min-height: 100vh;
   color: var(--ink);
   font-family: var(--font-app);
+  font-variant-numeric: proportional-nums;
   background:
     radial-gradient(circle at 14% 4%, rgba(46, 230, 159, 0.13), transparent 28%),
     radial-gradient(circle at 90% 0%, rgba(114, 169, 255, 0.12), transparent 32%),
