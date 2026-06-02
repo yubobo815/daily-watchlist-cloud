@@ -344,6 +344,7 @@ function renderCompanyBrief(profile) {
   const nextReport = String(profile?.next_report_date || "").trim();
   const website = safeWebsite(profile?.website);
   const industry = [profile?.sector, profile?.industry].filter(Boolean).join(" · ");
+  const source = String(profile?.profile_source || "Company profile").trim();
 
   if (!summary && !highlights && !nextReport && !website && !industry) {
     target.innerHTML = "";
@@ -359,7 +360,7 @@ function renderCompanyBrief(profile) {
         ${nextReport ? `<div><span>Next report</span><strong>${escapeHtml(nextReport)}</strong></div>` : ""}
         ${website ? `<div><span>Website</span><strong><a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(new URL(website).hostname.replace(/^www\./, ""))}</a></strong></div>` : ""}
       </div>
-      <span class="company-source">Source: Yahoo Finance</span>
+      <span class="company-source">Source: ${escapeHtml(source)}</span>
     </div>
   `;
 }
