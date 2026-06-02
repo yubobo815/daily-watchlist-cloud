@@ -164,8 +164,8 @@ body[data-page="watchlist"] .hero {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  body[data-page="watchlist"] .change-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  body[data-page="watchlist"] .change-card {
+    flex-basis: clamp(230px, 22vw, 300px);
   }
 }
 
@@ -543,8 +543,7 @@ body.search-active .changed-today {
   letter-spacing: 0.04em;
 }
 
-.focus-grid,
-.change-grid {
+.focus-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 10px;
@@ -630,8 +629,31 @@ body.search-active .changed-today {
   background: linear-gradient(90deg, currentColor, rgba(242, 245, 236, 0.72));
 }
 
-.change-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+.change-rail {
+  overflow: hidden;
+  border-radius: 22px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+}
+
+.change-track {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.change-rail.rolling .change-track {
+  width: max-content;
+  animation: movers-roll 38s linear infinite;
+}
+
+.change-rail.rolling:hover .change-track,
+.change-rail.rolling:focus-within .change-track {
+  animation-play-state: paused;
+}
+
+.change-card {
+  flex: 0 0 clamp(220px, 28vw, 292px);
 }
 
 .change-card-head {
@@ -658,6 +680,24 @@ body.search-active .changed-today {
 .compact-empty {
   padding: 14px 0;
   text-align: left;
+}
+
+@keyframes movers-roll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .change-rail {
+    overflow-x: auto;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .change-rail.rolling .change-track {
+    animation: none;
+  }
 }
 
 .table-wrap {
@@ -1839,14 +1879,32 @@ body[data-page="history"] .raw-history summary {
     margin-bottom: 6px;
   }
 
-  .focus-grid,
-  .change-grid {
+  .focus-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     margin: 0;
     padding: 0;
     overflow: visible;
+  }
+
+  .change-rail {
+    margin: 0;
+    border-radius: 18px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
+  }
+
+  .change-track {
+    gap: 6px;
+  }
+
+  .change-rail.rolling .change-track {
+    animation-duration: 30s;
+  }
+
+  .change-card {
+    flex-basis: clamp(168px, 56vw, 230px);
   }
 
   .table-wrap {

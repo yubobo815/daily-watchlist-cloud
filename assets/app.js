@@ -800,6 +800,23 @@ function renderTodayFocus() {
   `;
 }
 
+function changedTodayCard({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }, duplicate = false) {
+  return `
+    <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}"${duplicate ? ' aria-hidden="true" tabindex="-1"' : ""}>
+      <div class="change-card-head">
+        <strong>${escapeHtml(row.ticker)}</strong>
+        <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
+      </div>
+      <div class="change-card-body">
+        ${actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>` : ""}
+        ${setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : ""}
+        <span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>
+        <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
+      </div>
+    </a>
+  `;
+}
+
 function renderChangedToday() {
   const panel = document.querySelector("#changed-today");
   if (!panel) return;
@@ -818,6 +835,9 @@ function renderChangedToday() {
     return;
   }
 
+  const rolling = changes.length > 1;
+  const cards = changes.map((change) => changedTodayCard(change)).join("");
+  const duplicateCards = rolling ? changes.map((change) => changedTodayCard(change, true)).join("") : "";
   panel.innerHTML = `
     <div class="section-heading">
       <div>
@@ -825,21 +845,11 @@ function renderChangedToday() {
       </div>
       ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
     </div>
-    <div class="change-grid">
-      ${changes.map(({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }) => `
-        <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
-          <div class="change-card-head">
-            <strong>${escapeHtml(row.ticker)}</strong>
-            <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
-          </div>
-          <div class="change-card-body">
-            ${actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>` : ""}
-            ${setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : ""}
-            <span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>
-            <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
-          </div>
-        </a>
-      `).join("")}
+    <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Today’s movers">
+      <div class="change-track">
+        ${cards}
+        ${duplicateCards}
+      </div>
     </div>
   `;
 }
