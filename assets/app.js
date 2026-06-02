@@ -854,6 +854,8 @@ function renderWatchlist() {
   renderChangedToday();
 
   const needle = state.query.trim().toLowerCase();
+  const searchActive = Boolean(needle);
+  document.body.classList.toggle("search-active", searchActive);
   const [sortKey, direction] = state.sort.split("-");
   const multiplier = direction === "asc" ? 1 : -1;
   state.visibleRows = state.rows
@@ -873,7 +875,19 @@ function renderWatchlist() {
     </tr>
   `).join("");
   document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} shown`;
+  const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
+  if (watchlistTitle) watchlistTitle.textContent = searchActive ? "Search Results" : "Watchlist";
   document.querySelector("#empty").classList.toggle("hidden", state.visibleRows.length > 0);
+}
+
+function scrollToWatchlistResults() {
+  if (!window.matchMedia("(max-width: 960px)").matches) return;
+  const target = document.querySelector("#watchlist-table");
+  if (!target) return;
+  const stickyOffset = 150;
+  const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY - stickyOffset);
+  window.history.replaceState(null, "", "#watchlist-table");
+  window.scrollTo({ top, behavior: "smooth" });
 }
 
 function initTabNavigation() {
@@ -908,6 +922,7 @@ async function initWatchlist() {
     state.query = event.target.value;
     syncSearchClear();
     renderWatchlist();
+    if (state.query.trim()) scrollToWatchlistResults();
   });
   if (clearSearch) {
     clearSearch.addEventListener("click", () => {

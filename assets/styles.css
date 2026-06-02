@@ -481,6 +481,11 @@ body[data-page="watchlist"] .meta {
   padding-top: 4px;
 }
 
+body.search-active .today-focus,
+body.search-active .changed-today {
+  display: none;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
