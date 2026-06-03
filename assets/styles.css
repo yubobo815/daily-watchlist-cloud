@@ -415,6 +415,73 @@ body[data-page="watchlist"] .meta {
   font-weight: 760;
 }
 
+.traffic-health {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 610;
+  line-height: 1.35;
+}
+
+.traffic-health b {
+  color: var(--ink);
+  font-weight: 720;
+}
+
+.traffic-lights {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 8px);
+  gap: 4px;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 4px 5px;
+  border: 1px solid rgba(226, 232, 218, 0.1);
+  border-radius: 999px;
+  background: rgba(7, 10, 15, 0.3);
+}
+
+.traffic-lights i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  opacity: 0.24;
+  transform: scale(0.88);
+}
+
+.traffic-red {
+  background: #f16b6b;
+}
+
+.traffic-yellow {
+  background: #e4bc5c;
+}
+
+.traffic-green {
+  background: #2ee69f;
+}
+
+.traffic-lights i.active {
+  opacity: 1;
+  transform: scale(1);
+  box-shadow: 0 0 16px currentColor;
+}
+
+.traffic-red.active {
+  color: #f16b6b;
+}
+
+.traffic-yellow.active {
+  color: #e4bc5c;
+}
+
+.traffic-green.active {
+  color: #2ee69f;
+}
+
 .brief-actions {
   display: flex;
   flex-wrap: wrap;
@@ -447,7 +514,7 @@ body[data-page="watchlist"] .meta {
 }
 
 .run-health-panel {
-  margin: 10px 0 12px;
+  display: none;
 }
 
 .run-health-card {
@@ -2239,6 +2306,23 @@ body[data-page="history"] .raw-history summary {
     min-height: 24px;
     padding: 3px 7px;
     font-size: 9.5px;
+  }
+
+  .traffic-health {
+    gap: 7px;
+    margin-top: 8px;
+    font-size: 10.5px;
+  }
+
+  .traffic-lights {
+    grid-template-columns: repeat(3, 7px);
+    gap: 3px;
+    padding: 3px 4px;
+  }
+
+  .traffic-lights i {
+    width: 7px;
+    height: 7px;
   }
 
   .brief-actions {

@@ -924,45 +924,45 @@ function runHealthSummary(runInfo) {
 function renderRunHealthPanel(runInfo, rows = []) {
   const panel = document.querySelector("#run-health-panel");
   if (!panel) return;
+  panel.innerHTML = "";
+  panel.hidden = true;
+}
+
+function runHealthStatus(runInfo, rows = []) {
   const failed = Number(runInfo?.symbols_failed || 0);
   const stale = Number(runInfo?.symbols_stale_cache || 0);
   const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
   const total = Number(runInfo?.symbols_total || rows.length || 0);
   const liveOk = runInfo?.live_access_ok;
-  const sourceLabel = liveOk === false ? "Source degraded" : liveOk === true ? "Live source OK" : "Source unknown";
-  const tone = liveOk === false || failed || stale ? "warn" : "ok";
-  const version = runInfo?.scanner_version || "unknown";
   const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
-  const staleSymbols = (runInfo?.payload?.stale_cache_fallbacks || []).map((item) => item.ticker).filter(Boolean).slice(0, 8);
-  const failedSymbols = (runInfo?.payload?.failed_symbols || []).map((item) => item.ticker).filter(Boolean).slice(0, 8);
-  const issueLine = [
-    staleSymbols.length ? `Cached: ${staleSymbols.join(", ")}` : "",
-    failedSymbols.length ? `Failed: ${failedSymbols.join(", ")}` : "",
+  const hasRows = rows.length > 0 || analyzed > 0;
+  const hasIssue = liveOk === false || failed > 0 || stale > 0;
+  const tone = !hasRows ? "bad" : hasIssue ? "warn" : "ok";
+  const label = tone === "bad" ? "Data issue" : tone === "warn" ? "Data caution" : "Live data healthy";
+  const caveats = [
+    stale ? `${stale} cached` : "",
+    failed ? `${failed} failed` : "",
+    liveOk === false ? "source degraded" : "",
+  ].filter(Boolean);
+  const detail = [
+    `${analyzed || total || rows.length} analyzed`,
+    latestData && latestData !== "unknown" ? `market data ${latestData}` : "",
+    caveats.length ? caveats.join(", ") : "",
   ].filter(Boolean).join(" · ");
+  return { tone, label, detail };
+}
 
-  panel.innerHTML = `
-    <details class="run-health-card tone-${tone}">
-      <summary>
-        <div>
-          <span class="brief-kicker">Run Health</span>
-          <strong>${escapeHtml(sourceLabel)}</strong>
-          <p>${escapeHtml(latestData)} · scanner ${escapeHtml(version)}</p>
-        </div>
-        <span class="run-health-summary">${failed || stale ? `${stale} cached · ${failed} failed` : "Healthy"}</span>
-      </summary>
-      <div class="run-health-detail">
-        <div>
-        <span class="brief-kicker">Run Health</span>
-        ${issueLine ? `<p class="run-health-issues">${escapeHtml(issueLine)}</p>` : ""}
-        </div>
-        <div class="run-health-metrics">
-          <span><b>${analyzed}</b><small>Analyzed</small></span>
-          <span><b>${stale}</b><small>Cached</small></span>
-          <span><b>${failed}</b><small>Failed</small></span>
-          <span><b>${total}</b><small>Total</small></span>
-        </div>
-      </div>
-    </details>
+function renderTrafficHealth(runInfo, rows = []) {
+  const health = runHealthStatus(runInfo, rows);
+  return `
+    <div class="traffic-health tone-${health.tone}">
+      <span class="traffic-lights" aria-label="${escapeHtml(health.label)}">
+        <i class="traffic-red ${health.tone === "bad" ? "active" : ""}" aria-hidden="true"></i>
+        <i class="traffic-yellow ${health.tone === "warn" ? "active" : ""}" aria-hidden="true"></i>
+        <i class="traffic-green ${health.tone === "ok" ? "active" : ""}" aria-hidden="true"></i>
+      </span>
+      <span><b>${escapeHtml(health.label)}</b>${health.detail ? ` · ${escapeHtml(health.detail)}` : ""}</span>
+    </div>
   `;
 }
 
@@ -1174,16 +1174,6 @@ function tickerList(items, limit = 3) {
   return tickers.length ? tickers.slice(0, limit).join(" / ") : "none";
 }
 
-function sourceHealthLine(runInfo, rows) {
-  const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
-  const failed = Number(runInfo?.symbols_failed || 0);
-  const stale = Number(runInfo?.symbols_stale_cache || 0);
-  const caveat = failed || stale
-    ? ` · ${stale} cached, ${failed} failed`
-    : "";
-  return `Data ${latestData}${caveat}`;
-}
-
 function renderDailyBrief(counts) {
   const panel = document.querySelector("#daily-brief");
   if (!panel) return;
@@ -1216,7 +1206,7 @@ function renderDailyBrief(counts) {
           <span><b>Movers</b> ${escapeHtml(moverText)}</span>
           <span><b>Risk</b> ${escapeHtml(riskText)}</span>
         </div>
-        <p>${escapeHtml(sourceHealthLine(state.runInfo, state.rows))}</p>
+        ${renderTrafficHealth(state.runInfo, state.rows)}
       </div>
       <div class="brief-actions">
         ${topBuy ? `<a class="brief-primary" href="./history.html?ticker=${encodeURIComponent(topBuy.ticker)}">Review ${escapeHtml(topBuy.ticker)}</a>` : ""}
