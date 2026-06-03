@@ -664,25 +664,7 @@ async function getSupabaseConfig() {
     // Fall back to the static config script below.
   }
 
-  await new Promise((resolve) => {
-    const existing = document.querySelector("script[data-watchlist-supabase]");
-    if (existing) {
-      existing.addEventListener("load", resolve, { once: true });
-      existing.addEventListener("error", resolve, { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "./supabase-config.js";
-    script.async = true;
-    script.dataset.watchlistSupabase = "true";
-    script.onload = resolve;
-    script.onerror = resolve;
-    document.head.appendChild(script);
-  });
-
-  return window.WATCHLIST_SUPABASE?.url && window.WATCHLIST_SUPABASE?.anonKey
-    ? window.WATCHLIST_SUPABASE
-    : STATIC_SUPABASE_CONFIG;
+  return STATIC_SUPABASE_CONFIG;
 }
 
 async function supabaseFetch(path) {
