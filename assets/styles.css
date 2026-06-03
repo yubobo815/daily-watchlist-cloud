@@ -1583,14 +1583,14 @@ body[data-page="history"] .company-brief {
 
 .gauge-readout {
   position: absolute;
-  bottom: 17px;
+  bottom: 16px;
   left: 50%;
   display: flex;
   align-items: baseline;
-  gap: 2px;
+  gap: 4px;
   transform: translateX(-50%);
   font-family: var(--font-data);
-  font-size: 15px;
+  font-size: 12px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -2692,6 +2692,11 @@ body[data-page="history"] .raw-history summary {
 
   .conviction-gauge svg {
     width: min(100%, 172px);
+  }
+
+  .gauge-readout {
+    bottom: 13px;
+    font-size: 11px;
   }
 
   .chart-insights {
