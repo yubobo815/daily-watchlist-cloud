@@ -331,11 +331,9 @@ function historyDisplayTitle() {
   return state.tickerName || state.ticker;
 }
 
-function firstSentence(text, maxLength = 190) {
+function cleanSummaryText(text) {
   const clean = String(text || "").replace(/\s+/g, " ").trim();
-  if (!clean) return "";
-  const sentence = clean.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || clean;
-  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 1).trim()}...` : sentence;
+  return clean;
 }
 
 function safeWebsite(value) {
@@ -351,7 +349,7 @@ function safeWebsite(value) {
 function renderCompanyBrief(profile) {
   const target = document.querySelector("#ticker-name");
   if (!target) return;
-  const summary = firstSentence(profile?.business_summary);
+  const summary = cleanSummaryText(profile?.business_summary);
   const highlights = String(profile?.latest_report_highlights || "").trim();
   const nextReport = String(profile?.next_report_date || "").trim();
   const website = safeWebsite(profile?.website);
@@ -366,7 +364,7 @@ function renderCompanyBrief(profile) {
   target.innerHTML = `
     <details class="company-brief">
       <summary>
-      ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
+        ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
         ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
         ${summary && summary.length > 120 ? `<span class="company-toggle" data-open="Show less" data-closed="Show more"></span>` : ""}
       </summary>
