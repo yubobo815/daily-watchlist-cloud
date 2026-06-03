@@ -61,6 +61,10 @@ const KIND_LABELS = {
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
+const STATIC_SUPABASE_CONFIG = {
+  url: "https://epjeuatrsjacfcyxxttk.supabase.co",
+  anonKey: "sb_publishable_0n1SKb8_92zrPmGThrYs9A_qNz77BAn",
+};
 
 const SECURITY_NAME_FALLBACKS = {
   AAPL: "Apple",
@@ -678,7 +682,7 @@ async function getSupabaseConfig() {
 
   return window.WATCHLIST_SUPABASE?.url && window.WATCHLIST_SUPABASE?.anonKey
     ? window.WATCHLIST_SUPABASE
-    : null;
+    : STATIC_SUPABASE_CONFIG;
 }
 
 async function supabaseFetch(path) {
