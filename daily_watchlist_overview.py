@@ -25,6 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
+SCANNER_VERSION = "2026.06.03-product-cleanup"
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -494,7 +495,7 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
         raise RuntimeError(f"Supabase upsert to {table} failed with HTTP {exc.code}: {body}") from exc
 
 
-def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str) -> None:
+def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
     url, key = supabase_credentials()
     if not url or not key:
         print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.")
@@ -549,6 +550,12 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str) ->
                     "payload": row,
                 }
             )
+
+    if run_metadata:
+        try:
+            supabase_upsert("watchlist_refresh_runs", [clean_record(run_metadata)], ["run_date"])
+        except RuntimeError as exc:
+            print(f"Supabase run-health sync skipped: {exc}")
 
     supabase_upsert("watchlist_snapshots", report_records, ["run_date", "ticker"])
     supabase_upsert("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
@@ -624,7 +631,7 @@ def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_
         max_pullback = max(max_pullback, close - atr_now * 1.5)
 
     if entry < max_pullback:
-        return max_pullback, f"Entry zone capped near current price; original retest {entry:.2f} was stale"
+        return max_pullback, f"Reference zone capped near current price; original retest {entry:.2f} was stale"
     return entry, ""
 
 
@@ -1191,7 +1198,7 @@ def write_history_html(path: Path) -> None:
     <section class="table-wrap">
       <table>
         <thead>
-          <tr><th>Date</th><th>Signal</th><th>Setup</th><th>Mode</th><th>Tape</th><th>Score</th><th>Close</th><th>Chg%</th><th>Entry</th><th>Stop</th><th>Target</th><th>Notes</th></tr>
+          <tr><th>Date</th><th>Signal</th><th>Setup</th><th>Mode</th><th>Tape</th><th>Score</th><th>Close</th><th>Chg%</th><th>Ref Zone</th><th>Stop</th><th>Target</th><th>Notes</th></tr>
         </thead>
         <tbody id="rows"></tbody>
       </table>
@@ -1409,7 +1416,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "hist_win_rate": "Win%",
         "reward_risk": "R/R",
         "volume_state": "Vol",
-        "entry_est": "Entry",
+        "entry_est": "Ref Zone",
         "stop_est": "Stop",
         "target_est": "Target",
         "notes": "Read",
@@ -1918,6 +1925,31 @@ def main() -> None:
         status_parts.append(f"{len(failures)} symbols failed")
     status_text = " | ".join(status_parts)
     preflight_text = None if live_access_ok else f"{live_access_message} Running cache-backed refresh."
+    run_status = "ok"
+    if not live_access_ok or stale_cache_fallbacks:
+        run_status = "degraded"
+    if failures and not rows:
+        run_status = "failed"
+    run_metadata = {
+        "run_date": today,
+        "status": run_status,
+        "live_access_ok": live_access_ok,
+        "live_access_message": live_access_message,
+        "earliest_data_date": earliest_data_date,
+        "latest_data_date": latest_data_date,
+        "symbols_total": len(tickers),
+        "symbols_analyzed": len(rows),
+        "symbols_failed": len(failures),
+        "symbols_stale_cache": len(stale_cache_fallbacks),
+        "snapshot_rows": len(report),
+        "history_rows": len(history_rows),
+        "scanner_version": SCANNER_VERSION,
+        "notes": status_text,
+        "payload": {
+            "failures": failures[:25],
+            "stale_cache_fallbacks": stale_cache_fallbacks[:25],
+        },
+    }
 
     write_html(report, html_path, status_text=status_text, preflight_text=preflight_text)
     report.to_csv("daily_watchlist_overview_latest.csv", index=False)
@@ -1944,7 +1976,7 @@ def main() -> None:
         Path("daily_watchlist_overview_stale_cache.csv").unlink()
 
     if not args.no_supabase:
-        sync_supabase(report, history, today)
+        sync_supabase(report, history, today, run_metadata)
 
     columns = ["ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct", "notes"]
     print(report[columns].to_string(index=False))

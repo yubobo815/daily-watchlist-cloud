@@ -5,7 +5,7 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 ## What it does
 
 - Runs `python daily_watchlist_overview.py --refresh`.
-- Publishes `daily_watchlist_overview_latest.html` as the site homepage.
+- Publishes the app shell (`index.html`) as the site homepage.
 - Publishes the latest CSV beside the HTML report.
 - Saves each refresh into Supabase when the Supabase secrets are configured.
 - Runs at 8:00am Australia/Melbourne time, including daylight saving changes.
@@ -41,7 +41,6 @@ After the first successful run, GitHub will show the public Pages URL in the wor
 ## Published files
 
 - `index.html`: the main report page.
-- `daily_watchlist_overview_latest.html`: same report page, explicit filename.
 - `daily_watchlist_overview_latest.csv`: latest signal data.
 - `history.html`: ticker behavior history viewer.
 - `watchlist_behavior_history_latest.csv`: latest 30-trading-day behavior history.

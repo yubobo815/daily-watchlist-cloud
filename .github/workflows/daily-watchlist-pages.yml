@@ -33,7 +33,12 @@ jobs:
         id: time_gate
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -75,12 +80,11 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           mkdir -p public
-          cp daily_watchlist_overview_latest.html public/index.html
-          cp daily_watchlist_overview_latest.html public/daily_watchlist_overview_latest.html
-          cp daily_watchlist_overview_latest.csv public/daily_watchlist_overview_latest.csv
+          cp index.html public/index.html
           cp history.html public/history.html
           cp manifest.webmanifest public/manifest.webmanifest
           cp -R assets public/assets
+          cp daily_watchlist_overview_latest.csv public/daily_watchlist_overview_latest.csv
           cp watchlist_behavior_history_latest.csv public/watchlist_behavior_history_latest.csv
           cp daily_watchlist_overview_failures.csv public/daily_watchlist_overview_failures.csv 2>/dev/null || true
           cp daily_watchlist_overview_stale_cache.csv public/daily_watchlist_overview_stale_cache.csv 2>/dev/null || true

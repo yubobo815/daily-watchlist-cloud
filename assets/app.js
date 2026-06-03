@@ -21,13 +21,13 @@ const WATCHLIST_COLUMNS = [
   ["ticker", "Sym"],
   ["name", "Name"],
   ["action", "Signal"],
-  ["score", "Conviction"],
+  ["score", "Strength"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
   ["setup", "Pattern"],
   ["adaptive_mode", "Market Behavior"],
   ["psychology", "Tape"],
-  ["entry_est", "Entry"],
+  ["entry_est", "Ref Zone"],
   ["stop_est", "Stop"],
   ["target_est", "Target"],
   ["notes", "Behavior Note"]
@@ -62,7 +62,8 @@ const KIND_LABELS = {
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
 const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
-const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v2:";
+const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v3:";
+const STATIC_FALLBACK_MAX_AGE_DAYS = 3;
 const STATIC_SUPABASE_CONFIG = {
   url: "https://lzuwwiabrnebboxriemu.supabase.co",
   anonKey: "sb_publishable_tCTML11CHw0fwtYWD9_I-Q_ne39UiHw",
@@ -427,6 +428,14 @@ function scoreBand(value) {
   return "risk";
 }
 
+function strengthLabel(rowOrScore) {
+  const band = scoreBand(convictionScore(rowOrScore));
+  if (band === "strong") return "High";
+  if (band === "constructive") return "Building";
+  if (band === "weak") return "Low";
+  return "Risk";
+}
+
 function setupTone(value) {
   const label = setupLabel(value).toUpperCase();
   if (!label || label === "NONE") return "neutral";
@@ -446,6 +455,10 @@ function fmtConviction(rowOrScore) {
   return fmtNumber(convictionScore(rowOrScore), 0);
 }
 
+function fmtRawScore(row) {
+  return fmtNumber(numericValue(row, "score"), 1);
+}
+
 function behaviorDetail(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
@@ -456,12 +469,12 @@ function behaviorDetail(row) {
   const note = String(row.notes || "").trim();
 
   if (note) return note;
-  if (kind === "buy") return `${pattern} behavior with strong conviction and ${tape.toLowerCase()} tape.`;
-  if (kind === "continue") return `Strong continuation: leadership behavior remains constructive, but fresh entry quality may be extended.`;
-  if (kind === "setup") return `${pattern} is forming; conviction is constructive but still developing.`;
-  if (kind === "watch") return `${mode} behavior; monitor for conviction expansion or cleaner entry.`;
-  if (kind === "exit") return `Exit pressure: weak conviction with ${move < 0 ? "negative" : "unstable"} price action.`;
-  if (score < 25) return "Weak scanner behavior; avoid until conviction and tape improve.";
+  if (kind === "buy") return `${pattern} behavior with strong scanner strength and ${tape.toLowerCase()} tape.`;
+  if (kind === "continue") return `Strong continuation: leadership behavior remains constructive, but fresh zone quality may be extended.`;
+  if (kind === "setup") return `${pattern} is forming; scanner strength is constructive but still developing.`;
+  if (kind === "watch") return `${mode} behavior; monitor for strength expansion or a cleaner reference zone.`;
+  if (kind === "exit") return `Exit pressure: weak strength with ${move < 0 ? "negative" : "unstable"} price action.`;
+  if (score < 25) return "Weak scanner behavior; avoid until strength and tape improve.";
   return `${mode} behavior with no clear edge yet.`;
 }
 
@@ -607,7 +620,7 @@ function renderGauge(row) {
   const pointer = gaugePointerPath(point);
   return `
     <div class="conviction-gauge score-${band}">
-      <svg viewBox="0 0 180 104" role="img" aria-label="Conviction score ${fmtConviction(row)} out of 100">
+      <svg viewBox="0 0 180 104" role="img" aria-label="Scanner strength ${strengthLabel(row)}">
         <path class="gauge-track" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-risk" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-weak" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
@@ -617,8 +630,8 @@ function renderGauge(row) {
         <circle class="gauge-hub" cx="90" cy="63" r="4.2" />
       </svg>
       <div class="gauge-readout">
-        <strong>${fmtConviction(row)}</strong>
-        <small>/100</small>
+        <strong>${escapeHtml(strengthLabel(row))}</strong>
+        <small>raw ${escapeHtml(fmtRawScore(row))}</small>
       </div>
     </div>
   `;
@@ -639,7 +652,7 @@ function renderScoreBreakdown(row) {
   return `
     <div class="score-explainer">
       <div class="score-explainer-head">
-        <span>Conviction Read</span>
+        <span>Scanner Read</span>
         <strong>${escapeHtml(behaviorDetail(row))}</strong>
       </div>
       <div class="score-factors">
@@ -666,7 +679,7 @@ function renderHistoryChangeChips(row, previous) {
   }
   const scoreMove = convictionScore(row) - convictionScore(previous);
   if (Math.abs(scoreMove) >= 4) {
-    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>`);
+    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Strength ${fmtSignedNumber(scoreMove, 0)}</span>`);
   }
   return chips.join(" ") || `<span class="change-chip quiet">Steady</span>`;
 }
@@ -678,12 +691,26 @@ function setStatus(message, ok = true) {
   if (runStatus) runStatus.classList.toggle("bad", !ok);
 }
 
-function setRefreshSummary(latest, marketData, rows) {
+function runHealthSummary(runInfo) {
+  if (!runInfo) return "";
+  const parts = [];
+  const failed = Number(runInfo.symbols_failed || 0);
+  const stale = Number(runInfo.symbols_stale_cache || 0);
+  const liveOk = runInfo.live_access_ok;
+  if (liveOk === false) parts.push("source degraded");
+  if (stale) parts.push(`${stale} cached`);
+  if (failed) parts.push(`${failed} failed`);
+  if (runInfo.scanner_version) parts.push(`scanner ${runInfo.scanner_version}`);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
+function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const status = document.querySelector("#status");
   const runStatus = document.querySelector("#run-status");
   if (runStatus) {
     const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
-    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}`;
+    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
+    runStatus.classList.toggle("warn", Boolean(runInfo && (runInfo.live_access_ok === false || Number(runInfo.symbols_failed || 0) || Number(runInfo.symbols_stale_cache || 0))));
   }
   if (status) status.textContent = APP_DISCLAIMER;
   if (runStatus) runStatus.classList.remove("bad");
@@ -742,12 +769,45 @@ async function supabaseFetch(path) {
 }
 
 async function recentRunDates(limit = 2) {
-  const rows = await supabaseFetch("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
   const dates = [];
+  try {
+    const runRows = await supabaseFetch(`watchlist_refresh_runs?select=*&order=run_date.desc&limit=${limit}`);
+    runRows.forEach((row) => {
+      if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
+    });
+  } catch {
+    // Older databases may not have the refresh-runs table yet.
+  }
+  if (dates.length >= limit) return dates.slice(0, limit);
+
+  const rows = await supabaseFetch("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
   rows.forEach((row) => {
     if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
   });
   return dates.slice(0, limit);
+}
+
+async function latestRunInfo(runDate) {
+  if (!runDate) return null;
+  try {
+    const rows = await supabaseFetch(`watchlist_refresh_runs?select=*&run_date=eq.${encodeURIComponent(runDate)}&limit=1`);
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+function fallbackAgeDays(runDate) {
+  if (!runDate) return Infinity;
+  const parsed = new Date(`${runDate}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return Infinity;
+  return Math.floor((Date.now() - parsed.getTime()) / 86400000);
+}
+
+function assertFreshStaticFallback(runDate) {
+  if (fallbackAgeDays(runDate) > STATIC_FALLBACK_MAX_AGE_DAYS) {
+    throw new Error("Live data is unavailable and the offline archive is too old to display safely.");
+  }
 }
 
 async function fetchStaticJson(path) {
@@ -758,6 +818,7 @@ async function fetchStaticJson(path) {
 
 async function loadStaticLatestRows() {
   const fallback = await fetchStaticJson("./data/latest.json");
+  assertFreshStaticFallback(fallback.run_date);
   return {
     latest: fallback.run_date,
     previous: "",
@@ -773,7 +834,10 @@ async function loadStaticLatestRows() {
 
 async function loadStaticTickerHistory(ticker) {
   const fallback = await fetchStaticJson("./data/history.json");
-  const rows = (fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || [])
+  const rawRows = fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || (fallback.rows || []).filter((row) => row.ticker === ticker);
+  const fallbackRunDate = fallback.run_date || rawRows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || "";
+  assertFreshStaticFallback(fallbackRunDate);
+  const rows = rawRows
     .map((row) => ({
       ...row,
       history_date: row.data_date || row.date || row.run_date,
@@ -782,7 +846,7 @@ async function loadStaticTickerHistory(ticker) {
     }))
     .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
   return {
-    latest: rows[0]?.run_date || "",
+    latest: rows[0]?.run_date || fallbackRunDate,
     name: rows[0]?.name || "",
     rows,
   };
@@ -805,7 +869,7 @@ function renderWatchlistCell(row, key) {
   if (key === "notes") {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
-  if (key === "score") return `<span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(fmtConviction(row))}</span>`;
+  if (key === "score") return `<span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(strengthLabel(row))}</span>`;
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
@@ -821,8 +885,8 @@ function renderMobileWatchlistSummary(row) {
         <span class="mobile-watch-tags">
           <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>
-          <span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(fmtConviction(row))}</span>
-          <span class="badge entry-pill">Entry ${escapeHtml(fmtNumber(row.entry_est, 2))}</span>
+          <span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(strengthLabel(row))}</span>
+          <span class="badge entry-pill">Zone ${escapeHtml(fmtNumber(row.entry_est, 2))}</span>
         </span>
       </span>
       <span class="mobile-watch-price">
@@ -858,7 +922,6 @@ function securityDisplay(row) {
 function focusItem(row, reason) {
   if (!row) return "";
   const kind = actionKind(row.action);
-  const score = fmtConviction(row);
   return `
     <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
       <span class="focus-kicker">${escapeHtml(reason)}</span>
@@ -868,7 +931,7 @@ function focusItem(row, reason) {
       </span>
       <span class="focus-meta">
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        <span>${score}/100</span>
+        <span class="badge conviction-pill score-${scoreBand(convictionScore(row))}">${escapeHtml(strengthLabel(row))}</span>
         <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
       </span>
     </a>
@@ -918,10 +981,21 @@ function changedTodayCard({ row, previous, scoreMove, pricePct, actionChanged, s
       <div class="change-card-body">
         ${previous && actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(signal)}</span>` : `<span class="change-chip signal">${escapeHtml(signal)}</span>`}
         ${previous && setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : `<span class="change-chip setup">${escapeHtml(setupLabel(row.setup))}</span>`}
-        ${previous ? `<span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>` : `<span class="change-chip quiet">Conviction ${fmtConviction(row)}/100</span>`}
+        ${previous ? `<span class="change-chip ${moveClass(scoreMove)}">Strength ${fmtSignedNumber(scoreMove, 0)}</span>` : `<span class="change-chip quiet">Strength ${escapeHtml(strengthLabel(row))}</span>`}
         <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
       </div>
     </a>
+  `;
+}
+
+function moversSectionHeading(title, runDate) {
+  return `
+    <div class="section-heading">
+      <div>
+        <span>${escapeHtml(title)}</span>
+      </div>
+      ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
+    </div>
   `;
 }
 
@@ -938,12 +1012,7 @@ function renderChangedToday() {
       const fallbackCards = fallbackMovers.map((change) => changedTodayCard(change)).join("");
       const duplicateFallbackCards = rollingFallback ? fallbackMovers.map((change) => changedTodayCard(change, true)).join("") : "";
       panel.innerHTML = `
-        <div class="section-heading">
-          <div>
-            <span>Today’s Movers</span>
-          </div>
-          ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
-        </div>
+        ${moversSectionHeading("Price Movers", runDate)}
         <div class="change-rail${rollingFallback ? " rolling" : ""}" aria-label="Today’s movers">
           <div class="change-track">
             ${fallbackCards}
@@ -954,12 +1023,7 @@ function renderChangedToday() {
       return;
     }
     panel.innerHTML = `
-      <div class="section-heading">
-        <div>
-          <span>Today’s Movers</span>
-        </div>
-        ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
-      </div>
+      ${moversSectionHeading("Signal Changes", runDate)}
       <div class="empty compact-empty">No major scanner changes versus the previous run.</div>
     `;
     return;
@@ -969,12 +1033,7 @@ function renderChangedToday() {
   const cards = items.map((change) => changedTodayCard(change)).join("");
   const duplicateCards = rolling ? items.map((change) => changedTodayCard(change, true)).join("") : "";
   panel.innerHTML = `
-    <div class="section-heading">
-      <div>
-        <span>Today’s Movers</span>
-      </div>
-      ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
-    </div>
+    ${moversSectionHeading("Signal Changes", runDate)}
     <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Today’s movers">
       <div class="change-track">
         ${cards}
@@ -1090,11 +1149,15 @@ async function initWatchlist() {
       renderWatchlist();
       return;
     }
-    state.rows = (await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(latest)}&order=score.desc`))
+    const runInfoPromise = latestRunInfo(latest);
+    const latestRowsPromise = supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(latest)}&order=score.desc`);
+    const previousRowsPromise = previous
+      ? supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(previous)}&order=score.desc`)
+      : Promise.resolve([]);
+    const [runInfo, latestRows, previousRows] = await Promise.all([runInfoPromise, latestRowsPromise, previousRowsPromise]);
+    state.rows = latestRows
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
-    state.previousRows = previous
-      ? await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(previous)}&order=score.desc`)
-      : [];
+    state.previousRows = previousRows;
     if (!state.rows.length) {
       const fallback = await loadStaticLatestRows();
       state.rows = fallback.rows;
@@ -1105,7 +1168,7 @@ async function initWatchlist() {
       return;
     }
     const marketData = dataDateSummary(state.rows);
-    setRefreshSummary(latest, marketData, state.rows);
+    setRefreshSummary(latest, marketData, state.rows, runInfo);
     renderWatchlist();
   } catch (error) {
     setStatus(error.message, false);
@@ -1126,9 +1189,9 @@ function renderLatestHistoryPanel(latest) {
       </div>
       <div class="latest-metrics">
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
-        <div><span>Conviction</span><strong>${fmtConviction(latest)}/100</strong></div>
+        <div><span>Strength</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
-        <div><span>Entry</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
+        <div><span>Ref Zone</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
       ${renderScoreBreakdown(latest)}
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
@@ -1183,7 +1246,7 @@ function renderHistoryVisual(rows) {
     const x = xFor(index) - barWidth / 2;
     return `
       <rect class="score-bar score-${scoreBand(score)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, baselineY - y).toFixed(1)}" rx="3">
-        <title>${escapeHtml(row.history_date)} · conviction ${fmtConviction(row)}/100 · raw rank ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
+        <title>${escapeHtml(row.history_date)} · strength ${escapeHtml(strengthLabel(row))} · raw rank ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
       </rect>
     `;
   }).join("");
@@ -1210,22 +1273,22 @@ function renderHistoryVisual(rows) {
     </div>
     <details class="chart-details">
       <summary>
-        <span>Show Conviction Detail</span>
-        <strong>Daily bars, compact view</strong>
+        <span>Show Strength Detail</span>
+        <strong>Daily scanner bars</strong>
       </summary>
       <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>Conviction Detail</span>
-          <strong>Daily normalized conviction bars</strong>
-          <p class="chart-note">Bars show normalized conviction from 0-100. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
+          <span>Strength Detail</span>
+          <strong>Daily scanner-strength bars</strong>
+          <p class="chart-note">Bars show normalized scanner strength. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
-          <strong>${fmtConviction(latest)}</strong>
+          <strong>${escapeHtml(strengthLabel(latest))}</strong>
         </div>
       </div>
-      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day conviction and price chart">
+      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day scanner strength and price chart">
         <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
         ${gridLines}
         ${scoreBars}
@@ -1233,7 +1296,7 @@ function renderHistoryVisual(rows) {
         ${dateTicks}
       </svg>
       <div class="chart-legend">
-        <span><i class="legend-score"></i> daily conviction bars</span>
+        <span><i class="legend-score"></i> daily strength bars</span>
         <span><i class="legend-price"></i> price direction</span>
       </div>
       <div class="chart-insights">
@@ -1280,7 +1343,7 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previous)}</div>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Conviction ${fmtConviction(row)}/100 · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Strength ${escapeHtml(strengthLabel(row))} · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
@@ -1296,8 +1359,8 @@ function renderHistoryRows() {
           </div>
           <div class="lookback-main">
             <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-            <strong>${fmtConviction(row)}</strong>
-            <span>Conviction</span>
+            <strong>${escapeHtml(strengthLabel(row))}</strong>
+            <span>Strength</span>
           </div>
           <div class="lookback-meta">
             <span>${escapeHtml(setupLabel(row.setup))}</span>
@@ -1330,13 +1393,19 @@ async function loadHistory(ticker) {
     const runRows = await supabaseFetch(`watchlist_behavior_history?select=run_date&ticker=eq.${encodeURIComponent(state.ticker)}&order=run_date.desc&limit=1`);
     const latest = runRows[0]?.run_date;
     if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
-    const snapshotRows = await supabaseFetch(`watchlist_snapshots?select=name,payload&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`);
+    const [snapshotRows, historyRows, runInfo, profile] = await Promise.all([
+      supabaseFetch(`watchlist_snapshots?select=name,payload&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`),
+      supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`),
+      latestRunInfo(latest),
+      fetchCompanyBrief(state.ticker).catch(() => ({}))
+    ]);
     state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
     document.title = historyDisplayTitle();
-    state.historyRows = await supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`);
+    if (hasCompanyBrief(profile)) renderCompanyBrief(profile);
+    state.historyRows = historyRows;
     const marketData = historyDateSummary(state.historyRows);
-    setRefreshSummary(latest, marketData, state.historyRows);
+    setRefreshSummary(latest, marketData, state.historyRows, runInfo);
     renderHistoryRows();
   } catch (error) {
     try {
