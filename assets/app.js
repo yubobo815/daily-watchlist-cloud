@@ -647,6 +647,19 @@ async function getSupabaseConfig() {
     return window.WATCHLIST_SUPABASE;
   }
 
+  try {
+    const response = await fetch("/api/config", { cache: "no-store" });
+    if (response.ok) {
+      const config = await response.json();
+      if (config?.url && config?.anonKey) {
+        window.WATCHLIST_SUPABASE = config;
+        return config;
+      }
+    }
+  } catch {
+    // Fall back to the static config script below.
+  }
+
   await new Promise((resolve) => {
     const existing = document.querySelector("script[data-watchlist-supabase]");
     if (existing) {
