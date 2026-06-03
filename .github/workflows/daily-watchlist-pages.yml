@@ -75,11 +75,10 @@ jobs:
       - name: Prepare Pages artifact
         if: steps.time_gate.outputs.run == 'true'
         shell: bash
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           mkdir -p public
+          mkdir -p public/data
+          git checkout -- index.html history.html assets manifest.webmanifest
           cp index.html public/index.html
           cp history.html public/history.html
           cp manifest.webmanifest public/manifest.webmanifest
@@ -88,11 +87,31 @@ jobs:
           cp watchlist_behavior_history_latest.csv public/watchlist_behavior_history_latest.csv
           cp daily_watchlist_overview_failures.csv public/daily_watchlist_overview_failures.csv 2>/dev/null || true
           cp daily_watchlist_overview_stale_cache.csv public/daily_watchlist_overview_stale_cache.csv 2>/dev/null || true
-          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
-            python -c 'import json, os, pathlib; pathlib.Path("public/supabase-config.js").write_text("window.WATCHLIST_SUPABASE = " + json.dumps({"url": os.environ["SUPABASE_URL"], "anonKey": os.environ["SUPABASE_ANON_KEY"]}) + ";\n")'
-          else
-            printf 'window.WATCHLIST_SUPABASE = null;\n' > public/supabase-config.js
-          fi
+          python - <<'PY'
+          import csv, json, pathlib
+
+          def read_csv(path):
+              source = pathlib.Path(path)
+              if not source.exists():
+                  return []
+              with source.open(newline="") as handle:
+                  return list(csv.DictReader(handle))
+
+          latest_rows = read_csv("daily_watchlist_overview_latest.csv")
+          history_rows = read_csv("watchlist_behavior_history_latest.csv")
+          run_date = ""
+          for row in latest_rows:
+              run_date = row.get("run_date") or row.get("date") or run_date
+              row["payload"] = {key: value for key, value in row.items() if key != "payload"}
+          by_ticker = {}
+          for row in history_rows:
+              ticker = row.get("ticker")
+              row["payload"] = {key: value for key, value in row.items() if key != "payload"}
+              if ticker:
+                  by_ticker.setdefault(ticker, []).append(row)
+          pathlib.Path("public/data/latest.json").write_text(json.dumps({"run_date": run_date, "rows": latest_rows}, separators=(",", ":")))
+          pathlib.Path("public/data/history.json").write_text(json.dumps({"run_date": run_date, "rows": history_rows, "by_ticker": by_ticker}, separators=(",", ":")))
+          PY
 
       - name: Configure Pages
         if: steps.time_gate.outputs.run == 'true'

@@ -411,6 +411,76 @@ body[data-page="watchlist"] .meta {
   color: var(--ink);
 }
 
+.run-health-panel {
+  margin: 10px 0 12px;
+}
+
+.run-health-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 14px;
+  border: 1px solid var(--line-soft);
+  border-left: 4px solid var(--tone-buy);
+  border-radius: 20px;
+  background: rgba(16, 21, 29, 0.56);
+}
+
+.run-health-card.tone-warn {
+  border-left-color: var(--tone-setup);
+}
+
+.run-health-card strong {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.run-health-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.run-health-card .run-health-issues {
+  color: #d9bd7c;
+}
+
+.run-health-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(58px, 1fr));
+  gap: 7px;
+}
+
+.run-health-metrics span {
+  display: grid;
+  gap: 2px;
+  min-height: 45px;
+  align-content: center;
+  padding: 7px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(242, 245, 236, 0.05);
+  text-align: center;
+}
+
+.run-health-metrics b {
+  color: var(--ink);
+  font-family: var(--font-data);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.run-health-metrics small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(6, minmax(92px, 1fr));
@@ -2101,6 +2171,40 @@ body[data-page="history"] .raw-history summary {
     min-height: 30px;
     padding: 6px 10px;
     font-size: 11px;
+  }
+
+  .run-health-card {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .run-health-card strong {
+    font-size: 13px;
+  }
+
+  .run-health-card p {
+    font-size: 10.5px;
+  }
+
+  .run-health-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .run-health-metrics span {
+    min-height: 38px;
+    padding: 5px 4px;
+    border-radius: 11px;
+  }
+
+  .run-health-metrics b {
+    font-size: 13px;
+  }
+
+  .run-health-metrics small {
+    font-size: 8px;
   }
 
   .controls {

@@ -26,7 +26,6 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 3. In GitHub, open `Settings -> Secrets and variables -> Actions`.
 4. Add `SUPABASE_URL`.
 5. Add `SUPABASE_SERVICE_ROLE_KEY`.
-6. Add `SUPABASE_ANON_KEY`.
 
 After that, every cloud refresh writes:
 
@@ -34,7 +33,7 @@ After that, every cloud refresh writes:
 - `watchlist_behavior_history`: one row per ticker per replayed history date.
 
 The service role key is only for GitHub Actions. Do not put it into browser JavaScript.
-The anon key is safe to publish in the browser because the tables only allow public reads.
+The published app should use Vercel API routes or static fallback JSON rather than exposing Supabase query config in browser JavaScript.
 
 After the first successful run, GitHub will show the public Pages URL in the workflow summary.
 
@@ -44,6 +43,8 @@ After the first successful run, GitHub will show the public Pages URL in the wor
 - `daily_watchlist_overview_latest.csv`: latest signal data.
 - `history.html`: ticker behavior history viewer.
 - `watchlist_behavior_history_latest.csv`: latest 30-trading-day behavior history.
+- `data/latest.json`: static fallback latest watchlist data.
+- `data/history.json`: static fallback ticker history data.
 - `daily_watchlist_overview_failures.csv`: failed symbols, when present.
 - `daily_watchlist_overview_stale_cache.csv`: cache fallback details, when present.
 

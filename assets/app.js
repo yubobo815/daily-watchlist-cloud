@@ -78,7 +78,8 @@ const REASON_LABELS = {
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
 const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
-const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v4:";
+const JSON_CACHE_PREFIX = "daily-trade-copilot:json:v1:";
+const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 3;
 
@@ -397,12 +398,6 @@ function renderCompanyBrief(profile) {
   `;
 }
 
-async function fetchCompanyBrief(ticker) {
-  const response = await fetch(`./api/company?ticker=${encodeURIComponent(ticker)}`);
-  if (!response.ok) return {};
-  return response.json();
-}
-
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -531,28 +526,41 @@ function payloadValue(row, key) {
   return row?.payload?.[key] ?? row?.[key];
 }
 
-function cacheKeyFor(path) {
-  return `${SUPABASE_CACHE_PREFIX}${path}`;
+function cacheKeyFor(path, prefix = JSON_CACHE_PREFIX) {
+  return `${prefix}${path}`;
 }
 
-function readJsonCache(path) {
+function readJsonCache(path, prefix = JSON_CACHE_PREFIX, ttl = SUPABASE_CACHE_TTL_MS) {
   try {
-    const cached = sessionStorage.getItem(cacheKeyFor(path));
+    const cached = sessionStorage.getItem(cacheKeyFor(path, prefix));
     if (!cached) return null;
     const payload = JSON.parse(cached);
-    if (!payload?.createdAt || Date.now() - payload.createdAt > SUPABASE_CACHE_TTL_MS) return null;
+    if (!payload?.createdAt || Date.now() - payload.createdAt > ttl) return null;
     return payload.value;
   } catch {
     return null;
   }
 }
 
-function writeJsonCache(path, value) {
+function writeJsonCache(path, value, prefix = JSON_CACHE_PREFIX) {
   try {
-    sessionStorage.setItem(cacheKeyFor(path), JSON.stringify({ createdAt: Date.now(), value }));
+    sessionStorage.setItem(cacheKeyFor(path, prefix), JSON.stringify({ createdAt: Date.now(), value }));
   } catch {
     // Private browsing or storage pressure should not block the app.
   }
+}
+
+async function appApiFetch(path, ttl = SUPABASE_CACHE_TTL_MS) {
+  const cached = readJsonCache(path, API_CACHE_PREFIX, ttl);
+  if (cached) return cached;
+  const response = await fetch(path);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `API returned HTTP ${response.status}.`);
+  }
+  const value = await response.json();
+  writeJsonCache(path, value, API_CACHE_PREFIX);
+  return value;
 }
 
 function loadFocusTickers() {
@@ -852,6 +860,43 @@ function runHealthSummary(runInfo) {
   return parts.length ? ` · ${parts.join(" · ")}` : "";
 }
 
+function renderRunHealthPanel(runInfo, rows = []) {
+  const panel = document.querySelector("#run-health-panel");
+  if (!panel) return;
+  const failed = Number(runInfo?.symbols_failed || 0);
+  const stale = Number(runInfo?.symbols_stale_cache || 0);
+  const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
+  const total = Number(runInfo?.symbols_total || rows.length || 0);
+  const liveOk = runInfo?.live_access_ok;
+  const sourceLabel = liveOk === false ? "Source degraded" : liveOk === true ? "Live source OK" : "Source unknown";
+  const tone = liveOk === false || failed || stale ? "warn" : "ok";
+  const version = runInfo?.scanner_version || "unknown";
+  const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
+  const staleSymbols = (runInfo?.payload?.stale_cache_fallbacks || []).map((item) => item.ticker).filter(Boolean).slice(0, 8);
+  const failedSymbols = (runInfo?.payload?.failed_symbols || []).map((item) => item.ticker).filter(Boolean).slice(0, 8);
+  const issueLine = [
+    staleSymbols.length ? `Cached: ${staleSymbols.join(", ")}` : "",
+    failedSymbols.length ? `Failed: ${failedSymbols.join(", ")}` : "",
+  ].filter(Boolean).join(" · ");
+
+  panel.innerHTML = `
+    <div class="run-health-card tone-${tone}">
+      <div>
+        <span class="brief-kicker">Run Health</span>
+        <strong>${escapeHtml(sourceLabel)}</strong>
+        <p>${escapeHtml(latestData)} · scanner ${escapeHtml(version)}</p>
+        ${issueLine ? `<p class="run-health-issues">${escapeHtml(issueLine)}</p>` : ""}
+      </div>
+      <div class="run-health-metrics">
+        <span><b>${analyzed}</b><small>Analyzed</small></span>
+        <span><b>${stale}</b><small>Cached</small></span>
+        <span><b>${failed}</b><small>Failed</small></span>
+        <span><b>${total}</b><small>Total</small></span>
+      </div>
+    </div>
+  `;
+}
+
 function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const status = document.querySelector("#status");
   const runStatus = document.querySelector("#run-status");
@@ -862,87 +907,7 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   }
   if (status) status.textContent = APP_DISCLAIMER;
   if (runStatus) runStatus.classList.remove("bad");
-}
-
-async function getSupabaseConfig() {
-  if (window.WATCHLIST_SUPABASE?.url && window.WATCHLIST_SUPABASE?.anonKey) {
-    return window.WATCHLIST_SUPABASE;
-  }
-
-  try {
-    const response = await fetch("/api/config");
-    if (response.ok) {
-      const config = await response.json();
-      if (config?.url && config?.anonKey) {
-        window.WATCHLIST_SUPABASE = config;
-        return config;
-      }
-    }
-  } catch {
-    // Fall back to the static config script below.
-  }
-
-  return null;
-}
-
-async function supabaseFetch(path) {
-  const cached = readJsonCache(path);
-  if (cached) return cached;
-
-  const proxyResponse = await fetch(`/api/supabase?path=${encodeURIComponent(path)}`);
-  if (proxyResponse.ok) {
-    const value = await proxyResponse.json();
-    writeJsonCache(path, value);
-    return value;
-  }
-
-  const config = await getSupabaseConfig();
-  if (!config) {
-    throw new Error("Supabase browser config is missing.");
-  }
-
-  const baseUrl = config.url.replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/rest/v1/${path}`, {
-    headers: {
-      apikey: config.anonKey,
-      Authorization: `Bearer ${config.anonKey}`
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`Supabase returned HTTP ${response.status}.`);
-  }
-  const value = await response.json();
-  writeJsonCache(path, value);
-  return value;
-}
-
-async function recentRunDates(limit = 2) {
-  const dates = [];
-  try {
-    const runRows = await supabaseFetch(`watchlist_refresh_runs?select=*&order=run_date.desc&limit=${limit}`);
-    runRows.forEach((row) => {
-      if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
-    });
-  } catch {
-    // Older databases may not have the refresh-runs table yet.
-  }
-  if (dates.length >= limit) return dates.slice(0, limit);
-
-  const rows = await supabaseFetch("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
-  rows.forEach((row) => {
-    if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
-  });
-  return dates.slice(0, limit);
-}
-
-async function latestRunInfo(runDate) {
-  if (!runDate) return null;
-  try {
-    const rows = await supabaseFetch(`watchlist_refresh_runs?select=*&run_date=eq.${encodeURIComponent(runDate)}&limit=1`);
-    return rows[0] || null;
-  } catch {
-    return null;
-  }
+  renderRunHealthPanel(runInfo, rows);
 }
 
 function fallbackAgeDays(runDate) {
@@ -1412,26 +1377,10 @@ async function initWatchlist() {
   syncSearchClear();
   initTabNavigation();
   try {
-    const [latest, previous] = await recentRunDates(2);
-    if (!latest) {
-      const fallback = await loadStaticLatestRows();
-      state.rows = fallback.rows;
-      state.previousRows = fallback.previousRows;
-      state.previousByTicker = rowByTicker(state.previousRows);
-      const marketData = dataDateSummary(state.rows);
-      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
-      renderWatchlist();
-      return;
-    }
-    const runInfoPromise = latestRunInfo(latest);
-    const latestRowsPromise = supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(latest)}&order=score.desc`);
-    const previousRowsPromise = previous
-      ? supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(previous)}&order=score.desc`)
-      : Promise.resolve([]);
-    const [runInfo, latestRows, previousRows] = await Promise.all([runInfoPromise, latestRowsPromise, previousRowsPromise]);
-    state.rows = latestRows
+    const latestPayload = await appApiFetch("/api/watchlist/latest");
+    state.rows = (latestPayload.rows || [])
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
-    state.previousRows = previousRows;
+    state.previousRows = latestPayload.previousRows || [];
     state.previousByTicker = rowByTicker(state.previousRows);
     if (!state.rows.length) {
       const fallback = await loadStaticLatestRows();
@@ -1444,10 +1393,20 @@ async function initWatchlist() {
       return;
     }
     const marketData = dataDateSummary(state.rows);
-    setRefreshSummary(latest, marketData, state.rows, runInfo);
+    setRefreshSummary(latestPayload.latest, marketData, state.rows, latestPayload.runInfo);
     renderWatchlist();
   } catch (error) {
-    setStatus(error.message, false);
+    try {
+      const fallback = await loadStaticLatestRows();
+      state.rows = fallback.rows;
+      state.previousRows = fallback.previousRows;
+      state.previousByTicker = rowByTicker(state.previousRows);
+      const marketData = dataDateSummary(state.rows);
+      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
+      renderWatchlist();
+    } catch {
+      setStatus(error.message, false);
+    }
   }
 }
 
@@ -1670,22 +1629,15 @@ async function loadHistory(ticker) {
   document.querySelector("#run-status").textContent = "No history loaded";
   document.querySelector("#run-status").classList.add("bad");
   try {
-    const runRows = await supabaseFetch(`watchlist_behavior_history?select=run_date&ticker=eq.${encodeURIComponent(state.ticker)}&order=run_date.desc&limit=1`);
-    const latest = runRows[0]?.run_date;
-    if (!latest) throw new Error(`No 30-day history found for ${state.ticker}.`);
-    const [snapshotRows, historyRows, runInfo, profile] = await Promise.all([
-      supabaseFetch(`watchlist_snapshots?select=name,payload&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&limit=1`),
-      supabaseFetch(`watchlist_behavior_history?select=*&ticker=eq.${encodeURIComponent(state.ticker)}&run_date=eq.${encodeURIComponent(latest)}&order=history_date.desc`),
-      latestRunInfo(latest),
-      fetchCompanyBrief(state.ticker).catch(() => ({}))
-    ]);
-    state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
+    const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`, 5 * 60 * 1000);
+    const latest = tickerPayload.latest;
+    state.tickerName = displaySecurityName(tickerPayload.snapshot?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
     document.title = historyDisplayTitle();
-    renderCompanyBrief(profile);
-    state.historyRows = historyRows;
+    renderCompanyBrief(tickerPayload.profile || {});
+    state.historyRows = tickerPayload.historyRows || [];
     const marketData = historyDateSummary(state.historyRows);
-    setRefreshSummary(latest, marketData, state.historyRows, runInfo);
+    setRefreshSummary(latest, marketData, state.historyRows, tickerPayload.runInfo);
     renderHistoryRows();
   } catch (error) {
     try {

@@ -6,7 +6,9 @@ This repo contains a static Vercel app. It intentionally has no Next.js dependen
 
 - GitHub Actions still refreshes the scanner each day around 8:00am Australia/Melbourne.
 - The refresh writes current watchlist rows and 30-day behavior history to Supabase.
-- Vercel serves the interactive app and reads Supabase directly in the browser.
+- Vercel serves the interactive app and reads Supabase through app API routes.
+- `/api/watchlist/latest` returns latest rows, previous rows, and run health in one response.
+- `/api/ticker/[ticker]` returns ticker history, latest snapshot, company profile, and run health in one response.
 - Public Vercel access is read-only. It lets visitors view/filter/download browser-visible data, but it does not grant project edit access.
 
 ## Supabase config
@@ -18,6 +20,6 @@ SUPABASE_URL
 SUPABASE_ANON_KEY
 ```
 
-The Vercel app reads Supabase through `/api/supabase`, so the committed frontend code does not need a hardcoded project URL or anon key.
+The Vercel app reads Supabase through narrow app APIs, so the frontend does not receive the Supabase project URL, anon key, or table-query details.
 
 Do not add `SUPABASE_SERVICE_ROLE_KEY` to Vercel. The service-role key is only for GitHub Actions refresh jobs.

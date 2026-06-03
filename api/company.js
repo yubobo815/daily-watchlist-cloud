@@ -233,26 +233,32 @@ function toProfile(ticker, payload) {
   };
 }
 
-module.exports = async function handler(req, res) {
-  const rawTicker = String(req.query?.ticker || "").trim().toUpperCase();
-  const ticker = rawTicker.replace("BRK.B", "BRK-B");
+async function fetchCompanyProfile(rawTicker) {
+  const ticker = String(rawTicker || "").trim().toUpperCase().replace("BRK.B", "BRK-B");
   if (!/^[A-Z0-9.^-]{1,12}$/.test(ticker)) {
-    res.status(400).json({ error: "Invalid ticker" });
-    return;
+    const error = new Error("Invalid ticker");
+    error.statusCode = 400;
+    throw error;
   }
 
   try {
-    let profile;
-    try {
-      const payload = await fetchYahooSummary(ticker);
-      profile = toProfile(rawTicker, payload);
-    } catch {
-      profile = await fetchStockAnalysisProfile(ticker);
-      profile.ticker = rawTicker;
-    }
+    return toProfile(String(rawTicker || "").trim().toUpperCase(), await fetchYahooSummary(ticker));
+  } catch {
+    const profile = await fetchStockAnalysisProfile(ticker);
+    profile.ticker = String(rawTicker || "").trim().toUpperCase();
+    return profile;
+  }
+}
+
+async function handler(req, res) {
+  try {
+    const profile = await fetchCompanyProfile(req.query?.ticker);
     res.setHeader("Cache-Control", "s-maxage=21600, stale-while-revalidate=86400");
     res.status(200).json(profile);
   } catch (error) {
-    res.status(502).json({ error: error.message || "Company profile unavailable" });
+    res.status(error.statusCode || 502).json({ error: error.message || "Company profile unavailable" });
   }
-};
+}
+
+module.exports = handler;
+module.exports.fetchCompanyProfile = fetchCompanyProfile;
