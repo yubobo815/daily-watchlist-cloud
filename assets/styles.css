@@ -951,11 +951,46 @@ td:nth-child(13) {
   box-shadow: var(--shadow);
 }
 
+.company-brief summary {
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.company-brief summary::-webkit-details-marker {
+  display: none;
+}
+
 .company-brief p {
+  display: -webkit-box;
   margin: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.company-brief[open] p {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.company-toggle {
+  justify-self: start;
+  color: var(--tone-watch);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.company-toggle::after {
+  content: attr(data-closed);
+}
+
+.company-brief[open] .company-toggle::after {
+  content: attr(data-open);
 }
 
 .company-kicker,

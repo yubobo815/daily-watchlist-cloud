@@ -364,16 +364,19 @@ function renderCompanyBrief(profile) {
   }
 
   target.innerHTML = `
-    <div class="company-brief">
+    <details class="company-brief">
+      <summary>
       ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
-      ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+        ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+        ${summary && summary.length > 120 ? `<span class="company-toggle" data-open="Show less" data-closed="Show more"></span>` : ""}
+      </summary>
       <div class="company-facts">
         ${highlights ? `<div><span>Latest report</span><strong>${escapeHtml(highlights)}</strong></div>` : ""}
         ${nextReport ? `<div><span>Next report</span><strong>${escapeHtml(nextReport)}</strong></div>` : ""}
         ${website ? `<div><span>Website</span><strong><a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(new URL(website).hostname.replace(/^www\./, ""))}</a></strong></div>` : ""}
       </div>
       <span class="company-source">Source: ${escapeHtml(source)}</span>
-    </div>
+    </details>
   `;
 }
 
