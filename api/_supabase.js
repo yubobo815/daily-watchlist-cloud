@@ -22,7 +22,33 @@ const SNAPSHOT_FIELDS = [
   "payload",
 ];
 
-const HISTORY_FIELDS = ["run_date", "history_date", ...SNAPSHOT_FIELDS.filter((field) => field !== "run_date")];
+const HISTORY_FIELDS = [
+  "run_date",
+  "ticker",
+  "history_date",
+  "action",
+  "setup",
+  "adaptive_mode",
+  "psychology",
+  "score",
+  "close",
+  "day_change_pct",
+  "entry_est",
+  "stop_est",
+  "target_est",
+  "notes",
+  "signal_stage",
+  "transition_label",
+  "transition_score",
+  "signal_age_days",
+  "price_progress_since_signal_pct",
+  "freshness_penalty",
+  "adjusted_score",
+  "distance_from_ref_zone_pct",
+  "extension_state",
+  "reason_codes",
+  "payload",
+];
 
 const RUN_FIELDS = [
   "run_date",

@@ -8,6 +8,7 @@ const {
   sortRows,
   supabaseSelect,
 } = require("../_supabase");
+const { staticLatestPayload } = require("../_static_data");
 
 module.exports = async function handler(request, response) {
   try {
@@ -44,6 +45,7 @@ module.exports = async function handler(request, response) {
     });
   } catch (error) {
     console.error(error);
-    response.status(502).json({ error: "Watchlist latest unavailable." });
+    response.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
+    response.status(200).json(staticLatestPayload());
   }
 };

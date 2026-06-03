@@ -10,6 +10,7 @@ const {
   supabaseSelect,
 } = require("../_supabase");
 const { fetchCompanyProfile } = require("../company");
+const { staticTickerPayload } = require("../_static_data");
 
 function withTimeout(promise, milliseconds, fallback) {
   return Promise.race([
@@ -56,6 +57,8 @@ module.exports = async function handler(request, response) {
     });
   } catch (error) {
     console.error(error);
-    response.status(502).json({ error: "Ticker detail unavailable." });
+    const profile = await withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {});
+    response.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
+    response.status(200).json(staticTickerPayload(ticker, profile));
   }
 };
