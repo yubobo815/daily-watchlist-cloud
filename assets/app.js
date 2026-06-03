@@ -81,7 +81,7 @@ const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
 const JSON_CACHE_PREFIX = "daily-trade-copilot:json:v1:";
 const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
-const STATIC_FALLBACK_MAX_AGE_DAYS = 3;
+const STATIC_FALLBACK_MAX_AGE_DAYS = 10;
 const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
 
 const SECURITY_NAME_FALLBACKS = {
@@ -1048,11 +1048,11 @@ async function loadStaticTickerHistory(ticker) {
   if (uniqueHistoryDateCount(rows) < 5) {
     rows = await loadPublishedTickerHistory(ticker);
   }
-  const fallbackRunDate = fallback.run_date || rows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || "";
-  assertFreshStaticFallback(fallbackRunDate);
   if (uniqueHistoryDateCount(rows) < 5) {
     throw new Error("Live history is unavailable and the published archive does not have enough history for this ticker.");
   }
+  const fallbackRunDate = fallback.run_date || rows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || rows[0]?.history_date || "";
+  assertFreshStaticFallback(fallbackRunDate);
   return {
     latest: rows[0]?.run_date || fallbackRunDate,
     name: rows[0]?.name || "",
