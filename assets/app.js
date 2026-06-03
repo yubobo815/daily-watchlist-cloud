@@ -398,6 +398,31 @@ function renderCompanyBrief(profile) {
   `;
 }
 
+function hasCompanyProfile(profile) {
+  return Boolean(
+    cleanSummaryText(profile?.business_summary)
+    || String(profile?.latest_report_highlights || "").trim()
+    || String(profile?.next_report_date || "").trim()
+    || safeWebsite(profile?.website)
+    || [profile?.sector, profile?.industry].filter(Boolean).join(" · ")
+  );
+}
+
+async function renderCompanyBriefWithFallback(ticker, profile) {
+  if (hasCompanyProfile(profile)) {
+    renderCompanyBrief(profile);
+    return;
+  }
+
+  renderCompanyBrief(profile || {});
+  try {
+    const fallbackProfile = await appApiFetch(`/api/company?ticker=${encodeURIComponent(ticker)}`, 6 * 60 * 60 * 1000);
+    if (hasCompanyProfile(fallbackProfile)) renderCompanyBrief(fallbackProfile);
+  } catch {
+    // Company context is useful, but ticker behavior should remain usable without it.
+  }
+}
+
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -1559,28 +1584,18 @@ function renderHistoryRows() {
   renderLatestHistoryPanel(state.historyRows[0]);
   renderHistoryVisual(state.historyRows);
   const chronological = [...state.historyRows].reverse();
-  const moments = chronological
-    .map((row, index) => ({ row, previous: chronological[index - 1], index }))
-    .filter(({ row, previous, index }) => {
-      if (index === chronological.length - 1) return true;
-      if (!previous) return actionKind(row.action) !== "avoid";
-      return row.action !== previous.action || row.setup !== previous.setup || Math.abs(convictionScore(row) - convictionScore(previous)) >= 6;
-    })
-    .slice(-8)
-    .reverse();
-  const oldestMomentDate = moments[moments.length - 1]?.row.history_date;
-  const lookbackRows = oldestMomentDate
-    ? state.historyRows.filter((row) => row.history_date < oldestMomentDate)
-    : state.historyRows.slice(1);
+  const previousByDate = new Map(chronological.map((row, index) => [row.history_date, chronological[index - 1] || null]));
+  const recentRows = state.historyRows.slice(0, Math.min(6, state.historyRows.length));
+  const lookbackRows = state.historyRows.slice(recentRows.length);
 
   timeline.innerHTML = `
-    <h3>Key Behavior Moments</h3>
-    ${moments.map(({ row, previous, index }) => `
+    <h3>Recent Behavior</h3>
+    ${recentRows.map((row, index) => `
       <div class="moment-card tone-${actionKind(row.action)}">
-        <div class="moment-date">${index === chronological.length - 1 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</div>
+        <div class="moment-date">${index === 0 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</div>
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-          <div class="change-chips">${renderHistoryChangeChips(row, previous)}</div>
+          <div class="change-chips">${renderHistoryChangeChips(row, previousByDate.get(row.history_date))}</div>
           <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Strength ${escapeHtml(strengthLabel(row))} · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
@@ -1637,7 +1652,7 @@ async function loadHistory(ticker) {
     state.tickerName = displaySecurityName(tickerPayload.snapshot?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
     document.title = historyDisplayTitle();
-    renderCompanyBrief(tickerPayload.profile || {});
+    renderCompanyBriefWithFallback(state.ticker, tickerPayload.profile || {});
     state.historyRows = tickerPayload.historyRows || [];
     const marketData = historyDateSummary(state.historyRows);
     setRefreshSummary(latest, marketData, state.historyRows, tickerPayload.runInfo);
