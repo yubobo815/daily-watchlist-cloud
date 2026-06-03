@@ -967,13 +967,15 @@ function renderRunHealthPanel(runInfo, rows = []) {
 
 function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const status = document.querySelector("#status");
+  const disclaimer = document.querySelector("#app-disclaimer");
   const runStatus = document.querySelector("#run-status");
   if (runStatus) {
     const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
     runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
     runStatus.classList.toggle("warn", Boolean(runInfo && (runInfo.live_access_ok === false || Number(runInfo.symbols_failed || 0) || Number(runInfo.symbols_stale_cache || 0))));
   }
-  if (status) status.textContent = APP_DISCLAIMER;
+  if (status) status.textContent = "";
+  if (disclaimer) disclaimer.textContent = APP_DISCLAIMER;
   if (runStatus) runStatus.classList.remove("bad");
   renderRunHealthPanel(runInfo, rows);
 }
