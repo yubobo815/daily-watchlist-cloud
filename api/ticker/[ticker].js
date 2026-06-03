@@ -1,11 +1,24 @@
 const {
   encodeFilterValue,
+  HISTORY_FIELDS,
   isValidTicker,
   normalizeTicker,
+  rowDto,
   runInfo,
+  selectList,
+  SNAPSHOT_FIELDS,
   supabaseSelect,
 } = require("../_supabase");
 const { fetchCompanyProfile } = require("../company");
+
+function withTimeout(promise, milliseconds, fallback) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      setTimeout(() => resolve(fallback), milliseconds);
+    }),
+  ]);
+}
 
 module.exports = async function handler(request, response) {
   const ticker = normalizeTicker(request.query?.ticker);
@@ -23,22 +36,26 @@ module.exports = async function handler(request, response) {
     }
 
     const [snapshotRows, historyRows, latestRunInfo, profile] = await Promise.all([
-      supabaseSelect(`watchlist_snapshots?select=*&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&limit=1`),
-      supabaseSelect(`watchlist_behavior_history?select=*&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&order=history_date.desc`),
+      supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&limit=1`),
+      supabaseSelect(`watchlist_behavior_history?select=${selectList(HISTORY_FIELDS)}&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&order=history_date.desc`),
       runInfo(latest),
-      fetchCompanyProfile(ticker).catch(() => ({})),
+      withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {}),
     ]);
 
-    response.setHeader("Cache-Control", "public, s-maxage=90, stale-while-revalidate=300");
+    const profileReady = profile && Object.keys(profile).length > 0;
+    response.setHeader("Cache-Control", profileReady
+      ? "public, s-maxage=90, stale-while-revalidate=300"
+      : "public, s-maxage=20, stale-while-revalidate=90");
     response.status(200).json({
       ticker,
       latest,
-      snapshot: snapshotRows[0] || null,
-      historyRows,
+      snapshot: snapshotRows[0] ? rowDto(snapshotRows[0]) : null,
+      historyRows: historyRows.map(rowDto),
       runInfo: latestRunInfo,
       profile,
     });
   } catch (error) {
-    response.status(502).json({ error: error.message || "Ticker detail unavailable." });
+    console.error(error);
+    response.status(502).json({ error: "Ticker detail unavailable." });
   }
 };

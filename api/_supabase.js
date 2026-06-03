@@ -3,6 +3,62 @@ const SUPABASE_CONFIG = {
   anonKey: process.env.SUPABASE_ANON_KEY || "",
 };
 
+const SNAPSHOT_FIELDS = [
+  "run_date",
+  "ticker",
+  "name",
+  "data_date",
+  "action",
+  "setup",
+  "adaptive_mode",
+  "psychology",
+  "score",
+  "close",
+  "day_change_pct",
+  "entry_est",
+  "stop_est",
+  "target_est",
+  "notes",
+  "payload",
+];
+
+const HISTORY_FIELDS = ["run_date", "history_date", ...SNAPSHOT_FIELDS.filter((field) => field !== "run_date")];
+
+const RUN_FIELDS = [
+  "run_date",
+  "status",
+  "live_access_ok",
+  "live_access_message",
+  "earliest_data_date",
+  "latest_data_date",
+  "symbols_total",
+  "symbols_analyzed",
+  "symbols_failed",
+  "symbols_stale_cache",
+  "snapshot_rows",
+  "history_rows",
+  "scanner_version",
+  "notes",
+  "payload",
+];
+
+const PAYLOAD_FIELDS = [
+  "adjusted_score",
+  "atr_pct",
+  "buyer_score",
+  "distance_from_ref_zone_pct",
+  "extension_state",
+  "freshness_penalty",
+  "price_progress_since_signal_pct",
+  "reason_codes",
+  "seller_score",
+  "signal_age_days",
+  "signal_stage",
+  "transition_label",
+  "transition_score",
+  "volume_state",
+];
+
 function assertSupabaseConfig() {
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
     throw new Error("Supabase server config is missing.");
@@ -23,7 +79,8 @@ async function supabaseSelect(path) {
   });
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`Supabase returned HTTP ${response.status}: ${text.slice(0, 300)}`);
+    console.error(`Supabase query failed (${response.status}): ${text.slice(0, 500)}`);
+    throw new Error("Data service unavailable.");
   }
   return text ? JSON.parse(text) : [];
 }
@@ -38,6 +95,42 @@ function normalizeTicker(value) {
 
 function isValidTicker(value) {
   return /^[A-Z0-9.^-]{1,12}$/.test(value);
+}
+
+function selectList(fields) {
+  return fields.join(",");
+}
+
+function cleanPayload(row) {
+  const payload = row?.payload && typeof row.payload === "object" ? row.payload : {};
+  return PAYLOAD_FIELDS.reduce((cleaned, field) => {
+    const value = row?.[field] ?? payload[field];
+    if (value !== undefined && value !== null && value !== "") cleaned[field] = value;
+    return cleaned;
+  }, {});
+}
+
+function rowDto(row) {
+  const output = {};
+  [...new Set([...SNAPSHOT_FIELDS, ...HISTORY_FIELDS])].forEach((field) => {
+    if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
+  });
+  output.payload = cleanPayload(row);
+  return output;
+}
+
+function runDto(row) {
+  if (!row) return null;
+  const output = {};
+  RUN_FIELDS.forEach((field) => {
+    if (field !== "payload" && row[field] !== undefined) output[field] = row[field];
+  });
+  const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+  output.payload = {
+    failed_symbols: Array.isArray(payload.failed_symbols) ? payload.failed_symbols.slice(0, 25) : [],
+    stale_cache_fallbacks: Array.isArray(payload.stale_cache_fallbacks) ? payload.stale_cache_fallbacks.slice(0, 25) : [],
+  };
+  return output;
 }
 
 function sortRows(rows) {
@@ -71,8 +164,8 @@ async function recentRunDates(limit = 2) {
 async function runInfo(runDate) {
   if (!runDate) return null;
   try {
-    const rows = await supabaseSelect(`watchlist_refresh_runs?select=*&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
-    return rows[0] || null;
+    const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList(RUN_FIELDS)}&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
+    return runDto(rows[0]);
   } catch {
     return null;
   }
@@ -80,10 +173,15 @@ async function runInfo(runDate) {
 
 module.exports = {
   encodeFilterValue,
+  HISTORY_FIELDS,
   isValidTicker,
   normalizeTicker,
   recentRunDates,
+  rowDto,
+  RUN_FIELDS,
   runInfo,
+  selectList,
+  SNAPSHOT_FIELDS,
   sortRows,
   supabaseSelect,
 };

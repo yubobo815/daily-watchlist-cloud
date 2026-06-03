@@ -880,20 +880,28 @@ function renderRunHealthPanel(runInfo, rows = []) {
   ].filter(Boolean).join(" · ");
 
   panel.innerHTML = `
-    <div class="run-health-card tone-${tone}">
-      <div>
+    <details class="run-health-card tone-${tone}">
+      <summary>
+        <div>
+          <span class="brief-kicker">Run Health</span>
+          <strong>${escapeHtml(sourceLabel)}</strong>
+          <p>${escapeHtml(latestData)} · scanner ${escapeHtml(version)}</p>
+        </div>
+        <span class="run-health-summary">${failed || stale ? `${stale} cached · ${failed} failed` : "Healthy"}</span>
+      </summary>
+      <div class="run-health-detail">
+        <div>
         <span class="brief-kicker">Run Health</span>
-        <strong>${escapeHtml(sourceLabel)}</strong>
-        <p>${escapeHtml(latestData)} · scanner ${escapeHtml(version)}</p>
         ${issueLine ? `<p class="run-health-issues">${escapeHtml(issueLine)}</p>` : ""}
+        </div>
+        <div class="run-health-metrics">
+          <span><b>${analyzed}</b><small>Analyzed</small></span>
+          <span><b>${stale}</b><small>Cached</small></span>
+          <span><b>${failed}</b><small>Failed</small></span>
+          <span><b>${total}</b><small>Total</small></span>
+        </div>
       </div>
-      <div class="run-health-metrics">
-        <span><b>${analyzed}</b><small>Analyzed</small></span>
-        <span><b>${stale}</b><small>Cached</small></span>
-        <span><b>${failed}</b><small>Failed</small></span>
-        <span><b>${total}</b><small>Total</small></span>
-      </div>
-    </div>
+    </details>
   `;
 }
 
@@ -1001,7 +1009,6 @@ function renderMobileWatchlistSummary(row) {
   const secondary = [strength, pattern && pattern !== "None" ? pattern : ""].filter(Boolean).join(" · ");
   return `
     <span class="mobile-watch-shell">
-      <button class="focus-toggle mobile-focus-toggle ${isFocusTicker(row.ticker) ? "active" : ""}" type="button" data-focus-ticker="${escapeHtml(row.ticker)}" aria-label="${isFocusTicker(row.ticker) ? "Remove" : "Add"} ${escapeHtml(row.ticker)} from Focus List">★</button>
       <a class="mobile-watch-row" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
         <span class="mobile-watch-main">
           <strong>${escapeHtml(row.ticker)}</strong>
@@ -1016,6 +1023,7 @@ function renderMobileWatchlistSummary(row) {
           ${renderMovePct(row.day_change_pct)}
         </span>
       </a>
+      <button class="focus-toggle mobile-focus-toggle ${isFocusTicker(row.ticker) ? "active" : ""}" type="button" data-focus-ticker="${escapeHtml(row.ticker)}" aria-label="${isFocusTicker(row.ticker) ? "Remove" : "Add"} ${escapeHtml(row.ticker)} from Focus List">★</button>
     </span>
   `;
 }
@@ -1090,7 +1098,6 @@ function reasonChips(row, previous = previousRowFor(row), limit = 3) {
 function focusItem(row, reason) {
   if (!row) return "";
   const kind = actionKind(row.action);
-  const previous = previousRowFor(row);
   return `
     <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
       <span class="focus-kicker">${escapeHtml(reason)}</span>
@@ -1099,12 +1106,10 @@ function focusItem(row, reason) {
         <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
       </span>
       <span class="focus-meta">
-        ${transitionBadge(row, previous)}
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        <span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>
         <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
       </span>
-      <span class="reason-row">${reasonChips(row, previous, 2)}</span>
+      <span class="reason-row">${reasonChips(row, previousRowFor(row), 2)}</span>
     </a>
   `;
 }
@@ -1141,7 +1146,7 @@ function renderTodayFocus() {
   `;
 }
 
-function changedTodayCard({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }, duplicate = false) {
+function changedTodayCard({ row, previous, pricePct }, duplicate = false) {
   const signal = ACTION_LABELS[row.action] || row.action || "Signal";
   return `
     <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}"${duplicate ? ' aria-hidden="true" tabindex="-1"' : ""}>
@@ -1150,10 +1155,8 @@ function changedTodayCard({ row, previous, scoreMove, pricePct, actionChanged, s
         <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
       </div>
       <div class="change-card-body">
+        <span class="badge ${actionKind(row.action)}">${escapeHtml(signal)}</span>
         ${transitionBadge(row, previous)}
-        ${previous && actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(signal)}</span>` : `<span class="change-chip signal">${escapeHtml(signal)}</span>`}
-        ${previous && setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : `<span class="change-chip setup">${escapeHtml(setupLabel(row.setup))}</span>`}
-        ${previous ? `<span class="change-chip ${moveClass(scoreMove)}">Strength ${fmtSignedNumber(scoreMove, 0)}</span>` : `<span class="change-chip quiet">Strength ${escapeHtml(strengthLabel(row))}</span>`}
         <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
       </div>
       <div class="reason-row">${reasonChips(row, previous, 2)}</div>
@@ -1629,7 +1632,7 @@ async function loadHistory(ticker) {
   document.querySelector("#run-status").textContent = "No history loaded";
   document.querySelector("#run-status").classList.add("bad");
   try {
-    const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`, 5 * 60 * 1000);
+    const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`);
     const latest = tickerPayload.latest;
     state.tickerName = displaySecurityName(tickerPayload.snapshot?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();

@@ -1,7 +1,10 @@
 const {
   encodeFilterValue,
   recentRunDates,
+  rowDto,
   runInfo,
+  selectList,
+  SNAPSHOT_FIELDS,
   sortRows,
   supabaseSelect,
 } = require("../_supabase");
@@ -21,9 +24,9 @@ module.exports = async function handler(request, response) {
       return;
     }
 
-    const latestRowsPromise = supabaseSelect(`watchlist_snapshots?select=*&run_date=eq.${encodeFilterValue(latest)}&order=score.desc`);
+    const latestRowsPromise = supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&run_date=eq.${encodeFilterValue(latest)}&order=score.desc`);
     const previousRowsPromise = previous
-      ? supabaseSelect(`watchlist_snapshots?select=*&run_date=eq.${encodeFilterValue(previous)}&order=score.desc`)
+      ? supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&run_date=eq.${encodeFilterValue(previous)}&order=score.desc`)
       : Promise.resolve([]);
     const [latestRows, previousRows, latestRunInfo] = await Promise.all([
       latestRowsPromise,
@@ -35,11 +38,12 @@ module.exports = async function handler(request, response) {
     response.status(200).json({
       latest,
       previous: previous || "",
-      rows: sortRows(latestRows),
-      previousRows: sortRows(previousRows),
+      rows: sortRows(latestRows.map(rowDto)),
+      previousRows: sortRows(previousRows.map(rowDto)),
       runInfo: latestRunInfo,
     });
   } catch (error) {
-    response.status(502).json({ error: error.message || "Watchlist latest unavailable." });
+    console.error(error);
+    response.status(502).json({ error: "Watchlist latest unavailable." });
   }
 };
