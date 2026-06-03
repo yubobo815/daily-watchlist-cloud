@@ -64,10 +64,6 @@ const APP_DISCLAIMER = "This tool is intended for reference and analysis only. D
 const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
 const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v3:";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 3;
-const STATIC_SUPABASE_CONFIG = {
-  url: "https://lzuwwiabrnebboxriemu.supabase.co",
-  anonKey: "sb_publishable_tCTML11CHw0fwtYWD9_I-Q_ne39UiHw",
-};
 
 const SECURITY_NAME_FALLBACKS = {
   AAPL: "Apple",
@@ -735,23 +731,23 @@ async function getSupabaseConfig() {
     // Fall back to the static config script below.
   }
 
-  return STATIC_SUPABASE_CONFIG;
+  return null;
 }
 
 async function supabaseFetch(path) {
   const cached = readJsonCache(path);
   if (cached) return cached;
 
-  const config = await getSupabaseConfig();
-  if (!config) {
-    throw new Error("Supabase browser config is missing.");
-  }
-
   const proxyResponse = await fetch(`/api/supabase?path=${encodeURIComponent(path)}`);
   if (proxyResponse.ok) {
     const value = await proxyResponse.json();
     writeJsonCache(path, value);
     return value;
+  }
+
+  const config = await getSupabaseConfig();
+  if (!config) {
+    throw new Error("Supabase browser config is missing.");
   }
 
   const baseUrl = config.url.replace(/\/$/, "");

@@ -444,7 +444,7 @@ def numeric_or_none(value):
 
 def supabase_credentials() -> tuple[str, str]:
     url = os.getenv("SUPABASE_URL", "").rstrip("/")
-    key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or "").strip()
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     return url, key
 
 

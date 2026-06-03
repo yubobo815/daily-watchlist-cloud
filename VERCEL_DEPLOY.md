@@ -9,12 +9,15 @@ This repo contains a static Vercel app. It intentionally has no Next.js dependen
 - Vercel serves the interactive app and reads Supabase directly in the browser.
 - Public Vercel access is read-only. It lets visitors view/filter/download browser-visible data, but it does not grant project edit access.
 
-## Supabase browser config
+## Supabase config
 
-The app loads the existing public browser config from:
+Set these Vercel environment variables:
 
 ```text
-https://yubobo815.github.io/daily-watchlist-cloud/supabase-config.js
+SUPABASE_URL
+SUPABASE_ANON_KEY
 ```
 
-The Supabase anon key is public read-only because table policies only allow `select`. The Supabase service role key must not be added to Vercel. It stays only in GitHub Actions.
+The Vercel app reads Supabase through `/api/supabase`, so the committed frontend code does not need a hardcoded project URL or anon key.
+
+Do not add `SUPABASE_SERVICE_ROLE_KEY` to Vercel. The service-role key is only for GitHub Actions refresh jobs.

@@ -77,6 +77,14 @@ alter table public.watchlist_snapshots enable row level security;
 alter table public.watchlist_behavior_history enable row level security;
 alter table public.watchlist_refresh_runs enable row level security;
 
+revoke all on public.watchlist_snapshots from anon, authenticated;
+revoke all on public.watchlist_behavior_history from anon, authenticated;
+revoke all on public.watchlist_refresh_runs from anon, authenticated;
+
+grant select on public.watchlist_snapshots to anon, authenticated;
+grant select on public.watchlist_behavior_history to anon, authenticated;
+grant select on public.watchlist_refresh_runs to anon, authenticated;
+
 drop policy if exists "Public read watchlist snapshots" on public.watchlist_snapshots;
 create policy "Public read watchlist snapshots"
   on public.watchlist_snapshots for select
