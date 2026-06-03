@@ -82,6 +82,7 @@ const JSON_CACHE_PREFIX = "daily-trade-copilot:json:v1:";
 const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 3;
+const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
 
 const SECURITY_NAME_FALLBACKS = {
   AAPL: "Apple",
@@ -962,6 +963,41 @@ async function fetchStaticJson(path) {
   return response.json();
 }
 
+function parseCsvLine(line) {
+  const values = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (quoted && char === "\"" && next === "\"") {
+      value += "\"";
+      index += 1;
+    } else if (char === "\"") {
+      quoted = !quoted;
+    } else if (!quoted && char === ",") {
+      values.push(value);
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+  values.push(value);
+  return values;
+}
+
+function parseCsv(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(Boolean);
+  const headers = parseCsvLine(lines.shift() || "");
+  return lines.map((line) => {
+    const values = parseCsvLine(line);
+    return headers.reduce((row, header, index) => {
+      row[header] = values[index] ?? "";
+      return row;
+    }, {});
+  });
+}
+
 async function loadStaticLatestRows() {
   const fallback = await fetchStaticJson("./data/latest.json");
   assertFreshStaticFallback(fallback.run_date);
@@ -982,21 +1018,40 @@ function uniqueHistoryDateCount(rows) {
   return new Set(rows.map((row) => row.history_date || row.data_date || row.date).filter(Boolean)).size;
 }
 
+async function loadPublishedTickerHistory(ticker) {
+  const response = await fetch(`${PUBLISHED_HISTORY_CSV_URL}?v=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Published history returned HTTP ${response.status}.`);
+  return parseCsv(await response.text())
+    .filter((row) => normaliseTicker(row.ticker) === ticker)
+    .map((row) => ({
+      ...row,
+      history_date: row.history_date || row.data_date || row.date || row.run_date,
+      data_date: row.data_date || row.date || row.history_date,
+      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
+      payload: row,
+    }))
+    .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
+}
+
 async function loadStaticTickerHistory(ticker) {
   const fallback = await fetchStaticJson("./data/history.json");
   const rawRows = fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || (fallback.rows || []).filter((row) => row.ticker === ticker);
-  const fallbackRunDate = fallback.run_date || rawRows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || "";
-  assertFreshStaticFallback(fallbackRunDate);
-  const rows = rawRows
+  let rows = rawRows
     .map((row) => ({
       ...row,
       history_date: row.data_date || row.date || row.run_date,
       data_date: row.data_date || row.date,
+      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
       payload: row,
     }))
     .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
   if (uniqueHistoryDateCount(rows) < 5) {
-    throw new Error("Live history is unavailable and the offline archive does not have enough history for this ticker.");
+    rows = await loadPublishedTickerHistory(ticker);
+  }
+  const fallbackRunDate = fallback.run_date || rows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || "";
+  assertFreshStaticFallback(fallbackRunDate);
+  if (uniqueHistoryDateCount(rows) < 5) {
+    throw new Error("Live history is unavailable and the published archive does not have enough history for this ticker.");
   }
   return {
     latest: rows[0]?.run_date || fallbackRunDate,
