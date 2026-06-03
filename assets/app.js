@@ -84,6 +84,27 @@ const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 10;
 const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
 
+const COMPANY_PROFILE_FALLBACKS = {
+  AAPL: ["Consumer Technology", "Apple designs iPhone, Mac, iPad, wearables, services, and related software ecosystems.", "apple.com"],
+  AMD: ["Semiconductors", "Advanced Micro Devices designs CPUs, GPUs, adaptive chips, and data-center accelerators.", "amd.com"],
+  AMZN: ["Internet Retail & Cloud", "Amazon operates e-commerce marketplaces, logistics, advertising, subscriptions, and AWS cloud services.", "amazon.com"],
+  AVGO: ["Semiconductors & Infrastructure Software", "Broadcom supplies semiconductor connectivity products and infrastructure software for enterprise and cloud customers.", "broadcom.com"],
+  CSCO: ["Networking & Security", "Cisco provides networking hardware, software, cybersecurity, observability, and collaboration products for enterprises and service providers.", "cisco.com"],
+  CSX: ["Rail Transportation", "CSX operates a major freight railroad network across the eastern United States.", "csx.com"],
+  DELL: ["Technology Hardware", "Dell provides PCs, servers, storage, networking, and infrastructure solutions for consumers and enterprises.", "dell.com"],
+  GOOGL: ["Internet Services", "Alphabet operates Google Search, YouTube, Android, cloud services, advertising platforms, and AI products.", "abc.xyz"],
+  GOOG: ["Internet Services", "Alphabet operates Google Search, YouTube, Android, cloud services, advertising platforms, and AI products.", "abc.xyz"],
+  META: ["Social Platforms", "Meta operates Facebook, Instagram, WhatsApp, Messenger, ads infrastructure, AI products, and Reality Labs.", "meta.com"],
+  MRVL: ["Semiconductors", "Marvell designs data-infrastructure semiconductors for cloud, networking, storage, wireless, and automotive markets.", "marvell.com"],
+  MSFT: ["Software & Cloud", "Microsoft provides productivity software, Windows, Azure cloud, gaming, security, and AI infrastructure.", "microsoft.com"],
+  MU: ["Memory Semiconductors", "Micron manufactures DRAM, NAND, and memory/storage products used in data centers, PCs, mobile, and automotive markets.", "micron.com"],
+  NVDA: ["AI Semiconductors", "NVIDIA designs GPUs, networking, systems, and software platforms for AI, gaming, professional visualization, and data centers.", "nvidia.com"],
+  ORCL: ["Enterprise Software & Cloud", "Oracle provides enterprise databases, cloud infrastructure, business applications, and industry software.", "oracle.com"],
+  PANW: ["Cybersecurity", "Palo Alto Networks provides network security, cloud security, security operations, and threat-intelligence platforms.", "paloaltonetworks.com"],
+  PLTR: ["Data Analytics Software", "Palantir provides data integration, analytics, ontology, and AI operating platforms for commercial and government customers.", "palantir.com"],
+  TSLA: ["Electric Vehicles & Energy", "Tesla designs electric vehicles, energy storage systems, solar products, charging infrastructure, and autonomous-driving software.", "tesla.com"],
+};
+
 const SECURITY_NAME_FALLBACKS = {
   AAPL: "Apple",
   ABBV: "AbbVie",
@@ -409,13 +430,26 @@ function hasCompanyProfile(profile) {
   );
 }
 
+function fallbackCompanyProfile(ticker) {
+  const [industry, summary, domain] = COMPANY_PROFILE_FALLBACKS[normaliseTicker(ticker)] || [];
+  if (!summary) return {};
+  return {
+    business_summary: summary,
+    website: `https://${domain}`,
+    industry,
+    latest_report_highlights: "Live report highlights unavailable in fallback profile.",
+    next_report_date: "Check investor relations",
+    profile_source: "Built-in fallback profile",
+  };
+}
+
 async function renderCompanyBriefWithFallback(ticker, profile) {
   if (hasCompanyProfile(profile)) {
     renderCompanyBrief(profile);
     return;
   }
 
-  renderCompanyBrief(profile || {});
+  renderCompanyBrief(fallbackCompanyProfile(ticker) || profile || {});
   try {
     const fallbackProfile = await appApiFetch(`/api/company?ticker=${encodeURIComponent(ticker)}`, 6 * 60 * 60 * 1000);
     if (hasCompanyProfile(fallbackProfile)) renderCompanyBrief(fallbackProfile);
