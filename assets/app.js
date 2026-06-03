@@ -672,6 +672,14 @@ async function supabaseFetch(path) {
   if (!config) {
     throw new Error("Supabase browser config is missing.");
   }
+
+  const proxyResponse = await fetch(`/api/supabase?path=${encodeURIComponent(path)}`, {
+    cache: "no-store"
+  });
+  if (proxyResponse.ok) {
+    return proxyResponse.json();
+  }
+
   const baseUrl = config.url.replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/rest/v1/${path}`, {
     headers: {
