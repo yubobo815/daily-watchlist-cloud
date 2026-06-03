@@ -12,9 +12,9 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=product-layer-20260603">
+    <link rel="stylesheet" href="./assets/styles.css?v=brief-first-20260603">
     <script defer src="./supabase-config.js?v=public-read-config-20260603"></script>
-    <script defer src="./assets/app.js?v=product-layer-20260603"></script>
+    <script defer src="./assets/app.js?v=brief-first-20260603"></script>
   </head>
   <body data-page="history">
     <main class="shell">
@@ -37,7 +37,8 @@
       </section>
 
       <section class="history-grid">
-        <aside id="snapshot" class="panel">
+        <aside id="snapshot" class="panel block-current-read">
+          <h2>Current Read</h2>
           <form id="ticker-form">
             <label class="subtle" for="ticker">Ticker</label>
             <input id="ticker" class="ticker-input" autocomplete="off">
@@ -46,7 +47,7 @@
           <div id="latest-panel" class="timeline"></div>
         </aside>
 
-        <section id="behavior" class="panel">
+        <section id="behavior" class="panel block-behavior-journey">
           <h2>Behavior Journey</h2>
           <div id="history-visual" class="history-visual">
             <div class="empty">Loading visual history...</div>
@@ -55,13 +56,18 @@
             <div class="empty">Loading history...</div>
           </div>
         </section>
+
+        <section id="company-context" class="panel block-company-context">
+          <h2>Company Context</h2>
+          <div class="company-context-empty subtle">Loading company context...</div>
+        </section>
       </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
       <a href="./"><span>Home</span></a>
-      <a href="#snapshot" class="active"><span>Signal</span></a>
+      <a href="#snapshot" class="active"><span>Read</span></a>
       <a href="#behavior"><span>Journey</span></a>
-      <a href="#timeline"><span>Lookback</span></a>
+      <a href="#company-context"><span>Context</span></a>
     </nav>
   </body>
 </html>

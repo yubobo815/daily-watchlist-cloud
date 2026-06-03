@@ -12,9 +12,9 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=product-layer-20260603">
+    <link rel="stylesheet" href="./assets/styles.css?v=brief-first-20260603">
     <script defer src="./supabase-config.js?v=public-read-config-20260603"></script>
-    <script defer src="./assets/app.js?v=product-layer-20260603"></script>
+    <script defer src="./assets/app.js?v=brief-first-20260603"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -39,20 +39,6 @@
 
       <section id="cards" class="cards"></section>
 
-      <section class="controls">
-        <div class="search-shell">
-          <input id="search" class="search" type="search" placeholder="Search ticker or behavior..." autocomplete="off" inputmode="search">
-          <button id="clear-search" class="search-clear hidden" type="button" aria-label="Clear search">Clear</button>
-        </div>
-        <select id="sort" class="control">
-          <option value="score-desc">Strength high to low</option>
-          <option value="day_change_pct-desc">Best day change</option>
-          <option value="day_change_pct-asc">Worst day change</option>
-          <option value="ticker-asc">Ticker A to Z</option>
-        </select>
-        <div id="count" class="count">0 / 0 shown</div>
-      </section>
-
       <section id="today-focus" class="today-focus"></section>
 
       <section id="signal-changes" class="changed-today"></section>
@@ -67,6 +53,19 @@
             <span>Watchlist</span>
           </div>
         </div>
+        <section class="controls">
+          <div class="search-shell">
+            <input id="search" class="search" type="search" placeholder="Search ticker or behavior..." autocomplete="off" inputmode="search">
+            <button id="clear-search" class="search-clear hidden" type="button" aria-label="Clear search">Clear</button>
+          </div>
+          <select id="sort" class="control">
+            <option value="score-desc">Strength high to low</option>
+            <option value="day_change_pct-desc">Best day change</option>
+            <option value="day_change_pct-asc">Worst day change</option>
+            <option value="ticker-asc">Ticker A to Z</option>
+          </select>
+          <div id="count" class="count">0 / 0 shown</div>
+        </section>
         <table>
           <thead id="watchlist-head"></thead>
           <tbody id="watchlist-body"></tbody>

@@ -362,7 +362,7 @@ function safeWebsite(value) {
 }
 
 function renderCompanyBrief(profile) {
-  const target = document.querySelector("#ticker-name");
+  const target = document.querySelector("#company-context");
   if (!target) return;
   const summary = cleanSummaryText(profile?.business_summary);
   const highlights = String(profile?.latest_report_highlights || "").trim();
@@ -372,11 +372,15 @@ function renderCompanyBrief(profile) {
   const source = String(profile?.profile_source || "Company profile").trim();
 
   if (!summary && !highlights && !nextReport && !website && !industry) {
-    target.innerHTML = "";
+    target.innerHTML = `
+      <h2>Company Context</h2>
+      <div class="company-context-empty subtle">No company context available yet.</div>
+    `;
     return;
   }
 
   target.innerHTML = `
+    <h2>Company Context</h2>
     <details class="company-brief">
       <summary>
         ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
@@ -391,17 +395,6 @@ function renderCompanyBrief(profile) {
       <span class="company-source">Source: ${escapeHtml(source)}</span>
     </details>
   `;
-}
-
-function hasCompanyBrief(profile) {
-  return Boolean(
-    profile?.business_summary ||
-    profile?.latest_report_highlights ||
-    profile?.next_report_date ||
-    profile?.website ||
-    profile?.sector ||
-    profile?.industry
-  );
 }
 
 async function fetchCompanyBrief(ticker) {
@@ -1037,22 +1030,21 @@ function renderWatchlistCell(row, key) {
 
 function renderMobileWatchlistSummary(row) {
   const kind = actionKind(row.action);
-  const previous = previousRowFor(row);
+  const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
+  const pattern = setupLabel(row.setup);
+  const strength = strengthLabel(row);
+  const secondary = [strength, pattern && pattern !== "None" ? pattern : ""].filter(Boolean).join(" · ");
   return `
     <span class="mobile-watch-shell">
       <button class="focus-toggle mobile-focus-toggle ${isFocusTicker(row.ticker) ? "active" : ""}" type="button" data-focus-ticker="${escapeHtml(row.ticker)}" aria-label="${isFocusTicker(row.ticker) ? "Remove" : "Add"} ${escapeHtml(row.ticker)} from Focus List">★</button>
       <a class="mobile-watch-row" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
         <span class="mobile-watch-main">
           <strong>${escapeHtml(row.ticker)}</strong>
-          <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || row.ticker)}</span>
-          <span class="mobile-watch-tags">
-            ${transitionBadge(row, previous)}
+          <span>${escapeHtml(company)}</span>
+          <span class="mobile-watch-signal">
             <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-            <span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>
-            <span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>
-            <span class="badge entry-pill">Zone ${escapeHtml(fmtNumber(row.entry_est, 2))}</span>
+            <span>${escapeHtml(secondary)}</span>
           </span>
-          <span class="mobile-why">${whyThisMatters(row, previous).slice(0, 1).join("")}</span>
         </span>
         <span class="mobile-watch-price">
           <strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>
@@ -1468,7 +1460,7 @@ function renderLatestHistoryPanel(latest) {
   panel.innerHTML = `
     <div class="latest-card tone-${actionKind(latest.action)}">
       <div class="latest-head">
-        <span class="latest-label">Latest signal</span>
+        <span class="latest-label">Current read</span>
         <span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
       </div>
       <div class="latest-metrics">
@@ -1557,7 +1549,7 @@ function renderHistoryVisual(rows) {
     </div>
     <details class="chart-details">
       <summary>
-        <span>Show Strength Detail</span>
+        <span>Optional chart</span>
         <strong>Daily scanner bars</strong>
       </summary>
       <div class="chart-card">
@@ -1668,6 +1660,10 @@ async function loadHistory(ticker) {
   document.querySelector("#ticker").value = state.ticker;
   document.querySelector("#history-title").textContent = state.ticker;
   document.querySelector("#ticker-name").innerHTML = "";
+  document.querySelector("#company-context").innerHTML = `
+    <h2>Company Context</h2>
+    <div class="company-context-empty subtle">Loading company context...</div>
+  `;
   document.title = state.ticker;
   window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
@@ -1686,7 +1682,7 @@ async function loadHistory(ticker) {
     state.tickerName = displaySecurityName(snapshotRows[0]?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
     document.title = historyDisplayTitle();
-    if (hasCompanyBrief(profile)) renderCompanyBrief(profile);
+    renderCompanyBrief(profile);
     state.historyRows = historyRows;
     const marketData = historyDateSummary(state.historyRows);
     setRefreshSummary(latest, marketData, state.historyRows, runInfo);
@@ -1701,6 +1697,7 @@ async function loadHistory(ticker) {
       state.historyRows = fallback.rows;
       const marketData = historyDateSummary(state.historyRows);
       setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.historyRows);
+      renderCompanyBrief({});
       renderHistoryRows();
     } catch {
       state.historyRows = [];
