@@ -17,9 +17,9 @@ Set these Vercel environment variables:
 
 ```text
 SUPABASE_URL
-SUPABASE_ANON_KEY
+SUPABASE_SECRET_KEY
 ```
 
-The Vercel app reads Supabase through narrow app APIs, so the frontend does not receive the Supabase project URL, anon key, or table-query details.
+The Vercel app reads Supabase through narrow app APIs, so the frontend does not receive the Supabase project URL, secret key, or table-query details.
 
-Do not add `SUPABASE_SERVICE_ROLE_KEY` to Vercel. The service-role key is only for GitHub Actions refresh jobs.
+Prefer `SUPABASE_SECRET_KEY` with a Supabase `sb_secret_...` key. The legacy `SUPABASE_SERVICE_ROLE_KEY` still works as a fallback, but do not expose either key in browser JavaScript.

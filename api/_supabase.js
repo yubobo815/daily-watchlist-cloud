@@ -1,6 +1,10 @@
 const SUPABASE_CONFIG = {
   url: process.env.SUPABASE_URL || "",
-  apiKey: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "",
+  apiKey: process.env.SUPABASE_SECRET_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_PUBLISHABLE_KEY
+    || process.env.SUPABASE_ANON_KEY
+    || "",
 };
 
 const SNAPSHOT_FIELDS = [
@@ -85,13 +89,24 @@ function supabaseBaseUrl() {
   return SUPABASE_CONFIG.url.replace(/\/$/, "");
 }
 
+function isJwtKey(key) {
+  return String(key || "").split(".").length === 3 && !String(key || "").startsWith("sb_");
+}
+
+function supabaseHeaders() {
+  const headers = {
+    apikey: SUPABASE_CONFIG.apiKey,
+  };
+  if (isJwtKey(SUPABASE_CONFIG.apiKey)) {
+    headers.Authorization = `Bearer ${SUPABASE_CONFIG.apiKey}`;
+  }
+  return headers;
+}
+
 async function supabaseSelect(path) {
   assertSupabaseConfig();
   const response = await fetch(`${supabaseBaseUrl()}/rest/v1/${path}`, {
-    headers: {
-      apikey: SUPABASE_CONFIG.apiKey,
-      Authorization: `Bearer ${SUPABASE_CONFIG.apiKey}`,
-    },
+    headers: supabaseHeaders(),
   });
   const text = await response.text();
   if (!response.ok) {

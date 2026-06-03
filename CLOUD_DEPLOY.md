@@ -25,14 +25,14 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 2. Run the SQL in `supabase_schema.sql`.
 3. In GitHub, open `Settings -> Secrets and variables -> Actions`.
 4. Add `SUPABASE_URL`.
-5. Add `SUPABASE_SERVICE_ROLE_KEY`.
+5. Add `SUPABASE_SECRET_KEY` with a Supabase `sb_secret_...` key.
 
 After that, every cloud refresh writes:
 
 - `watchlist_snapshots`: one row per ticker per run date.
 - `watchlist_behavior_history`: one row per ticker per replayed history date.
 
-The service role key is only for GitHub Actions. Do not put it into browser JavaScript.
+The secret key is only for GitHub Actions and server-side Vercel API routes. Do not put it into browser JavaScript.
 The published app should use Vercel API routes or static fallback JSON rather than exposing Supabase query config in browser JavaScript.
 
 After the first successful run, GitHub will show the public Pages URL in the workflow summary.

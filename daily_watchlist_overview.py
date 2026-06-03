@@ -448,11 +448,23 @@ def numeric_or_none(value):
 
 def supabase_credentials() -> tuple[str, str]:
     url = os.getenv("SUPABASE_URL", "").rstrip("/")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    key = (
+        os.getenv("SUPABASE_SECRET_KEY", "").strip()
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    )
     return url, key
 
 
+def is_supabase_jwt_key(key: str) -> bool:
+    return len(key.split(".")) == 3 and not key.startswith("sb_")
+
+
 def describe_supabase_key(key: str) -> str:
+    if key.startswith("sb_secret_"):
+        return "secret key prefix=sb_secret"
+    if key.startswith("sb_publishable_"):
+        return "publishable key prefix=sb_publishable"
+
     parts = key.split(".")
     if len(parts) != 3:
         prefix = key.split("_", 1)[0] if "_" in key else "unknown"
@@ -469,6 +481,17 @@ def describe_supabase_key(key: str) -> str:
     return f"jwt role={role} ref={ref}"
 
 
+def supabase_headers(key: str) -> dict[str, str]:
+    headers = {
+        "apikey": key,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    if is_supabase_jwt_key(key):
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
 def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]) -> None:
     if not records:
         return
@@ -483,12 +506,7 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
         endpoint,
         data=payload,
         method="POST",
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
+        headers=supabase_headers(key),
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -535,7 +553,8 @@ def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict]
 def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
     url, key = supabase_credentials()
     if not url or not key:
-        print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.")
+        print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SECRET_KEY are not set.")
+        print("Legacy fallback: SUPABASE_SERVICE_ROLE_KEY is also supported.")
         return
 
     print(f"Supabase sync target: {urllib.parse.urlparse(url).netloc} ({describe_supabase_key(key)})")
