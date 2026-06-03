@@ -310,7 +310,8 @@ const state = {
   historyRows: [],
   ticker: "ORCL",
   tickerName: "",
-  focusTickers: []
+  focusTickers: [],
+  runInfo: null
 };
 
 function escapeHtml(value) {
@@ -1168,31 +1169,54 @@ function renderCards(counts) {
   });
 }
 
+function tickerList(items, limit = 3) {
+  const tickers = items.map((item) => item.row?.ticker || item.ticker).filter(Boolean);
+  return tickers.length ? tickers.slice(0, limit).join(" / ") : "none";
+}
+
+function sourceHealthLine(runInfo, rows) {
+  const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
+  const failed = Number(runInfo?.symbols_failed || 0);
+  const stale = Number(runInfo?.symbols_stale_cache || 0);
+  const caveat = failed || stale
+    ? ` · ${stale} cached, ${failed} failed`
+    : "";
+  return `Data ${latestData}${caveat}`;
+}
+
 function renderDailyBrief(counts) {
   const panel = document.querySelector("#daily-brief");
   if (!panel) return;
-  const runDate = state.rows[0]?.run_date || "";
-  const marketData = dataDateSummary(state.rows).replace(/^Market data:\s*/, "");
   const changes = dailyChangeItems(state.rows, state.previousRows);
-  const upgrades = changes
-    .filter((item) => ["Fresh Setup To Buy", "Upgraded", "New Today"].includes(item.transition))
-    .slice(0, 3)
-    .map((item) => item.row.ticker);
-  const topBuy = [...state.rows].find((row) => actionKind(row.action) === "buy");
+  const fresh = changes.filter((item) => item.transition === "New Today");
+  const upgrades = changes.filter((item) => ["Fresh Setup To Buy", "Upgraded"].includes(item.transition));
+  const exits = state.rows
+    .filter((row) => actionKind(row.action) === "exit")
+    .sort((a, b) => convictionScore(a) - convictionScore(b));
+  const priceMovers = currentDayMoverItems(state.rows);
+  const topBuy = [...state.rows]
+    .filter((row) => actionKind(row.action) === "buy")
+    .sort((a, b) => convictionScore(b) - convictionScore(a))[0];
   const exitCount = counts.exit || 0;
-  const headline = marketData
-    ? `Market data updated ${marketData}`
-    : runDate
-      ? `Scanner refreshed ${runDate}`
-      : "Scanner refresh loaded";
-  const upgradesText = upgrades.length ? upgrades.join(" / ") : "none";
+  const actionTotal = (counts.buy || 0) + (counts.setup || 0);
+  const headline = `${actionTotal} actionable names: ${counts.buy || 0} BUY, ${counts.setup || 0} SETUP`;
+  const freshText = tickerList(fresh);
+  const upgradesText = tickerList(upgrades);
+  const moverText = tickerList(priceMovers, 2);
+  const riskText = exits.length ? tickerList(exits, 2) : `${exitCount} exit-risk`;
 
   panel.innerHTML = `
     <div class="brief-card">
       <div class="brief-copy">
         <span class="brief-kicker">Daily Brief</span>
         <h2>${escapeHtml(headline)}</h2>
-        <p>${counts.buy || 0} BUY · ${counts.setup || 0} SETUP · ${exitCount} EXIT · strongest upgrades: ${escapeHtml(upgradesText)}</p>
+        <div class="brief-points">
+          <span><b>Fresh</b> ${escapeHtml(freshText)}</span>
+          <span><b>Upgraded</b> ${escapeHtml(upgradesText)}</span>
+          <span><b>Movers</b> ${escapeHtml(moverText)}</span>
+          <span><b>Risk</b> ${escapeHtml(riskText)}</span>
+        </div>
+        <p>${escapeHtml(sourceHealthLine(state.runInfo, state.rows))}</p>
       </div>
       <div class="brief-actions">
         ${topBuy ? `<a class="brief-primary" href="./history.html?ticker=${encodeURIComponent(topBuy.ticker)}">Review ${escapeHtml(topBuy.ticker)}</a>` : ""}
@@ -1513,12 +1537,14 @@ async function initWatchlist() {
       state.rows = fallback.rows;
       state.previousRows = fallback.previousRows;
       state.previousByTicker = rowByTicker(state.previousRows);
+      state.runInfo = fallback.runInfo || null;
       const marketData = dataDateSummary(state.rows);
       setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
       renderWatchlist();
       return;
     }
     const marketData = dataDateSummary(state.rows);
+    state.runInfo = latestPayload.runInfo || null;
     setRefreshSummary(latestPayload.latest, marketData, state.rows, latestPayload.runInfo);
     renderWatchlist();
   } catch (error) {
@@ -1527,6 +1553,7 @@ async function initWatchlist() {
       state.rows = fallback.rows;
       state.previousRows = fallback.previousRows;
       state.previousByTicker = rowByTicker(state.previousRows);
+      state.runInfo = fallback.runInfo || null;
       const marketData = dataDateSummary(state.rows);
       setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
       renderWatchlist();

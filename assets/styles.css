@@ -388,6 +388,33 @@ body[data-page="watchlist"] .meta {
   font-weight: 620;
 }
 
+.brief-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.brief-points span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid rgba(226, 232, 218, 0.12);
+  border-radius: 999px;
+  background: rgba(7, 10, 15, 0.22);
+  color: var(--ink);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.brief-points b {
+  color: var(--tone-buy);
+  font-weight: 760;
+}
+
 .brief-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2201,6 +2228,17 @@ body[data-page="history"] .raw-history summary {
   .brief-card p {
     font-size: 11.5px;
     line-height: 1.35;
+  }
+
+  .brief-points {
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .brief-points span {
+    min-height: 24px;
+    padding: 3px 7px;
+    font-size: 9.5px;
   }
 
   .brief-actions {
