@@ -1,4 +1,5 @@
 import argparse
+import base64
 import http.cookiejar
 import html
 import json
@@ -7,7 +8,7 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from typing import Optional
 from datetime import datetime
 from pathlib import Path
@@ -442,8 +443,25 @@ def numeric_or_none(value):
 
 def supabase_credentials() -> tuple[str, str]:
     url = os.getenv("SUPABASE_URL", "").rstrip("/")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or ""
+    key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or "").strip()
     return url, key
+
+
+def describe_supabase_key(key: str) -> str:
+    parts = key.split(".")
+    if len(parts) != 3:
+        prefix = key.split("_", 1)[0] if "_" in key else "unknown"
+        return f"non-jwt key prefix={prefix}"
+
+    try:
+        payload_part = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_part).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return "jwt key payload unreadable"
+
+    role = payload.get("role", "unknown")
+    ref = payload.get("ref") or payload.get("iss", "unknown")
+    return f"jwt role={role} ref={ref}"
 
 
 def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]) -> None:
@@ -467,9 +485,13 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
             "Prefer": "resolution=merge-duplicates,return=minimal",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        if resp.status not in {200, 201, 204}:
-            raise RuntimeError(f"Supabase upsert to {table} returned HTTP {resp.status}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in {200, 201, 204}:
+                raise RuntimeError(f"Supabase upsert to {table} returned HTTP {resp.status}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase upsert to {table} failed with HTTP {exc.code}: {body}") from exc
 
 
 def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str) -> None:
@@ -477,6 +499,8 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str) ->
     if not url or not key:
         print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.")
         return
+
+    print(f"Supabase sync target: {urllib.parse.urlparse(url).netloc} ({describe_supabase_key(key)})")
 
     report_records = []
     for record in report.to_dict(orient="records"):
