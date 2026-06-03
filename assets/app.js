@@ -517,6 +517,23 @@ function dailyChangeItems(rows, previousRows) {
     .slice(0, 8);
 }
 
+function currentDayMoverItems(rows) {
+  return rows
+    .map((row) => ({
+      row,
+      previous: null,
+      scoreMove: convictionScore(row),
+      pricePct: numericValue(row, "day_change_pct"),
+      actionChanged: false,
+      setupChanged: false,
+      currentDayOnly: true,
+      priority: Math.abs(numericValue(row, "day_change_pct")) + convictionScore(row) / 20
+    }))
+    .filter((item) => Number.isFinite(item.pricePct) && Math.abs(item.pricePct) >= 3)
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 8);
+}
+
 function gaugePoint(score, radius = 58) {
   const clamped = Math.max(0, Math.min(100, score));
   const angle = Math.PI + (clamped / 100) * Math.PI;
@@ -860,6 +877,7 @@ function renderTodayFocus() {
 }
 
 function changedTodayCard({ row, previous, scoreMove, pricePct, actionChanged, setupChanged }, duplicate = false) {
+  const signal = ACTION_LABELS[row.action] || row.action || "Signal";
   return `
     <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}"${duplicate ? ' aria-hidden="true" tabindex="-1"' : ""}>
       <div class="change-card-head">
@@ -867,9 +885,9 @@ function changedTodayCard({ row, previous, scoreMove, pricePct, actionChanged, s
         <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
       </div>
       <div class="change-card-body">
-        ${actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>` : ""}
-        ${setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : ""}
-        <span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>
+        ${previous && actionChanged ? `<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(signal)}</span>` : `<span class="change-chip signal">${escapeHtml(signal)}</span>`}
+        ${previous && setupChanged ? `<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>` : `<span class="change-chip setup">${escapeHtml(setupLabel(row.setup))}</span>`}
+        ${previous ? `<span class="change-chip ${moveClass(scoreMove)}">Conviction ${fmtSignedNumber(scoreMove, 0)}</span>` : `<span class="change-chip quiet">Conviction ${fmtConviction(row)}/100</span>`}
         <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
       </div>
     </a>
@@ -881,7 +899,29 @@ function renderChangedToday() {
   if (!panel) return;
   const runDate = state.rows[0]?.run_date || "";
   const changes = dailyChangeItems(state.rows, state.previousRows);
+  const fallbackMovers = changes.length ? [] : currentDayMoverItems(state.rows);
+  const items = changes.length ? changes : fallbackMovers;
   if (!changes.length) {
+    if (fallbackMovers.length) {
+      const rollingFallback = fallbackMovers.length > 1;
+      const fallbackCards = fallbackMovers.map((change) => changedTodayCard(change)).join("");
+      const duplicateFallbackCards = rollingFallback ? fallbackMovers.map((change) => changedTodayCard(change, true)).join("") : "";
+      panel.innerHTML = `
+        <div class="section-heading">
+          <div>
+            <span>Today’s Movers</span>
+          </div>
+          ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
+        </div>
+        <div class="change-rail${rollingFallback ? " rolling" : ""}" aria-label="Today’s movers">
+          <div class="change-track">
+            ${fallbackCards}
+            ${duplicateFallbackCards}
+          </div>
+        </div>
+      `;
+      return;
+    }
     panel.innerHTML = `
       <div class="section-heading">
         <div>
@@ -894,9 +934,9 @@ function renderChangedToday() {
     return;
   }
 
-  const rolling = changes.length > 1;
-  const cards = changes.map((change) => changedTodayCard(change)).join("");
-  const duplicateCards = rolling ? changes.map((change) => changedTodayCard(change, true)).join("") : "";
+  const rolling = items.length > 1;
+  const cards = items.map((change) => changedTodayCard(change)).join("");
+  const duplicateCards = rolling ? items.map((change) => changedTodayCard(change, true)).join("") : "";
   panel.innerHTML = `
     <div class="section-heading">
       <div>
