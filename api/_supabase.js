@@ -37,16 +37,6 @@ const HISTORY_FIELDS = [
   "stop_est",
   "target_est",
   "notes",
-  "signal_stage",
-  "transition_label",
-  "transition_score",
-  "signal_age_days",
-  "price_progress_since_signal_pct",
-  "freshness_penalty",
-  "adjusted_score",
-  "distance_from_ref_zone_pct",
-  "extension_state",
-  "reason_codes",
   "payload",
 ];
 
