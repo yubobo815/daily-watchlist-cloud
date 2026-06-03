@@ -702,6 +702,44 @@ async function recentRunDates(limit = 2) {
   return dates.slice(0, limit);
 }
 
+async function fetchStaticJson(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Static fallback returned HTTP ${response.status}.`);
+  return response.json();
+}
+
+async function loadStaticLatestRows() {
+  const fallback = await fetchStaticJson("./data/latest.json");
+  return {
+    latest: fallback.run_date,
+    previous: "",
+    rows: (fallback.rows || []).map((row) => ({
+      ...row,
+      run_date: row.run_date || fallback.run_date,
+      data_date: row.data_date || row.date,
+      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
+    })),
+    previousRows: [],
+  };
+}
+
+async function loadStaticTickerHistory(ticker) {
+  const fallback = await fetchStaticJson("./data/history.json");
+  const rows = (fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || [])
+    .map((row) => ({
+      ...row,
+      history_date: row.data_date || row.date || row.run_date,
+      data_date: row.data_date || row.date,
+      payload: row,
+    }))
+    .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
+  return {
+    latest: rows[0]?.run_date || "",
+    name: rows[0]?.name || "",
+    rows,
+  };
+}
+
 function renderWatchlistCell(row, key) {
   if (key === "ticker") {
     return `<a class="ticker-link" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">${escapeHtml(row.ticker)}</a>`;
@@ -972,12 +1010,29 @@ async function initWatchlist() {
   initTabNavigation();
   try {
     const [latest, previous] = await recentRunDates(2);
-    if (!latest) throw new Error("No Supabase run found yet.");
+    if (!latest) {
+      const fallback = await loadStaticLatestRows();
+      state.rows = fallback.rows;
+      state.previousRows = fallback.previousRows;
+      const marketData = dataDateSummary(state.rows);
+      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
+      renderWatchlist();
+      return;
+    }
     state.rows = (await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(latest)}&order=score.desc`))
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
     state.previousRows = previous
       ? await supabaseFetch(`watchlist_snapshots?select=*&run_date=eq.${encodeURIComponent(previous)}&order=score.desc`)
       : [];
+    if (!state.rows.length) {
+      const fallback = await loadStaticLatestRows();
+      state.rows = fallback.rows;
+      state.previousRows = fallback.previousRows;
+      const marketData = dataDateSummary(state.rows);
+      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
+      renderWatchlist();
+      return;
+    }
     const marketData = dataDateSummary(state.rows);
     setRefreshSummary(latest, marketData, state.rows);
     renderWatchlist();
@@ -1213,9 +1268,21 @@ async function loadHistory(ticker) {
     setRefreshSummary(latest, marketData, state.historyRows);
     renderHistoryRows();
   } catch (error) {
-    state.historyRows = [];
-    setStatus(error.message, false);
-    renderHistoryRows();
+    try {
+      const fallback = await loadStaticTickerHistory(state.ticker);
+      if (!fallback.rows.length) throw error;
+      state.tickerName = displaySecurityName(fallback.name, state.ticker);
+      document.querySelector("#history-title").textContent = historyDisplayTitle();
+      document.title = historyDisplayTitle();
+      state.historyRows = fallback.rows;
+      const marketData = historyDateSummary(state.historyRows);
+      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.historyRows);
+      renderHistoryRows();
+    } catch {
+      state.historyRows = [];
+      setStatus(error.message, false);
+      renderHistoryRows();
+    }
   }
 }
 
