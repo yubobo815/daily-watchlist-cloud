@@ -978,6 +978,10 @@ async function loadStaticLatestRows() {
   };
 }
 
+function uniqueHistoryDateCount(rows) {
+  return new Set(rows.map((row) => row.history_date || row.data_date || row.date).filter(Boolean)).size;
+}
+
 async function loadStaticTickerHistory(ticker) {
   const fallback = await fetchStaticJson("./data/history.json");
   const rawRows = fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || (fallback.rows || []).filter((row) => row.ticker === ticker);
@@ -991,6 +995,9 @@ async function loadStaticTickerHistory(ticker) {
       payload: row,
     }))
     .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
+  if (uniqueHistoryDateCount(rows) < 5) {
+    throw new Error("Live history is unavailable and the offline archive does not have enough history for this ticker.");
+  }
   return {
     latest: rows[0]?.run_date || fallbackRunDate,
     name: rows[0]?.name || "",
@@ -1669,9 +1676,9 @@ async function loadHistory(ticker) {
       setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.historyRows);
       renderCompanyBrief({});
       renderHistoryRows();
-    } catch {
+    } catch (fallbackError) {
       state.historyRows = [];
-      setStatus(error.message, false);
+      setStatus(fallbackError?.message || error.message, false);
       renderHistoryRows();
     }
   }

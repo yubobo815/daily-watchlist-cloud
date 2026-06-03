@@ -1,6 +1,6 @@
 const SUPABASE_CONFIG = {
   url: process.env.SUPABASE_URL || "",
-  anonKey: process.env.SUPABASE_ANON_KEY || "",
+  apiKey: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "",
 };
 
 const SNAPSHOT_FIELDS = [
@@ -60,7 +60,7 @@ const PAYLOAD_FIELDS = [
 ];
 
 function assertSupabaseConfig() {
-  if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) {
+  if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.apiKey) {
     throw new Error("Supabase server config is missing.");
   }
 }
@@ -73,8 +73,8 @@ async function supabaseSelect(path) {
   assertSupabaseConfig();
   const response = await fetch(`${supabaseBaseUrl()}/rest/v1/${path}`, {
     headers: {
-      apikey: SUPABASE_CONFIG.anonKey,
-      Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
+      apikey: SUPABASE_CONFIG.apiKey,
+      Authorization: `Bearer ${SUPABASE_CONFIG.apiKey}`,
     },
   });
   const text = await response.text();
