@@ -1,6 +1,6 @@
 const SUPABASE_CONFIG = {
-  url: process.env.SUPABASE_URL || "https://epjeuatrsjacfcyxxttk.supabase.co",
-  anonKey: process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || "sb_publishable_0n1SKb8_92zrPmGThrYs9A_qNz77BAn",
+  url: process.env.SUPABASE_URL || "https://lzuwwiabrnebboxriemu.supabase.co",
+  anonKey: process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || "sb_publishable_tCTML11CHw0fwtYWD9_I-Q_ne39UiHw",
 };
 
 export default async function handler(request, response) {

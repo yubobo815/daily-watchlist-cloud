@@ -62,8 +62,8 @@ const KIND_LABELS = {
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
 const STATIC_SUPABASE_CONFIG = {
-  url: "https://epjeuatrsjacfcyxxttk.supabase.co",
-  anonKey: "sb_publishable_0n1SKb8_92zrPmGThrYs9A_qNz77BAn",
+  url: "https://lzuwwiabrnebboxriemu.supabase.co",
+  anonKey: "sb_publishable_tCTML11CHw0fwtYWD9_I-Q_ne39UiHw",
 };
 
 const SECURITY_NAME_FALLBACKS = {
