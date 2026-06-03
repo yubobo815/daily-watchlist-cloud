@@ -12,9 +12,9 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=product-cleanup-20260603">
+    <link rel="stylesheet" href="./assets/styles.css?v=product-layer-20260603">
     <script defer src="./supabase-config.js?v=public-read-config-20260603"></script>
-    <script defer src="./assets/app.js?v=product-cleanup-20260603"></script>
+    <script defer src="./assets/app.js?v=product-layer-20260603"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -35,6 +35,8 @@
         </div>
       </section>
 
+      <section id="daily-brief" class="daily-brief"></section>
+
       <section id="cards" class="cards"></section>
 
       <section class="controls">
@@ -53,7 +55,11 @@
 
       <section id="today-focus" class="today-focus"></section>
 
-      <section id="changed-today" class="changed-today"></section>
+      <section id="signal-changes" class="changed-today"></section>
+
+      <section id="price-movers" class="price-movers"></section>
+
+      <section id="focus-list" class="focus-list"></section>
 
       <section id="watchlist-table" class="table-wrap">
         <div class="section-heading watchlist-heading">
@@ -69,9 +75,9 @@
       </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
-      <a href="#cards" class="active"><span>Signals</span></a>
+      <a href="#daily-brief" class="active"><span>Brief</span></a>
       <a href="#today-focus"><span>Focus</span></a>
-      <a href="#changed-today"><span>Movers</span></a>
+      <a href="#signal-changes"><span>Changes</span></a>
       <a href="#watchlist-table"><span>Watchlist</span></a>
     </nav>
   </body>

@@ -340,6 +340,77 @@ body[data-page="watchlist"] .meta {
   color: #070a0f;
 }
 
+.daily-brief {
+  margin: 14px 0 12px;
+}
+
+.brief-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(46, 230, 159, 0.22);
+  border-radius: var(--radius-ios);
+  background:
+    linear-gradient(135deg, rgba(46, 230, 159, 0.13), rgba(114, 169, 255, 0.07)),
+    rgba(16, 21, 29, 0.72);
+  box-shadow: var(--shadow);
+}
+
+.brief-kicker {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--tone-buy);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brief-card h2 {
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 30px);
+}
+
+.brief-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.brief-primary,
+.brief-secondary {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 720;
+  text-decoration: none;
+}
+
+.brief-primary {
+  background: #f2f5ec;
+  color: #070a0f;
+}
+
+.brief-secondary {
+  background: rgba(242, 245, 236, 0.08);
+  color: var(--ink);
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(6, minmax(92px, 1fr));
@@ -509,13 +580,18 @@ body[data-page="watchlist"] .meta {
 }
 
 .today-focus,
-.changed-today {
+.changed-today,
+.price-movers,
+.focus-list {
   margin-bottom: 12px;
   padding-top: 4px;
 }
 
+body.search-active .daily-brief,
 body.search-active .today-focus,
-body.search-active .changed-today {
+body.search-active .changed-today,
+body.search-active .price-movers,
+body.search-active .focus-list {
   display: none;
 }
 
@@ -628,6 +704,26 @@ body.search-active .changed-today {
   font-weight: 620;
 }
 
+.reason-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 22px;
+}
+
+.reason-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid rgba(226, 232, 218, 0.12);
+  border-radius: 999px;
+  background: rgba(242, 245, 236, 0.06);
+  color: #c6d1df;
+  font-size: 10.5px;
+  font-weight: 620;
+}
+
 .change-rail {
   overflow: hidden;
   border-radius: 22px;
@@ -679,6 +775,55 @@ body.search-active .changed-today {
 .compact-empty {
   padding: 14px 0;
   text-align: left;
+}
+
+.focus-empty {
+  padding: 13px;
+  border: 1px dashed var(--line-soft);
+  border-radius: var(--radius-tile);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.focus-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.focus-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--line-soft);
+  border-left: 4px solid var(--tone-avoid);
+  border-radius: var(--radius-tile);
+  background: rgba(16, 21, 29, 0.58);
+  color: inherit;
+  text-decoration: none;
+}
+
+.focus-list-item strong,
+.focus-list-item small {
+  display: block;
+}
+
+.focus-list-item small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-list-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
 }
 
 @keyframes movers-roll {
@@ -772,6 +917,33 @@ td:nth-child(9) {
 td:nth-child(13) {
   max-width: 230px;
   white-space: normal;
+}
+
+.ticker-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.focus-toggle {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(242, 245, 236, 0.06);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.focus-toggle.active {
+  border-color: rgba(242, 184, 75, 0.38);
+  background: rgba(242, 184, 75, 0.16);
+  color: var(--tone-setup);
 }
 
 .num {
@@ -1885,6 +2057,38 @@ body[data-page="history"] .raw-history summary {
     font-size: 16px;
   }
 
+  .daily-brief {
+    margin: 8px 0;
+  }
+
+  .brief-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .brief-card h2 {
+    font-size: 18px;
+    line-height: 1.12;
+  }
+
+  .brief-card p {
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
+  .brief-actions {
+    justify-content: flex-start;
+  }
+
+  .brief-primary,
+  .brief-secondary {
+    min-height: 30px;
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
   .controls {
     position: sticky;
     top: 96px;
@@ -1957,7 +2161,9 @@ body[data-page="history"] .raw-history summary {
   }
 
   .today-focus,
-  .changed-today {
+  .changed-today,
+  .price-movers,
+  .focus-list {
     margin-bottom: 6px;
   }
 
@@ -2043,12 +2249,23 @@ body[data-page="history"] .raw-history summary {
     display: block;
   }
 
+  .mobile-watch-shell {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    padding: 11px 2px;
+  }
+
+  .mobile-focus-toggle {
+    margin-top: 1px;
+  }
+
   .mobile-watch-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 4px 12px;
     align-items: start;
-    padding: 11px 2px;
     color: inherit;
     text-decoration: none;
   }
@@ -2139,6 +2356,38 @@ body[data-page="history"] .raw-history summary {
   .change-card-body,
   .change-chips {
     font-size: 10px;
+  }
+
+  .reason-row {
+    gap: 3px;
+    min-height: 18px;
+  }
+
+  .reason-chip {
+    min-height: 18px;
+    padding: 1px 6px;
+    font-size: 9.5px;
+  }
+
+  .mobile-why {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .focus-list-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .focus-list-item {
+    padding: 9px 2px;
+    border-width: 0 0 1px;
+    border-radius: 0;
+    background: transparent;
   }
 
   .focus-meta {
