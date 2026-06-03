@@ -1711,7 +1711,6 @@ function renderHistoryRows() {
           <div class="lookback-main">
             <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
             <strong>${escapeHtml(strengthLabel(row))}</strong>
-            <span>Strength</span>
           </div>
           <div class="lookback-meta">
             <span>${escapeHtml(setupLabel(row.setup))}</span>

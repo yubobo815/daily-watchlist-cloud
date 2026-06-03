@@ -1957,9 +1957,9 @@ body[data-page="history"] .raw-history summary {
 .lookback-main strong {
   color: var(--ink);
   font-family: var(--font-data);
-  font-size: 28px;
+  font-size: 17px;
   font-weight: 650;
-  line-height: 0.95;
+  line-height: 1.05;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2739,7 +2739,7 @@ body[data-page="history"] .raw-history summary {
   }
 
   .lookback-main strong {
-    font-size: 18px;
+    font-size: 13px;
   }
 
   .lookback-meta span {
