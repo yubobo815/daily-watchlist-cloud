@@ -60,9 +60,25 @@ const KIND_LABELS = {
   avoid: "AVOID"
 };
 
+const REASON_LABELS = {
+  volume_expansion: "Volume expansion",
+  trend_reclaim: "Trend reclaim",
+  momentum_reclaim: "Momentum reclaim",
+  support_retest: "Support retest",
+  fear_rejection: "Fear rejection",
+  quiet_absorption: "Quiet absorption",
+  buyer_tape: "Buyer tape",
+  seller_pressure: "Seller pressure",
+  exit_pressure: "Exit pressure",
+  extended_from_zone: "Extended from zone",
+  reference_zone_adjusted: "Reference zone adjusted",
+  stale_buy_no_progress: "Stale buy: no progress",
+  fresh_buy_signal: "Fresh buy signal"
+};
+
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
 const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
-const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v3:";
+const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v4:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 3;
 
@@ -405,6 +421,33 @@ function numericValue(row, key) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function payloadNumeric(row, key) {
+  const number = Number(payloadValue(row, key));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function reasonCodes(row) {
+  const raw = payloadValue(row, "reason_codes");
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch {
+      return raw.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function scannerScoreValue(row) {
+  const adjusted = payloadValue(row, "adjusted_score");
+  const raw = adjusted === "" || adjusted == null ? payloadValue(row, "score") : adjusted;
+  const number = Number(raw);
+  return Number.isFinite(number) ? number : 0;
+}
+
 function scalePoint(value, min, max, start, end) {
   if (max === min) return (start + end) / 2;
   return start + ((value - min) / (max - min)) * (end - start);
@@ -452,7 +495,7 @@ function setupTone(value) {
 }
 
 function convictionScore(rowOrScore) {
-  const raw = typeof rowOrScore === "object" ? numericValue(rowOrScore, "score") : Number(rowOrScore);
+  const raw = typeof rowOrScore === "object" ? scannerScoreValue(rowOrScore) : Number(rowOrScore);
   if (!Number.isFinite(raw)) return 0;
   return Math.max(0, Math.min(100, (raw / 128) * 100));
 }
@@ -473,7 +516,14 @@ function behaviorDetail(row) {
   const tape = row.psychology || "Mixed tape";
   const mode = row.adaptive_mode || "Mixed mode";
   const note = String(row.notes || "").trim();
+  const transition = transitionLabel(row);
+  const distanceFromZone = payloadNumeric(row, "distance_from_ref_zone_pct");
 
+  if (payloadValue(row, "extension_state") === "EXTENDED") {
+    const distance = distanceFromZone ? `${fmtNumber(distanceFromZone, 1)}% above ` : "above ";
+    return `Extended: price is ${distance}the reference zone; wait for a cleaner base or pullback.`;
+  }
+  if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
   if (note) return note;
   if (kind === "buy") return `${pattern} behavior with strong scanner strength and ${tape.toLowerCase()} tape.`;
   if (kind === "continue") return `Strong continuation: leadership behavior remains constructive, but fresh zone quality may be extended.`;
@@ -576,6 +626,8 @@ function transitionRank(row) {
 }
 
 function transitionLabel(row, previous = previousRowFor(row)) {
+  const structured = payloadValue(row, "transition_label");
+  if (structured) return structured;
   if (!previous) return "New Today";
   if (row.action === previous.action && row.setup === previous.setup) return "Repeated";
   if (transitionRank(row) > transitionRank(previous) || convictionScore(row) - convictionScore(previous) >= 8) return "Upgraded";
@@ -584,9 +636,9 @@ function transitionLabel(row, previous = previousRowFor(row)) {
 }
 
 function transitionTone(label) {
-  if (label === "Upgraded" || label === "New Today") return "up";
-  if (label === "Downgraded") return "down";
-  if (label === "Changed") return "setup";
+  if (label === "Upgraded" || label === "New Today" || label === "Fresh Setup To Buy") return "up";
+  if (label === "Downgraded" || label === "Stale Buy") return "down";
+  if (label === "Extended" || label === "Changed") return "setup";
   return "quiet";
 }
 
@@ -600,6 +652,13 @@ function referenceZoneMove(row, previous) {
 }
 
 function whyThisMatters(row, previous = previousRowFor(row)) {
+  const structuredReasons = reasonCodes(row).map((code) => REASON_LABELS[code] || code.replaceAll("_", " "));
+  const distanceFromZone = payloadNumeric(row, "distance_from_ref_zone_pct");
+  if (payloadValue(row, "extension_state") === "EXTENDED" && distanceFromZone) {
+    structuredReasons.unshift(`${fmtNumber(distanceFromZone, 1)}% above zone`);
+  }
+  if (structuredReasons.length) return [...new Set(structuredReasons)].slice(0, 3);
+
   const reasons = [];
   const kind = actionKind(row.action);
   const buyer = Number(payloadValue(row, "buyer_score"));
@@ -633,16 +692,19 @@ function dailyChangeItems(rows, previousRows) {
       const scoreMove = convictionScore(row) - convictionScore(previous);
       const actionChanged = row.action !== previous.action;
       const setupChanged = row.setup !== previous.setup;
+      const transition = transitionLabel(row, previous);
+      const transitionScore = payloadNumeric(row, "transition_score");
       const priceMove = numericValue(row, "close") - numericValue(previous, "close");
       const previousClose = numericValue(previous, "close");
       const pricePct = previousClose ? (priceMove / previousClose) * 100 : 0;
       const priority =
         (actionChanged ? 40 : 0) +
         (setupChanged ? 20 : 0) +
+        Math.min(Math.abs(transitionScore), 35) +
         Math.min(Math.abs(scoreMove), 30) +
         Math.min(Math.abs(pricePct), 10);
-      if (!actionChanged && !setupChanged && Math.abs(scoreMove) < 6 && Math.abs(pricePct) < 3) return null;
-      return { row, previous, scoreMove, pricePct, actionChanged, setupChanged, priority, transition: transitionLabel(row, previous) };
+      if (transition === "Repeated Signal" && !actionChanged && !setupChanged && Math.abs(scoreMove) < 6 && Math.abs(pricePct) < 3) return null;
+      return { row, previous, scoreMove, pricePct, actionChanged, setupChanged, priority, transition };
     })
     .filter(Boolean)
     .sort((a, b) => b.priority - a.priority)
@@ -1025,7 +1087,7 @@ function renderDailyBrief(counts) {
   const marketData = dataDateSummary(state.rows).replace(/^Market data:\s*/, "");
   const changes = dailyChangeItems(state.rows, state.previousRows);
   const upgrades = changes
-    .filter((item) => item.transition === "Upgraded" || item.actionChanged || item.setupChanged)
+    .filter((item) => ["Fresh Setup To Buy", "Upgraded", "New Today"].includes(item.transition))
     .slice(0, 3)
     .map((item) => item.row.ticker);
   const topBuy = [...state.rows].find((row) => actionKind(row.action) === "buy");

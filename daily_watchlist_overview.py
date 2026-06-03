@@ -420,6 +420,10 @@ def clean_json_value(value):
         return None
     if isinstance(value, float) and math.isnan(value):
         return None
+    if isinstance(value, dict):
+        return {key: clean_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean_json_value(item) for item in value]
     if pd.isna(value):
         return None
     if isinstance(value, (np.integer,)):
@@ -495,6 +499,39 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
         raise RuntimeError(f"Supabase upsert to {table} failed with HTTP {exc.code}: {body}") from exc
 
 
+OPTIONAL_SIGNAL_COLUMNS = {
+    "signal_stage",
+    "transition_label",
+    "transition_score",
+    "signal_age_days",
+    "price_progress_since_signal_pct",
+    "freshness_penalty",
+    "adjusted_score",
+    "distance_from_ref_zone_pct",
+    "extension_state",
+    "reason_codes",
+}
+
+
+def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict], conflict_columns: list[str]) -> None:
+    try:
+        supabase_upsert(table, records, conflict_columns)
+        return
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        schema_cache_error = "could not find" in message or "schema cache" in message or "column" in message
+        has_optional_columns = any(OPTIONAL_SIGNAL_COLUMNS.intersection(record) for record in records)
+        if not schema_cache_error or not has_optional_columns:
+            raise
+
+        stripped_records = [
+            {key: value for key, value in record.items() if key not in OPTIONAL_SIGNAL_COLUMNS}
+            for record in records
+        ]
+        print(f"Supabase {table} optional signal columns unavailable; storing transition fields in payload only.")
+        supabase_upsert(table, stripped_records, conflict_columns)
+
+
 def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
     url, key = supabase_credentials()
     if not url or not key:
@@ -523,6 +560,16 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
                 "stop_est": numeric_or_none(row.get("stop_est")),
                 "target_est": numeric_or_none(row.get("target_est")),
                 "notes": row.get("notes"),
+                "signal_stage": row.get("signal_stage"),
+                "transition_label": row.get("transition_label"),
+                "transition_score": numeric_or_none(row.get("transition_score")),
+                "signal_age_days": numeric_or_none(row.get("signal_age_days")),
+                "price_progress_since_signal_pct": numeric_or_none(row.get("price_progress_since_signal_pct")),
+                "freshness_penalty": numeric_or_none(row.get("freshness_penalty")),
+                "adjusted_score": numeric_or_none(row.get("adjusted_score")),
+                "distance_from_ref_zone_pct": numeric_or_none(row.get("distance_from_ref_zone_pct")),
+                "extension_state": row.get("extension_state"),
+                "reason_codes": row.get("reason_codes") or [],
                 "payload": row,
             }
         )
@@ -547,6 +594,16 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
                     "stop_est": numeric_or_none(row.get("stop_est")),
                     "target_est": numeric_or_none(row.get("target_est")),
                     "notes": row.get("notes"),
+                    "signal_stage": row.get("signal_stage"),
+                    "transition_label": row.get("transition_label"),
+                    "transition_score": numeric_or_none(row.get("transition_score")),
+                    "signal_age_days": numeric_or_none(row.get("signal_age_days")),
+                    "price_progress_since_signal_pct": numeric_or_none(row.get("price_progress_since_signal_pct")),
+                    "freshness_penalty": numeric_or_none(row.get("freshness_penalty")),
+                    "adjusted_score": numeric_or_none(row.get("adjusted_score")),
+                    "distance_from_ref_zone_pct": numeric_or_none(row.get("distance_from_ref_zone_pct")),
+                    "extension_state": row.get("extension_state"),
+                    "reason_codes": row.get("reason_codes") or [],
                     "payload": row,
                 }
             )
@@ -557,8 +614,8 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
         except RuntimeError as exc:
             print(f"Supabase run-health sync skipped: {exc}")
 
-    supabase_upsert("watchlist_snapshots", report_records, ["run_date", "ticker"])
-    supabase_upsert("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
+    supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
+    supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
     print(f"Synced {len(report_records)} snapshot rows and {len(history_records)} history rows to Supabase.")
 
 
@@ -620,6 +677,35 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
 
 def bool_text(value: bool) -> str:
     return "YES" if value else "NO"
+
+
+SIGNAL_STAGE_ORDER = {
+    "WAIT": 0,
+    "WAIT / AVOID": 0,
+    "WATCH TREND": 1,
+    "SETUP FORMING": 2,
+    "BUY CANDIDATE": 3,
+    "STRONG CONTINUATION": 4,
+    "EXIT PRESSURE": 5,
+}
+
+SIGNAL_STAGE_LABELS = {
+    "WAIT": "WAIT",
+    "WAIT / AVOID": "WAIT",
+    "WATCH TREND": "WATCH",
+    "SETUP FORMING": "SETUP",
+    "BUY CANDIDATE": "BUY",
+    "STRONG CONTINUATION": "CONTINUE",
+    "EXIT PRESSURE": "EXIT",
+}
+
+
+def signal_stage(action: str) -> str:
+    return SIGNAL_STAGE_LABELS.get(action, "WAIT")
+
+
+def signal_stage_rank(action: str) -> int:
+    return SIGNAL_STAGE_ORDER.get(action, 0)
 
 
 def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_pullback_pct: float) -> tuple[float, str]:
@@ -975,6 +1061,22 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     stop = max(percent_stop, atr_stop)
     target = close + atr_now * 3.0 if atr_now > 0 else close * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
     reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
+    distance_from_ref_zone_pct = (
+        (close - float(entry_est)) / float(entry_est) * 100
+        if setup_forming and not math.isnan(entry_est) and float(entry_est) > 0
+        else np.nan
+    )
+    distance_from_ref_zone_atr = (
+        (close - float(entry_est)) / atr_now
+        if setup_forming and not math.isnan(entry_est) and atr_now > 0
+        else np.nan
+    )
+    extended_from_zone = (
+        setup_forming
+        and not math.isnan(distance_from_ref_zone_pct)
+        and (distance_from_ref_zone_pct >= 7.0 or (not math.isnan(distance_from_ref_zone_atr) and distance_from_ref_zone_atr >= 2.25))
+    )
+    extension_state = "EXTENDED" if extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     if filters_ok:
         action = "BUY CANDIDATE"
@@ -1020,6 +1122,31 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     if avoid:
         notes.append("Weak mode")
 
+    reason_codes = []
+    if volume_ok and (breakout_vol or accum_vol):
+        reason_codes.append("volume_expansion")
+    if breakout:
+        reason_codes.append("trend_reclaim")
+    if momentum:
+        reason_codes.append("momentum_reclaim")
+    if pullback or early_pullback:
+        reason_codes.append("support_retest")
+    if reversal or fear_rejected:
+        reason_codes.append("fear_rejection")
+    if quiet_absorption:
+        reason_codes.append("quiet_absorption")
+    if buyer_control:
+        reason_codes.append("buyer_tape")
+    if seller_control:
+        reason_codes.append("seller_pressure")
+    if exit_pressure:
+        reason_codes.append("exit_pressure")
+    if extended_from_zone:
+        reason_codes.append("extended_from_zone")
+    if entry_note:
+        reason_codes.append("reference_zone_adjusted")
+    reason_codes = list(dict.fromkeys(reason_codes))
+
     return {
         "ticker": display_ticker(ticker),
         "name": stock_name(ticker),
@@ -1043,6 +1170,10 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         "stop_est": round(float(stop), 2) if setup_forming else "",
         "target_est": round(float(target), 2) if setup_forming else "",
         "reward_risk": round(float(reward_risk), 2) if setup_forming and not math.isnan(reward_risk) else "",
+        "distance_from_ref_zone_pct": round(float(distance_from_ref_zone_pct), 2) if setup_forming and not math.isnan(distance_from_ref_zone_pct) else "",
+        "extension_state": extension_state,
+        "reason_codes": reason_codes,
+        "signal_stage": signal_stage(action),
         "hist_trades": setup_stats["hist_trades"],
         "hist_win_rate": setup_stats["hist_win_rate"],
         "hist_avg_return": setup_stats["hist_avg_return"],
@@ -1064,6 +1195,83 @@ def action_class(action: str) -> str:
     }.get(action, "wait")
 
 
+def enrich_signal_transitions(history_rows: list[dict]) -> list[dict]:
+    if not history_rows:
+        return history_rows
+
+    enriched: list[dict] = []
+    for index, row in enumerate(history_rows):
+        previous = enriched[index - 1] if index else None
+        action = row.get("action", "")
+        previous_action = previous.get("action", "") if previous else ""
+        current_rank = signal_stage_rank(action)
+        previous_rank = signal_stage_rank(previous_action)
+        transition_label = "New Today"
+        transition_score = 0.0
+
+        if previous:
+            if action == previous_action and row.get("setup") == previous.get("setup"):
+                transition_label = "Repeated Signal"
+                transition_score = 0.0
+            elif action == "EXIT PRESSURE":
+                transition_label = "Downgraded"
+                transition_score = -35.0
+            elif action == "BUY CANDIDATE" and previous_action == "SETUP FORMING":
+                transition_label = "Fresh Setup To Buy"
+                transition_score = 35.0
+            elif current_rank > previous_rank and action != "EXIT PRESSURE":
+                transition_label = "Upgraded"
+                transition_score = 20.0
+            elif current_rank < previous_rank or action == "WAIT / AVOID":
+                transition_label = "Downgraded"
+                transition_score = -20.0
+            else:
+                transition_label = "Changed"
+                transition_score = 5.0
+
+        streak_start = index
+        while streak_start > 0 and history_rows[streak_start - 1].get("action") == action:
+            streak_start -= 1
+        signal_age_days = index - streak_start + 1
+        start_close = numeric_or_none(history_rows[streak_start].get("close"))
+        close = numeric_or_none(row.get("close"))
+        price_progress = (
+            (float(close) / float(start_close) - 1) * 100
+            if start_close and close and float(start_close) > 0
+            else None
+        )
+
+        stale_penalty = 0.0
+        reason_codes = list(row.get("reason_codes") or [])
+        if action == "BUY CANDIDATE" and signal_age_days >= 3 and (price_progress is None or price_progress < 1.0):
+            stale_penalty = min(22.0, (signal_age_days - 2) * 5.0)
+            transition_label = "Stale Buy"
+            reason_codes.append("stale_buy_no_progress")
+        elif action == "BUY CANDIDATE" and signal_age_days == 1:
+            reason_codes.append("fresh_buy_signal")
+
+        if row.get("extension_state") == "EXTENDED":
+            stale_penalty += 12.0
+            transition_label = "Extended"
+            reason_codes.append("extended_from_zone")
+
+        adjusted_score = max(0.0, min(128.0, float(numeric_or_none(row.get("score")) or 0) + transition_score - stale_penalty))
+        row.update(
+            {
+                "signal_stage": signal_stage(action),
+                "transition_label": transition_label,
+                "transition_score": round(float(transition_score - stale_penalty), 1),
+                "signal_age_days": signal_age_days,
+                "price_progress_since_signal_pct": round(float(price_progress), 2) if price_progress is not None else "",
+                "freshness_penalty": round(float(stale_penalty), 1),
+                "adjusted_score": round(float(adjusted_score), 1),
+                "reason_codes": list(dict.fromkeys(reason_codes)),
+            }
+        )
+        enriched.append(row)
+    return enriched
+
+
 def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> list[dict]:
     d = prepare(raw)
     if len(d) < 220:
@@ -1078,7 +1286,38 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
             continue
         snapshot["history_day"] = len(d) - end
         history_rows.append(snapshot)
-    return history_rows
+    return enrich_signal_transitions(history_rows)
+
+
+LATEST_SIGNAL_FIELDS = [
+    "signal_stage",
+    "transition_label",
+    "transition_score",
+    "signal_age_days",
+    "price_progress_since_signal_pct",
+    "freshness_penalty",
+    "adjusted_score",
+    "distance_from_ref_zone_pct",
+    "extension_state",
+    "reason_codes",
+]
+
+
+def apply_latest_signal_context(row: dict, ticker_history: list[dict]) -> dict:
+    if not ticker_history:
+        row.setdefault("signal_stage", signal_stage(row.get("action", "")))
+        row.setdefault("transition_label", "New Today")
+        row.setdefault("transition_score", 0.0)
+        row.setdefault("signal_age_days", 1)
+        row.setdefault("freshness_penalty", 0.0)
+        row.setdefault("adjusted_score", row.get("score", 0.0))
+        return row
+
+    latest = ticker_history[-1]
+    for field in LATEST_SIGNAL_FIELDS:
+        if field in latest:
+            row[field] = latest[field]
+    return row
 
 
 def write_history_html(path: Path) -> None:
@@ -1882,9 +2121,11 @@ def main() -> None:
             else:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
             row = classify_and_score(ticker, df)
+            ticker_history = build_behavior_history(ticker, df, days=args.history_days)
+            row = apply_latest_signal_context(row, ticker_history)
             row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
             rows.append(row)
-            history_rows.extend(build_behavior_history(ticker, df, days=args.history_days))
+            history_rows.extend(ticker_history)
         except URLError as exc:
             if not args.refresh:
                 failures.append({"ticker": display_ticker(ticker), "error": str(exc)})
@@ -1892,9 +2133,11 @@ def main() -> None:
             try:
                 df = cached_chart(ticker, years=args.years)
                 row = classify_and_score(ticker, df)
+                ticker_history = build_behavior_history(ticker, df, days=args.history_days)
+                row = apply_latest_signal_context(row, ticker_history)
                 row.update(fetch_company_profile(ticker, refresh=False))
                 rows.append(row)
-                history_rows.extend(build_behavior_history(ticker, df, days=args.history_days))
+                history_rows.extend(ticker_history)
                 stale_cache_fallbacks.append(
                     {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
                 )
@@ -1907,7 +2150,8 @@ def main() -> None:
         raise SystemExit("No symbols could be analyzed.")
 
     report = pd.DataFrame(rows)
-    report = report.sort_values(["score", "action", "ticker"], ascending=[False, True, True]).reset_index(drop=True)
+    sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
+    report = report.sort_values([sort_score_col, "score", "action", "ticker"], ascending=[False, False, True, True]).reset_index(drop=True)
 
     today = local_run_date()
     csv_path = Path(f"daily_watchlist_overview_{today}.csv")
