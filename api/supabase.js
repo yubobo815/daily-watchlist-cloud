@@ -5,7 +5,7 @@ const SUPABASE_CONFIG = {
 
 export default async function handler(request, response) {
   const path = String(request.query.path || "");
-  if (!path.startsWith("watchlist_snapshots?")) {
+  if (!path.startsWith("watchlist_snapshots?") && !path.startsWith("watchlist_behavior_history?")) {
     response.status(400).json({ error: "Unsupported Supabase path." });
     return;
   }
@@ -19,6 +19,6 @@ export default async function handler(request, response) {
   });
 
   const text = await result.text();
-  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
   response.status(result.status).send(text);
 }

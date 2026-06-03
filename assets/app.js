@@ -61,6 +61,8 @@ const KIND_LABELS = {
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
+const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
+const SUPABASE_CACHE_PREFIX = "daily-trade-copilot:supabase:v2:";
 const STATIC_SUPABASE_CONFIG = {
   url: "https://lzuwwiabrnebboxriemu.supabase.co",
   anonKey: "sb_publishable_tCTML11CHw0fwtYWD9_I-Q_ne39UiHw",
@@ -467,6 +469,30 @@ function payloadValue(row, key) {
   return row?.payload?.[key] ?? row?.[key];
 }
 
+function cacheKeyFor(path) {
+  return `${SUPABASE_CACHE_PREFIX}${path}`;
+}
+
+function readJsonCache(path) {
+  try {
+    const cached = sessionStorage.getItem(cacheKeyFor(path));
+    if (!cached) return null;
+    const payload = JSON.parse(cached);
+    if (!payload?.createdAt || Date.now() - payload.createdAt > SUPABASE_CACHE_TTL_MS) return null;
+    return payload.value;
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonCache(path, value) {
+  try {
+    sessionStorage.setItem(cacheKeyFor(path), JSON.stringify({ createdAt: Date.now(), value }));
+  } catch {
+    // Private browsing or storage pressure should not block the app.
+  }
+}
+
 function dataDateSummary(rows) {
   const dates = [...new Set(rows.map((row) => row.data_date || row.date || row.history_date).filter(Boolean))].sort();
   if (!dates.length) return "";
@@ -669,7 +695,7 @@ async function getSupabaseConfig() {
   }
 
   try {
-    const response = await fetch("/api/config", { cache: "no-store" });
+    const response = await fetch("/api/config");
     if (response.ok) {
       const config = await response.json();
       if (config?.url && config?.anonKey) {
@@ -685,16 +711,19 @@ async function getSupabaseConfig() {
 }
 
 async function supabaseFetch(path) {
+  const cached = readJsonCache(path);
+  if (cached) return cached;
+
   const config = await getSupabaseConfig();
   if (!config) {
     throw new Error("Supabase browser config is missing.");
   }
 
-  const proxyResponse = await fetch(`/api/supabase?path=${encodeURIComponent(path)}`, {
-    cache: "no-store"
-  });
+  const proxyResponse = await fetch(`/api/supabase?path=${encodeURIComponent(path)}`);
   if (proxyResponse.ok) {
-    return proxyResponse.json();
+    const value = await proxyResponse.json();
+    writeJsonCache(path, value);
+    return value;
   }
 
   const baseUrl = config.url.replace(/\/$/, "");
@@ -707,7 +736,9 @@ async function supabaseFetch(path) {
   if (!response.ok) {
     throw new Error(`Supabase returned HTTP ${response.status}.`);
   }
-  return response.json();
+  const value = await response.json();
+  writeJsonCache(path, value);
+  return value;
 }
 
 async function recentRunDates(limit = 2) {
