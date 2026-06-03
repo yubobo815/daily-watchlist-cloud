@@ -668,7 +668,7 @@ async function getSupabaseConfig() {
       return;
     }
     const script = document.createElement("script");
-    script.src = "https://yubobo815.github.io/daily-watchlist-cloud/supabase-config.js";
+    script.src = "./supabase-config.js";
     script.async = true;
     script.dataset.watchlistSupabase = "true";
     script.onload = resolve;
