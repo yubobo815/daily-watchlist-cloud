@@ -1959,12 +1959,11 @@ function renderHistoryRows() {
           </div>
           <div class="lookback-meta">
             <span>${escapeHtml(setupLabel(row.setup))}</span>
-            <span>${escapeHtml(row.adaptive_mode || "Mixed")}</span>
+            ${renderMovePct(row.day_change_pct)}
           </div>
           <div class="bar"><span class="score-${scoreBand(convictionScore(row))}" style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
           <div class="lookback-price">
             <strong>${fmtNumber(row.close, 2)}</strong>
-            ${renderMovePct(row.day_change_pct)}
           </div>
         </article>
       `).join("") : "<div class=\"empty compact-empty\">No earlier look-back days available.</div>"}
