@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.03-product-cleanup"
+SCANNER_VERSION = "2026.06.04-adaptive-quality"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -36,6 +36,7 @@ BENCHMARK_LOOKBACK_BARS = 20
 EVENT_RISK_DAYS = 10
 MARKET_LEADER_THRESHOLD_PCT = 3.0
 MARKET_LAGGARD_THRESHOLD_PCT = -3.0
+BUY_QUALITY_MINIMUM = 60.0
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -811,6 +812,87 @@ def latest_pivot(values: pd.Series, left: int = 3, right: int = 3, kind: str = "
     return confirmed[-1] if confirmed else np.nan
 
 
+def clamp_float(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def stock_personality_profile(d: pd.DataFrame, i: int, is_etf: bool, trend_efficiency: float) -> dict:
+    lookback = d.iloc[max(0, i - PERSONALITY_LOOKBACK_BARS + 1) : i + 1]
+    median_atr_pct = float(lookback["atr_pct"].dropna().median()) if not lookback["atr_pct"].dropna().empty else 5.0
+    median_abs_move_pct = (
+        float(lookback["close"].pct_change().abs().dropna().median() * 100)
+        if len(lookback) > 2
+        else 1.5
+    )
+    volatility_ratio = clamp_float(median_atr_pct / 5.0, 0.55, 1.9)
+
+    if is_etf:
+        personality = "ETF"
+    elif median_atr_pct >= 7.0 or median_abs_move_pct >= 2.6:
+        personality = "HIGH_BETA"
+    elif trend_efficiency >= 0.28 and median_atr_pct <= 4.5:
+        personality = "COMPOUNDER"
+    elif trend_efficiency < 0.14 and median_atr_pct <= 5.5:
+        personality = "RANGE_BOUND"
+    else:
+        personality = "BALANCED"
+
+    profile = {
+        "personality_type": personality,
+        "personality_atr_pct": round(median_atr_pct, 2),
+        "personality_abs_move_pct": round(median_abs_move_pct, 2),
+        "min_buy_quality": BUY_QUALITY_MINIMUM,
+        "min_close_loc": 0.56,
+        "min_buyer_score": 56.0,
+        "max_zone_distance_pct": clamp_float(6.0 * volatility_ratio, 3.5, 9.0),
+        "max_zone_distance_atr": clamp_float(2.0 * volatility_ratio, 1.35, 2.8),
+        "min_reward_risk": 1.05,
+    }
+
+    if personality == "ETF":
+        profile.update(
+            {
+                "min_close_loc": 0.58,
+                "min_buyer_score": 54.0,
+                "max_zone_distance_pct": clamp_float(4.5 * volatility_ratio, 3.0, 6.0),
+                "max_zone_distance_atr": clamp_float(1.7 * volatility_ratio, 1.2, 2.2),
+                "min_reward_risk": 1.0,
+            }
+        )
+    elif personality == "COMPOUNDER":
+        profile.update(
+            {
+                "min_close_loc": 0.62,
+                "min_buyer_score": 62.0,
+                "max_zone_distance_pct": clamp_float(4.6 * volatility_ratio, 3.5, 6.2),
+                "max_zone_distance_atr": clamp_float(1.65 * volatility_ratio, 1.25, 2.1),
+                "min_reward_risk": 1.15,
+            }
+        )
+    elif personality == "HIGH_BETA":
+        profile.update(
+            {
+                "min_close_loc": 0.55,
+                "min_buyer_score": 58.0,
+                "max_zone_distance_pct": clamp_float(7.5 * volatility_ratio, 6.0, 10.5),
+                "max_zone_distance_atr": clamp_float(2.25 * volatility_ratio, 1.8, 3.0),
+                "min_reward_risk": 1.2,
+            }
+        )
+    elif personality == "RANGE_BOUND":
+        profile.update(
+            {
+                "min_close_loc": 0.60,
+                "min_buyer_score": 60.0,
+                "max_zone_distance_pct": clamp_float(4.8 * volatility_ratio, 3.2, 6.0),
+                "max_zone_distance_atr": clamp_float(1.55 * volatility_ratio, 1.2, 2.0),
+                "min_reward_risk": 1.1,
+            }
+        )
+
+    return profile
+
+
 def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     if i < 210:
         return "NONE"
@@ -941,6 +1023,7 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
 
     travel = d["close"].diff().abs().iloc[i - personality_lookback + 1 : i + 1].sum()
     trend_efficiency = abs(close - float(d.iloc[i - personality_lookback].close)) / travel if travel > 0 else 0.0
+    personality_profile = stock_personality_profile(d, i, is_etf, float(trend_efficiency))
 
     effective_monster_eff = 0.30 * (1.15 if is_etf else 1.0)
     effective_compounder_eff = 0.18 * (0.75 if is_etf else 1.0)
@@ -1072,14 +1155,15 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         (accum_vol or breakout_vol or ((fear_rejected or quiet_absorption or buyer_control) and recent_oversold_bb))
     )
     volume_ok = vol_ready and not dist_vol and behavior_volume_ok
-    close_ok = row.close_loc >= 0.55
+    close_ok = row.close_loc >= float(personality_profile["min_close_loc"])
+    buyer_quality_ok = buyer_score >= float(personality_profile["min_buyer_score"])
     setup_low = min(low, float(d["low"].iloc[i - lookback_bars : i + 1].min()))
     close_above_setup_low_atr = (close - setup_low) / atr_now if atr_now > 0 else 0.0
     close_above_pivot_pct = (close - last_pivot_high) / last_pivot_high * 100 if not math.isnan(last_pivot_high) and last_pivot_high > 0 else 0.0
     no_chase = range_atr <= 2.5 and close_above_setup_low_atr <= 2.5 and close_above_pivot_pct <= 8.0
     high_beta_no_chase = not high_vol or (range_atr <= 2.5 * (0.90 if is_etf else 0.75) and close_above_setup_low_atr <= 2.5 * (0.90 if is_etf else 0.75))
     personality_entry_ok = mode != "MEAN REVERSION" or fear_rejected or quiet_absorption or buyer_control
-    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and no_chase and high_beta_no_chase and personality_entry_ok and not avoid and not seller_control and not fomo and not greed_rejected
+    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and buyer_quality_ok and no_chase and high_beta_no_chase and personality_entry_ok and not avoid and not seller_control and not fomo and not greed_rejected
     continuation_ok = (
         setup_forming
         and not filters_ok
@@ -1152,7 +1236,40 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         and not math.isnan(distance_from_ref_zone_pct)
         and (distance_from_ref_zone_pct >= 7.0 or (not math.isnan(distance_from_ref_zone_atr) and distance_from_ref_zone_atr >= 2.25))
     )
-    extension_state = "EXTENDED" if extended_from_zone else "NEAR_ZONE" if setup_forming else ""
+    profile_extended_from_zone = (
+        setup_forming
+        and not math.isnan(distance_from_ref_zone_pct)
+        and (
+            distance_from_ref_zone_pct >= float(personality_profile["max_zone_distance_pct"])
+            or (
+                not math.isnan(distance_from_ref_zone_atr)
+                and distance_from_ref_zone_atr >= float(personality_profile["max_zone_distance_atr"])
+            )
+        )
+    )
+    reward_risk_ok = (
+        not setup_forming
+        or math.isnan(reward_risk)
+        or reward_risk >= float(personality_profile["min_reward_risk"])
+    )
+    buy_quality_penalty = 0.0
+    buy_quality_penalty += max(0.0, (float(personality_profile["min_close_loc"]) - float(row.close_loc)) * 60)
+    buy_quality_penalty += max(0.0, (float(personality_profile["min_buyer_score"]) - float(buyer_score)) * 0.6)
+    buy_quality_penalty += 18.0 if profile_extended_from_zone else 0.0
+    buy_quality_penalty += 8.0 if not reward_risk_ok else 0.0
+    buy_quality_score = max(0.0, min(100.0, 100.0 - buy_quality_penalty))
+    profile_buy_ok = (
+        not setup_forming
+        or (
+            buy_quality_score >= float(personality_profile["min_buy_quality"])
+            and not profile_extended_from_zone
+            and reward_risk_ok
+        )
+    )
+    if setup_forming:
+        filters_ok = filters_ok and profile_buy_ok
+        continuation_ok = continuation_ok and not profile_extended_from_zone
+    extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     if filters_ok:
         action = "BUY CANDIDATE"
@@ -1181,6 +1298,7 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     score += 8 if psych in {"FR", "QA", "BUYERS"} else -8 if psych in {"FOMO", "GR", "SELLERS"} else 0
     score += min(max(trend_efficiency * 20, 0), 10)
     score -= min(max(row.atr_pct - setup_max_atr, 0), 15)
+    score -= max(0.0, (float(personality_profile["min_buy_quality"]) - buy_quality_score) * 0.25) if setup_forming else 0.0
 
     notes = []
     if fear_rejected:
@@ -1193,6 +1311,10 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         notes.append("Strong continuation")
     if entry_note:
         notes.append(entry_note)
+    if profile_extended_from_zone:
+        notes.append("Personality-adjusted zone is extended")
+    if setup_forming and not reward_risk_ok:
+        notes.append("Reward/risk is below personality threshold")
     if exit_pressure:
         notes.append("Exit pressure")
     if avoid:
@@ -1219,6 +1341,12 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         reason_codes.append("exit_pressure")
     if extended_from_zone:
         reason_codes.append("extended_from_zone")
+    if profile_extended_from_zone:
+        reason_codes.append("personality_extended")
+    if setup_forming and not reward_risk_ok:
+        reason_codes.append("weak_reward_risk")
+    if setup_forming and not buyer_quality_ok:
+        reason_codes.append("buyer_quality_low")
     if entry_note:
         reason_codes.append("reference_zone_adjusted")
     reason_codes = list(dict.fromkeys(reason_codes))
@@ -1239,6 +1367,12 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         "atr_pct": round(float(row.atr_pct), 2),
         "setup_atr_limit": setup_max_atr,
         "trend_efficiency": round(float(trend_efficiency), 2),
+        "personality_type": personality_profile["personality_type"],
+        "personality_atr_pct": personality_profile["personality_atr_pct"],
+        "personality_abs_move_pct": personality_profile["personality_abs_move_pct"],
+        "buy_quality_score": round(float(buy_quality_score), 1),
+        "buy_quality_minimum": round(float(personality_profile["min_buy_quality"]), 1),
+        "profile_zone_limit_pct": round(float(personality_profile["max_zone_distance_pct"]), 2),
         "buyer_score": round(float(buyer_score), 0),
         "seller_score": round(float(seller_score), 0),
         "volume_state": "BREAKDOWN" if breakdown_vol else "DISTRIBUTION" if dist_vol else "BREAKOUT" if breakout_vol else "DEMAND" if accum_vol else "DRY-UP" if dry_up_vol else "NEUTRAL",

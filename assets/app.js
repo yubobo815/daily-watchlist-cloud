@@ -76,7 +76,10 @@ const REASON_LABELS = {
   fresh_buy_signal: "Fresh buy signal",
   market_leader: "Market leader",
   market_lagging: "Market lagging",
-  event_risk: "Event risk"
+  event_risk: "Event risk",
+  personality_extended: "Extended for this stock type",
+  weak_reward_risk: "Weak reward/risk",
+  buyer_quality_low: "Buyer quality below threshold"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -965,12 +968,16 @@ function renderScoreBreakdown(row) {
   const volume = payloadValue(row, "volume_state") || "NEUTRAL";
   const market = payloadValue(row, "market_context") || "UNKNOWN";
   const quality = payloadValue(row, "signal_quality") || strengthLabel(row);
+  const personality = payloadValue(row, "personality_type") || "BALANCED";
+  const buyQuality = Number(payloadValue(row, "buy_quality_score"));
   const items = [
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
     ["Volume", volume],
     ["Market", market],
     ["Quality", quality],
+    ["Personality", String(personality).replace(/_/g, " ")],
+    ["Buy Quality", Number.isFinite(buyQuality) ? `${fmtNumber(buyQuality, 0)}/100` : "n/a"],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
     ["Pattern", setupLabel(row.setup)]
   ];
