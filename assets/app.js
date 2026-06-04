@@ -1233,6 +1233,19 @@ function renderWatchlistCell(row, key) {
   return escapeHtml(row[key]);
 }
 
+function searchableRowText(row) {
+  return [
+    ...WATCHLIST_COLUMNS.map(([key]) => row[key]),
+    ACTION_LABELS[row.action] || row.action,
+    setupLabel(row.setup),
+    strengthLabel(row),
+    payloadValue(row, "signal_quality"),
+    payloadValue(row, "market_context"),
+    reasonCodes(row).map((code) => REASON_LABELS[code] || code.replaceAll("_", " ")).join(" "),
+    whyThisMatters(row).join(" "),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
 function renderMobileWatchlistSummary(row) {
   const kind = actionKind(row.action);
   const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
@@ -1607,7 +1620,7 @@ function renderWatchlist() {
   const multiplier = direction === "asc" ? 1 : -1;
   state.visibleRows = state.rows
     .filter((row) => state.filter === "all" || actionKind(row.action) === state.filter)
-    .filter((row) => !needle || WATCHLIST_COLUMNS.some(([key]) => String(row[key] || "").toLowerCase().includes(needle)) || whyThisMatters(row).join(" ").toLowerCase().includes(needle))
+    .filter((row) => !needle || searchableRowText(row).includes(needle))
     .sort((a, b) => {
       if (sortKey === "ticker") return a.ticker.localeCompare(b.ticker) * multiplier;
       if (sortKey === "score") return (convictionScore(a) - convictionScore(b)) * multiplier;
@@ -1630,6 +1643,11 @@ function renderWatchlist() {
   });
   attachFocusControls();
   document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} shown`;
+  const mobileCount = document.querySelector("#mobile-search-count");
+  if (mobileCount) mobileCount.textContent = searchActive ? `${state.visibleRows.length} result${state.visibleRows.length === 1 ? "" : "s"}` : `${state.visibleRows.length} shown`;
+  document.querySelectorAll("[data-mobile-filter]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mobileFilter === state.filter);
+  });
   const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
   if (watchlistTitle) watchlistTitle.textContent = searchActive ? "Search Results" : "Watchlist";
   document.querySelector("#empty").classList.toggle("hidden", state.visibleRows.length > 0);
@@ -1671,25 +1689,46 @@ async function initWatchlist() {
   state.focusTickers = loadFocusTickers();
   state.focusPin = loadFocusPin();
   const searchInput = document.querySelector("#search");
+  const mobileSearchInput = document.querySelector("#mobile-search");
   const clearSearch = document.querySelector("#clear-search");
+  const mobileClearSearch = document.querySelector("#mobile-clear-search");
   const syncSearchClear = () => {
     if (clearSearch) clearSearch.classList.toggle("hidden", !searchInput.value);
+    if (mobileClearSearch) mobileClearSearch.classList.toggle("hidden", !state.query);
+    if (searchInput.value !== state.query) searchInput.value = state.query;
+    if (mobileSearchInput && mobileSearchInput.value !== state.query) mobileSearchInput.value = state.query;
   };
-  searchInput.addEventListener("input", (event) => {
-    state.query = event.target.value;
+  const updateSearch = (value, shouldScroll = true) => {
+    state.query = value;
     syncSearchClear();
     renderWatchlist();
-    if (state.query.trim()) scrollToWatchlistResults();
+    if (shouldScroll && state.query.trim()) scrollToWatchlistResults();
+  };
+  searchInput.addEventListener("input", (event) => {
+    updateSearch(event.target.value);
+  });
+  mobileSearchInput?.addEventListener("input", (event) => {
+    updateSearch(event.target.value);
   });
   if (clearSearch) {
     clearSearch.addEventListener("click", () => {
-      searchInput.value = "";
-      state.query = "";
-      syncSearchClear();
-      renderWatchlist();
+      updateSearch("", false);
       searchInput.focus();
     });
   }
+  if (mobileClearSearch) {
+    mobileClearSearch.addEventListener("click", () => {
+      updateSearch("", false);
+      mobileSearchInput?.focus();
+    });
+  }
+  document.querySelectorAll("[data-mobile-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.filter = button.dataset.mobileFilter || "all";
+      renderWatchlist();
+      scrollToWatchlistResults();
+    });
+  });
   document.querySelector("#sort").addEventListener("change", (event) => {
     state.sort = event.target.value;
     renderWatchlist();
