@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.04-high-beta-entry"
+SCANNER_VERSION = "2026.06.04-entry-quality"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -1287,6 +1287,47 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         and not math.isnan(distance_from_ref_zone_pct)
         and distance_from_ref_zone_pct <= float(personality_profile["max_zone_distance_pct"])
     )
+    fast_breakout_entry = (
+        setup_forming
+        and setup in {"BREAKOUT BUY", "MOMENTUM BUY"}
+        and buyer_score >= 75
+        and (breakout_vol or accum_vol)
+        and not math.isnan(distance_from_ref_zone_pct)
+        and distance_from_ref_zone_pct <= float(personality_profile["max_zone_distance_pct"])
+        and not extended_from_zone
+        and not profile_extended_from_zone
+    )
+    pullback_reclaim_entry = (
+        setup_forming
+        and setup in {"PULLBACK BUY", "EARLY PULLBACK BUY", "REVERSAL BUY"}
+        and not math.isnan(distance_from_ref_zone_pct)
+        and distance_from_ref_zone_pct <= 3.0
+        and (dry_up_vol or accum_vol or breakout_vol or quiet_absorption or fear_rejected)
+        and not extended_from_zone
+        and not profile_extended_from_zone
+    )
+
+    if extended_from_zone or profile_extended_from_zone:
+        entry_quality_label = "Extended"
+        entry_quality_score = max(0.0, min(70.0, buy_quality_score - 25.0))
+    elif fast_breakout_entry:
+        entry_quality_label = "Fast Breakout"
+        entry_quality_score = min(100.0, buy_quality_score + 5.0)
+    elif pullback_reclaim_entry:
+        entry_quality_label = "Pullback/Reclaim"
+        entry_quality_score = min(100.0, buy_quality_score + 3.0)
+    elif setup_forming and buy_quality_score >= 85 and (
+        math.isnan(distance_from_ref_zone_pct) or distance_from_ref_zone_pct <= 5.0
+    ):
+        entry_quality_label = "Developing"
+        entry_quality_score = buy_quality_score
+    elif setup_forming:
+        entry_quality_label = "Low Quality"
+        entry_quality_score = min(60.0, buy_quality_score)
+    else:
+        entry_quality_label = ""
+        entry_quality_score = 0.0
+
     if setup_forming:
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
         continuation_ok = continuation_ok and not profile_extended_from_zone
@@ -1368,6 +1409,10 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         reason_codes.append("personality_extended")
     if high_quality_entry_override:
         reason_codes.append("high_beta_entry_quality")
+    if fast_breakout_entry:
+        reason_codes.append("fast_breakout_entry")
+    if pullback_reclaim_entry:
+        reason_codes.append("pullback_reclaim_entry")
     if setup_forming and not reward_risk_ok:
         reason_codes.append("weak_reward_risk")
     if setup_forming and not buyer_quality_ok:
@@ -1397,6 +1442,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         "personality_abs_move_pct": personality_profile["personality_abs_move_pct"],
         "buy_quality_score": round(float(buy_quality_score), 1),
         "buy_quality_minimum": round(float(personality_profile["min_buy_quality"]), 1),
+        "entry_quality_label": entry_quality_label,
+        "entry_quality_score": round(float(entry_quality_score), 1),
         "profile_zone_limit_pct": round(float(personality_profile["max_zone_distance_pct"]), 2),
         "buyer_score": round(float(buyer_score), 0),
         "seller_score": round(float(seller_score), 0),

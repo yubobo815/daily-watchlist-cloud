@@ -1370,6 +1370,39 @@ td:nth-child(13) {
   color: #c6d1df;
 }
 
+.signal-stack {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.badge.entry-pill {
+  min-height: 21px;
+  padding-inline: 7px;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.badge.entry-pill.entry-strong {
+  border-color: rgba(57, 217, 138, 0.24);
+  background: rgba(57, 217, 138, 0.10);
+  color: #9cebc2;
+}
+
+.badge.entry-pill.entry-constructive,
+.badge.entry-pill.entry-watch {
+  border-color: rgba(111, 191, 255, 0.22);
+  background: rgba(111, 191, 255, 0.09);
+  color: #b7dcff;
+}
+
+.badge.entry-pill.entry-risk {
+  border-color: rgba(255, 121, 121, 0.22);
+  background: rgba(255, 121, 121, 0.09);
+  color: #ffc2c2;
+}
+
 .badge.conviction-pill {
   min-width: 54px;
 }

@@ -71,6 +71,8 @@ const PAYLOAD_FIELDS = [
   "buyer_score",
   "days_to_report",
   "distance_from_ref_zone_pct",
+  "entry_quality_label",
+  "entry_quality_score",
   "event_risk",
   "extension_state",
   "freshness_penalty",

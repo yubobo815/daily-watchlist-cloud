@@ -80,7 +80,9 @@ const REASON_LABELS = {
   personality_extended: "Extended for this stock type",
   weak_reward_risk: "Weak reward/risk",
   buyer_quality_low: "Buyer quality below threshold",
-  high_beta_entry_quality: "High-beta entry quality"
+  high_beta_entry_quality: "High-beta entry quality",
+  fast_breakout_entry: "Fast breakout entry",
+  pullback_reclaim_entry: "Pullback/reclaim entry"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -548,6 +550,29 @@ function setupLabel(value) {
   return SETUP_LABELS[value] || value;
 }
 
+function entryQualityLabel(row) {
+  const label = payloadValue(row, "entry_quality_label");
+  if (label) return String(label);
+  if (payloadValue(row, "extension_state") === "EXTENDED") return "Extended";
+  if (row.setup && row.setup !== "NONE") return "Developing";
+  return "";
+}
+
+function entryQualityTone(row) {
+  const label = entryQualityLabel(row).toLowerCase();
+  if (label.includes("breakout")) return "strong";
+  if (label.includes("pullback") || label.includes("reclaim")) return "constructive";
+  if (label.includes("extended") || label.includes("low")) return "risk";
+  if (label.includes("developing")) return "watch";
+  return "neutral";
+}
+
+function renderEntryQualityPill(row) {
+  const label = entryQualityLabel(row);
+  if (!label) return "";
+  return `<span class="badge entry-pill entry-${entryQualityTone(row)}">${escapeHtml(label)}</span>`;
+}
+
 function scoreBand(value) {
   const score = Number(value);
   if (score >= 75) return "strong";
@@ -995,15 +1020,18 @@ function renderScoreBreakdown(row) {
   const market = payloadValue(row, "market_context") || "UNKNOWN";
   const quality = payloadValue(row, "signal_quality") || strengthLabel(row);
   const personality = payloadValue(row, "personality_type") || "BALANCED";
-  const buyQuality = Number(payloadValue(row, "buy_quality_score"));
+  const entryQuality = entryQualityLabel(row);
+  const entryQualityScore = Number(payloadValue(row, "entry_quality_score") || payloadValue(row, "buy_quality_score"));
   const items = [
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
     ["Volume", volume],
     ["Market", market],
     ["Quality", quality],
+    ["Entry Quality", entryQuality
+      ? `${entryQuality}${Number.isFinite(entryQualityScore) ? ` ${fmtNumber(entryQualityScore, 0)}/100` : ""}`
+      : "n/a"],
     ["Personality", String(personality).replace(/_/g, " ")],
-    ["Buy Quality", Number.isFinite(buyQuality) ? `${fmtNumber(buyQuality, 0)}/100` : "n/a"],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"]
   ];
   return `
@@ -1251,7 +1279,12 @@ function renderWatchlistCell(row, key) {
   }
   if (key === "action") {
     const kind = actionKind(row.action);
-    return `<span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`;
+    return `
+      <span class="signal-stack">
+        <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+        ${renderEntryQualityPill(row)}
+      </span>
+    `;
   }
   if (key === "setup") {
     return `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>`;
@@ -1271,6 +1304,7 @@ function searchableRowText(row) {
     ACTION_LABELS[row.action] || row.action,
     setupLabel(row.setup),
     strengthLabel(row),
+    entryQualityLabel(row),
     payloadValue(row, "signal_quality"),
     payloadValue(row, "market_context"),
     reasonCodes(row).map((code) => REASON_LABELS[code] || code.replaceAll("_", " ")).join(" "),
@@ -1283,7 +1317,8 @@ function renderMobileWatchlistSummary(row) {
   const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
   const pattern = setupLabel(row.setup);
   const strength = strengthLabel(row);
-  const secondary = [strength, pattern && pattern !== "None" ? pattern : ""].filter(Boolean).join(" · ");
+  const entry = entryQualityLabel(row);
+  const secondary = [entry, strength, pattern && pattern !== "None" ? pattern : ""].filter(Boolean).join(" · ");
   return `
     <span class="mobile-watch-shell">
       <a class="mobile-watch-row" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
