@@ -978,8 +978,7 @@ function renderScoreBreakdown(row) {
     ["Quality", quality],
     ["Personality", String(personality).replace(/_/g, " ")],
     ["Buy Quality", Number.isFinite(buyQuality) ? `${fmtNumber(buyQuality, 0)}/100` : "n/a"],
-    ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
-    ["Pattern", setupLabel(row.setup)]
+    ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"]
   ];
   return `
     <div class="score-explainer">
