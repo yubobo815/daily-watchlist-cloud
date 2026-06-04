@@ -1,7 +1,7 @@
 const ACTION_LABELS = {
   "BUY CANDIDATE": "BUY",
   "STRONG CONTINUATION": "CONT",
-  "SETUP FORMING": "SETUP",
+  "SETUP FORMING": "BUILDING",
   "WATCH TREND": "WATCH",
   "EXIT PRESSURE": "EXIT",
   "WAIT": "WAIT",
@@ -36,7 +36,7 @@ const WATCHLIST_COLUMNS = [
 const SUMMARY_CARDS = [
   ["buy", "BUY"],
   ["continue", "CONT"],
-  ["setup", "SETUP"],
+  ["setup", "BUILDING"],
   ["watch", "WATCH"],
   ["exit", "EXIT"],
   ["avoid", "AVOID"]
@@ -54,7 +54,7 @@ const ACTION_TONE = {
 const KIND_LABELS = {
   buy: "BUY",
   continue: "CONT",
-  setup: "SETUP",
+  setup: "BUILDING",
   watch: "WATCH",
   exit: "EXIT",
   avoid: "AVOID"
@@ -785,6 +785,11 @@ function transitionLabel(row, previous = previousRowFor(row)) {
   return "Changed";
 }
 
+function displayTransitionLabel(label) {
+  if (label === "Fresh Setup To Buy") return "Fresh Building To Buy";
+  return label;
+}
+
 function transitionTone(label) {
   if (label === "Upgraded" || label === "New Today" || label === "Fresh Setup To Buy") return "up";
   if (label === "Downgraded" || label === "Stale Buy") return "down";
@@ -829,7 +834,7 @@ function whyThisMatters(row, previous = previousRowFor(row)) {
 
 function transitionBadge(row, previous = previousRowFor(row)) {
   const label = transitionLabel(row, previous);
-  return `<span class="change-chip ${transitionTone(label)}">${escapeHtml(label)}</span>`;
+  return `<span class="change-chip ${transitionTone(label)}">${escapeHtml(displayTransitionLabel(label))}</span>`;
 }
 
 function dailyChangeItems(rows, previousRows, limit = 8) {
@@ -1289,7 +1294,7 @@ function renderDailyBrief(counts) {
     .sort((a, b) => convictionScore(b) - convictionScore(a))[0];
   const exitCount = counts.exit || 0;
   const actionTotal = (counts.buy || 0) + (counts.setup || 0);
-  const headline = `${actionTotal} actionable names: ${counts.buy || 0} BUY, ${counts.setup || 0} SETUP`;
+  const headline = `${actionTotal} actionable names: ${counts.buy || 0} BUY, ${counts.setup || 0} BUILDING`;
   const freshText = tickerList(fresh);
   const upgradesText = tickerList(upgrades);
   const moverText = tickerList(priceMovers, 2);
@@ -1367,7 +1372,7 @@ function renderTodayFocus() {
 
   const items = [
     focusItem(strongest, "Buy"),
-    focusItem(building, "Setup"),
+    focusItem(building, "Building"),
     focusItem(pressure, "Exit"),
     focusItem(bestDay, "Move")
   ].filter(Boolean);
