@@ -689,7 +689,10 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
     supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
     supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
     print(f"Synced {len(report_records)} snapshot rows and {len(history_records)} history rows to Supabase.")
-    cleanup_supabase_retention(run_date)
+    try:
+        cleanup_supabase_retention(run_date)
+    except RuntimeError as exc:
+        print(f"Supabase retention cleanup skipped: {exc}")
 
 
 def ema(series: pd.Series, length: int) -> pd.Series:

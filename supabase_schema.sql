@@ -139,6 +139,9 @@ revoke all on public.focus_tickers from anon, authenticated;
 grant select on public.watchlist_snapshots to anon, authenticated;
 grant select on public.watchlist_behavior_history to anon, authenticated;
 grant select on public.watchlist_refresh_runs to anon, authenticated;
+grant select, insert, update, delete on public.watchlist_snapshots to service_role;
+grant select, insert, update, delete on public.watchlist_behavior_history to service_role;
+grant select, insert, update, delete on public.watchlist_refresh_runs to service_role;
 grant select, insert, update, delete on public.focus_tickers to service_role;
 
 drop policy if exists "Public read watchlist snapshots" on public.watchlist_snapshots;
