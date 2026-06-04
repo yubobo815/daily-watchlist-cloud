@@ -1,6 +1,6 @@
 const ACTION_LABELS = {
   "BUY CANDIDATE": "BUY",
-  "STRONG CONTINUATION": "CONT",
+  "STRONG CONTINUATION": "TRENDING",
   "SETUP FORMING": "BUILDING",
   "WATCH TREND": "WATCH",
   "EXIT PRESSURE": "EXIT",
@@ -35,7 +35,7 @@ const WATCHLIST_COLUMNS = [
 
 const SUMMARY_CARDS = [
   ["buy", "BUY"],
-  ["continue", "CONT"],
+  ["continue", "TRENDING"],
   ["setup", "BUILDING"],
   ["watch", "WATCH"],
   ["exit", "EXIT"],
@@ -53,7 +53,7 @@ const ACTION_TONE = {
 
 const KIND_LABELS = {
   buy: "BUY",
-  continue: "CONT",
+  continue: "TRENDING",
   setup: "BUILDING",
   watch: "WATCH",
   exit: "EXIT",
@@ -593,7 +593,7 @@ function behaviorDetail(row) {
   if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
   if (note) return note;
   if (kind === "buy") return `${pattern} behavior with strong trend quality and ${tape.toLowerCase()} tape.`;
-  if (kind === "continue") return `Strong continuation: leadership behavior remains constructive, but fresh zone quality may be extended.`;
+  if (kind === "continue") return `Trending: leadership behavior remains constructive, but fresh entry quality may be extended.`;
   if (kind === "setup") return `${pattern} is forming; trend quality is constructive but still developing.`;
   if (kind === "watch") return `${mode} behavior; monitor for quality expansion or a cleaner reference zone.`;
   if (kind === "exit") return `Exit pressure: weak trend quality with ${move < 0 ? "negative" : "unstable"} price action.`;

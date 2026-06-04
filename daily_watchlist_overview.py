@@ -772,7 +772,7 @@ SIGNAL_STAGE_LABELS = {
     "WATCH TREND": "WATCH",
     "SETUP FORMING": "SETUP",
     "BUY CANDIDATE": "BUY",
-    "STRONG CONTINUATION": "CONTINUE",
+    "STRONG CONTINUATION": "TRENDING",
     "EXIT PRESSURE": "EXIT",
 }
 
@@ -1798,7 +1798,7 @@ def write_history_html(path: Path) -> None:
     function shortAction(action) {
       return {
         "BUY CANDIDATE": "BUY",
-        "STRONG CONTINUATION": "CONT",
+        "STRONG CONTINUATION": "TRENDING",
         "SETUP FORMING": "SETUP",
         "WATCH TREND": "WATCH",
         "EXIT PRESSURE": "EXIT",
@@ -1938,7 +1938,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
 
     summary_items = [
         ("BUY", int((df["action"] == "BUY CANDIDATE").sum()), "buy"),
-        ("CONT", int((df["action"] == "STRONG CONTINUATION").sum()), "continue"),
+        ("TRENDING", int((df["action"] == "STRONG CONTINUATION").sum()), "continue"),
         ("SETUP", int((df["action"] == "SETUP FORMING").sum()), "setup"),
         ("WATCH", int((df["action"] == "WATCH TREND").sum()), "watch"),
         ("EXIT", int((df["action"] == "EXIT PRESSURE").sum()), "exit"),
@@ -1969,7 +1969,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     }
     action_labels = {
         "BUY CANDIDATE": "BUY",
-        "STRONG CONTINUATION": "CONT",
+        "STRONG CONTINUATION": "TRENDING",
         "SETUP FORMING": "SETUP",
         "EXIT PRESSURE": "EXIT",
         "WATCH TREND": "WATCH",
