@@ -26,6 +26,16 @@ ETF_HINTS = {
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 SCANNER_VERSION = "2026.06.03-product-cleanup"
+PERSONALITY_LOOKBACK_BARS = 100
+EMA_SLOPE_LOOKBACK_BARS = 5
+SHORT_RS_LOOKBACK_BARS = 10
+LOCAL_CANDLE_LOOKBACK_BARS = 3
+PIVOT_LEFT_BARS = 3
+PIVOT_RIGHT_BARS = 3
+BENCHMARK_LOOKBACK_BARS = 20
+EVENT_RISK_DAYS = 10
+MARKET_LEADER_THRESHOLD_PCT = 3.0
+MARKET_LAGGARD_THRESHOLD_PCT = -3.0
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -318,6 +328,10 @@ def compact_yahoo_text(value) -> str:
     return "" if value is None else str(value)
 
 
+def yahoo_raw_value(value):
+    return yahoo_value(value, "raw")
+
+
 def yahoo_headers() -> dict:
     return {
         "User-Agent": "Mozilla/5.0",
@@ -386,6 +400,7 @@ def fetch_company_profile(ticker: str, refresh: bool = False) -> dict:
         .get("earningsDate", [])
     )
     next_report = compact_yahoo_text(earnings_dates[0]) if earnings_dates else ""
+    next_report_ts = yahoo_raw_value(earnings_dates[0]) if earnings_dates else None
 
     revenue = compact_yahoo_text(latest_quarter.get("totalRevenue"))
     net_income = compact_yahoo_text(latest_quarter.get("netIncome"))
@@ -409,6 +424,7 @@ def fetch_company_profile(ticker: str, refresh: bool = False) -> dict:
         "industry": asset.get("industry", ""),
         "latest_report_highlights": "; ".join(highlights),
         "next_report_date": next_report,
+        "next_report_timestamp": next_report_ts,
         "profile_source": "Yahoo Finance",
     }
     cache_path.write_text(json.dumps(profile, indent=2, sort_keys=True))
@@ -900,11 +916,11 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     i = len(d) - 1
     row = d.iloc[i]
     prev = d.iloc[i - 1]
-    lookback_bars = 3
-    ema_slope_bars = 5
-    personality_lookback = 100
-    pivot_left_bars = 3
-    pivot_right_bars = 3
+    lookback_bars = LOCAL_CANDLE_LOOKBACK_BARS
+    ema_slope_bars = EMA_SLOPE_LOOKBACK_BARS
+    personality_lookback = PERSONALITY_LOOKBACK_BARS
+    pivot_left_bars = PIVOT_LEFT_BARS
+    pivot_right_bars = PIVOT_RIGHT_BARS
     is_etf = ticker in ETF_HINTS
 
     close = float(row.close)
@@ -932,7 +948,7 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     ema_alignment_bearish = close < row.ema_slow and row.ema_fast < row.ema_slow
     long_slope_up = row.ema_long >= d.iloc[i - ema_slope_bars].ema_long
     slow_slope_up = row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
-    rs_up = close > float(d.iloc[i - 10].close)
+    rs_up = close > float(d.iloc[i - SHORT_RS_LOOKBACK_BARS].close)
 
     accum_vol = vol_ready and row.volume > row.vol_ma * 0.9 and close > open_ and close >= prev.close and row.close_loc >= 0.55
     dist_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close <= prev.close and row.close_loc <= 0.45
@@ -1374,6 +1390,103 @@ def apply_latest_signal_context(row: dict, ticker_history: list[dict]) -> dict:
     for field in LATEST_SIGNAL_FIELDS:
         if field in latest:
             row[field] = latest[field]
+    return row
+
+
+def trailing_return_pct(frame: pd.DataFrame, bars: int = BENCHMARK_LOOKBACK_BARS) -> Optional[float]:
+    if frame is None or len(frame) <= bars:
+        return None
+    latest = float(frame.iloc[-1].close)
+    prior = float(frame.iloc[-bars - 1].close)
+    if prior <= 0:
+        return None
+    return (latest / prior - 1) * 100
+
+
+def market_context_for(raw: pd.DataFrame, benchmarks: dict[str, pd.DataFrame]) -> dict:
+    ticker_return = trailing_return_pct(raw)
+    spy_return = trailing_return_pct(benchmarks.get("SPY"))
+    qqq_return = trailing_return_pct(benchmarks.get("QQQ"))
+    benchmark_values = [value for value in (spy_return, qqq_return) if value is not None]
+    benchmark_return = float(np.mean(benchmark_values)) if benchmark_values else None
+    relative_return = ticker_return - benchmark_return if ticker_return is not None and benchmark_return is not None else None
+
+    if relative_return is None:
+        state = "UNKNOWN"
+    elif relative_return >= MARKET_LEADER_THRESHOLD_PCT:
+        state = "LEADING"
+    elif relative_return <= MARKET_LAGGARD_THRESHOLD_PCT:
+        state = "LAGGING"
+    else:
+        state = "INLINE"
+
+    return {
+        "market_context": state,
+        "relative_return_20d_pct": round(float(relative_return), 2) if relative_return is not None else "",
+        "ticker_return_20d_pct": round(float(ticker_return), 2) if ticker_return is not None else "",
+        "benchmark_return_20d_pct": round(float(benchmark_return), 2) if benchmark_return is not None else "",
+        "spy_return_20d_pct": round(float(spy_return), 2) if spy_return is not None else "",
+        "qqq_return_20d_pct": round(float(qqq_return), 2) if qqq_return is not None else "",
+    }
+
+
+def days_until_timestamp(timestamp_value) -> Optional[int]:
+    if timestamp_value in {"", None}:
+        return None
+    try:
+        timestamp = float(timestamp_value)
+    except (TypeError, ValueError):
+        return None
+    report_date = datetime.fromtimestamp(timestamp, tz=RUN_TIMEZONE).date()
+    return (report_date - datetime.now(RUN_TIMEZONE).date()).days
+
+
+def apply_quality_overlays(row: dict, market_context: dict) -> dict:
+    row.update(market_context)
+    action = row.get("action", "")
+    actionable = action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"}
+    reason_codes = list(row.get("reason_codes") or [])
+    adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
+    transition_label = row.get("transition_label", "")
+
+    market_state = market_context.get("market_context", "UNKNOWN")
+    if actionable and market_state == "LEADING":
+        adjusted_score = min(128.0, adjusted_score + 4.0)
+        reason_codes.append("market_leader")
+    elif actionable and market_state == "LAGGING":
+        adjusted_score = max(0.0, adjusted_score - 8.0)
+        reason_codes.append("market_lagging")
+
+    days_to_report = days_until_timestamp(row.get("next_report_timestamp"))
+    event_risk = days_to_report is not None and 0 <= days_to_report <= EVENT_RISK_DAYS
+    row["days_to_report"] = days_to_report if days_to_report is not None else ""
+    row["event_risk"] = bool_text(event_risk)
+    if actionable and event_risk:
+        adjusted_score = max(0.0, adjusted_score - 10.0)
+        reason_codes.append("event_risk")
+        if transition_label in {"New Today", "Upgraded", "Fresh Setup To Buy"}:
+            row["transition_label"] = "Event Risk"
+
+    if row.get("extension_state") == "EXTENDED":
+        signal_quality = "EXTENDED"
+    elif event_risk and actionable:
+        signal_quality = "EVENT RISK"
+    elif row.get("transition_label") in {"New Today", "Upgraded", "Fresh Setup To Buy"}:
+        signal_quality = "FRESH"
+    elif row.get("transition_label") == "Stale Buy":
+        signal_quality = "STALE"
+    elif market_state == "LAGGING" and actionable:
+        signal_quality = "LAGGING"
+    elif actionable:
+        signal_quality = "VALID"
+    elif action == "EXIT PRESSURE":
+        signal_quality = "EXIT RISK"
+    else:
+        signal_quality = "NEUTRAL"
+
+    row["adjusted_score"] = round(float(adjusted_score), 1)
+    row["signal_quality"] = signal_quality
+    row["reason_codes"] = list(dict.fromkeys(reason_codes))
     return row
 
 
@@ -2168,6 +2281,16 @@ def main() -> None:
     history_rows = []
     failures = []
     stale_cache_fallbacks = []
+    benchmark_frames: dict[str, pd.DataFrame] = {}
+    for benchmark in ("SPY", "QQQ"):
+        try:
+            if args.refresh and not live_access_ok:
+                benchmark_frames[benchmark] = cached_chart(benchmark, years=args.years)
+            else:
+                benchmark_frames[benchmark] = fetch_chart(benchmark, years=args.years, refresh=args.refresh)
+        except Exception as exc:
+            print(f"Benchmark context unavailable for {benchmark}: {exc}")
+
     for ticker in tickers:
         try:
             if args.refresh and not live_access_ok:
@@ -2181,6 +2304,7 @@ def main() -> None:
             ticker_history = build_behavior_history(ticker, df, days=args.history_days)
             row = apply_latest_signal_context(row, ticker_history)
             row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
+            row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
             rows.append(row)
             history_rows.extend(ticker_history)
         except URLError as exc:
@@ -2193,6 +2317,7 @@ def main() -> None:
                 ticker_history = build_behavior_history(ticker, df, days=args.history_days)
                 row = apply_latest_signal_context(row, ticker_history)
                 row.update(fetch_company_profile(ticker, refresh=False))
+                row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
                 rows.append(row)
                 history_rows.extend(ticker_history)
                 stale_cache_fallbacks.append(

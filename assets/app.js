@@ -73,7 +73,10 @@ const REASON_LABELS = {
   extended_from_zone: "Extended from zone",
   reference_zone_adjusted: "Reference zone adjusted",
   stale_buy_no_progress: "Stale buy: no progress",
-  fresh_buy_signal: "Fresh buy signal"
+  fresh_buy_signal: "Fresh buy signal",
+  market_leader: "Market leader",
+  market_lagging: "Market lagging",
+  event_risk: "Event risk"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -571,10 +574,18 @@ function behaviorDetail(row) {
   const note = String(row.notes || "").trim();
   const transition = transitionLabel(row);
   const distanceFromZone = payloadNumeric(row, "distance_from_ref_zone_pct");
+  const marketContext = payloadValue(row, "market_context");
+  const daysToReport = payloadValue(row, "days_to_report");
 
   if (payloadValue(row, "extension_state") === "EXTENDED") {
     const distance = distanceFromZone ? `${fmtNumber(distanceFromZone, 1)}% above ` : "above ";
     return `Extended: price is ${distance}the reference zone; wait for a cleaner base or pullback.`;
+  }
+  if (["YES", "true", true].includes(payloadValue(row, "event_risk"))) {
+    return `Event risk: next report is ${daysToReport || "soon"} day(s) away; use extra caution.`;
+  }
+  if (marketContext === "LAGGING" && ["buy", "setup", "continue"].includes(kind)) {
+    return `${pattern} behavior is forming, but it is lagging SPY/QQQ over the last 20 sessions.`;
   }
   if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
   if (note) return note;
@@ -952,10 +963,14 @@ function renderScoreBreakdown(row) {
   const buyer = Number(payloadValue(row, "buyer_score"));
   const seller = Number(payloadValue(row, "seller_score"));
   const volume = payloadValue(row, "volume_state") || "NEUTRAL";
+  const market = payloadValue(row, "market_context") || "UNKNOWN";
+  const quality = payloadValue(row, "signal_quality") || strengthLabel(row);
   const items = [
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
     ["Volume", volume],
+    ["Market", market],
+    ["Quality", quality],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"],
     ["Pattern", setupLabel(row.setup)]
   ];
