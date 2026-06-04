@@ -110,6 +110,7 @@ const COMPANY_PROFILE_FALLBACKS = {
   PANW: ["Cybersecurity", "Palo Alto Networks provides network security, cloud security, security operations, and threat-intelligence platforms.", "paloaltonetworks.com"],
   PLTR: ["Data Analytics Software", "Palantir provides data integration, analytics, ontology, and AI operating platforms for commercial and government customers.", "palantir.com"],
   TSLA: ["Electric Vehicles & Energy", "Tesla designs electric vehicles, energy storage systems, solar products, charging infrastructure, and autonomous-driving software.", "tesla.com"],
+  WDC: ["Data Storage Hardware", "Western Digital designs and manufactures hard disk drives, flash storage, SSDs, and data-center storage products for cloud, enterprise, client, and consumer markets.", "westerndigital.com"],
 };
 
 const SECURITY_NAME_FALLBACKS = {
@@ -454,9 +455,33 @@ function fallbackCompanyProfile(ticker) {
   };
 }
 
+function isIncompleteCompanySummary(profile) {
+  const summary = cleanSummaryText(profile?.business_summary);
+  return !summary || summary.length < 100 || summary.split(/\s+/).filter(Boolean).length < 14;
+}
+
+function enrichCompanyProfile(ticker, profile = {}) {
+  const fallback = fallbackCompanyProfile(ticker);
+  if (!hasCompanyProfile(fallback)) return profile || {};
+  if (!hasCompanyProfile(profile)) return fallback;
+  if (!isIncompleteCompanySummary(profile)) return profile;
+
+  return {
+    ...fallback,
+    ...profile,
+    business_summary: fallback.business_summary,
+    website: safeWebsite(profile.website) || fallback.website,
+    industry: profile.industry || fallback.industry,
+    profile_source: profile.profile_source
+      ? `${profile.profile_source}; summary fallback`
+      : fallback.profile_source,
+  };
+}
+
 async function renderCompanyBriefWithFallback(ticker, profile) {
-  if (hasCompanyProfile(profile)) {
-    renderCompanyBrief(profile);
+  const enrichedProfile = enrichCompanyProfile(ticker, profile || {});
+  if (hasCompanyProfile(enrichedProfile)) {
+    renderCompanyBrief(enrichedProfile);
     return;
   }
 
