@@ -34,7 +34,7 @@ After that, every cloud refresh writes:
 - `watchlist_behavior_history`: one row per ticker per replayed history date.
 - `focus_tickers`: your private PIN-protected Focus List, read and written only through Vercel API routes.
 
-Scanner tables keep the most recent 90 days by default. Set `SUPABASE_RETENTION_DAYS` in GitHub Actions if you want a different retention window.
+Scanner tables keep the most recent 180 days by default. Set `SUPABASE_RETENTION_DAYS` in GitHub Actions if you want a different retention window.
 
 The secret key is only for GitHub Actions and server-side Vercel API routes. Do not put it into browser JavaScript.
 The published app should use Vercel API routes or static fallback JSON rather than exposing Supabase query config in browser JavaScript.

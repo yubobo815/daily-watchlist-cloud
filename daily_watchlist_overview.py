@@ -530,7 +530,7 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "reason_codes",
 }
 
-SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "90"))
+SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "180"))
 
 
 def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict], conflict_columns: list[str]) -> None:
