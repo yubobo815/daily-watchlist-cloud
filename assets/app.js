@@ -21,7 +21,7 @@ const WATCHLIST_COLUMNS = [
   ["ticker", "Sym"],
   ["name", "Name"],
   ["action", "Signal"],
-  ["score", "Strength"],
+  ["score", "Trend Quality"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
   ["setup", "Pattern"],
@@ -578,12 +578,12 @@ function behaviorDetail(row) {
   }
   if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
   if (note) return note;
-  if (kind === "buy") return `${pattern} behavior with strong scanner strength and ${tape.toLowerCase()} tape.`;
+  if (kind === "buy") return `${pattern} behavior with strong trend quality and ${tape.toLowerCase()} tape.`;
   if (kind === "continue") return `Strong continuation: leadership behavior remains constructive, but fresh zone quality may be extended.`;
-  if (kind === "setup") return `${pattern} is forming; scanner strength is constructive but still developing.`;
-  if (kind === "watch") return `${mode} behavior; monitor for strength expansion or a cleaner reference zone.`;
-  if (kind === "exit") return `Exit pressure: weak strength with ${move < 0 ? "negative" : "unstable"} price action.`;
-  if (score < 25) return "Weak scanner behavior; avoid until strength and tape improve.";
+  if (kind === "setup") return `${pattern} is forming; trend quality is constructive but still developing.`;
+  if (kind === "watch") return `${mode} behavior; monitor for quality expansion or a cleaner reference zone.`;
+  if (kind === "exit") return `Exit pressure: weak trend quality with ${move < 0 ? "negative" : "unstable"} price action.`;
+  if (score < 25) return "Weak scanner behavior; avoid until trend quality and tape improve.";
   return `${mode} behavior with no clear edge yet.`;
 }
 
@@ -817,7 +817,7 @@ function whyThisMatters(row, previous = previousRowFor(row)) {
   if (!previous) reasons.push("New scan entry");
   if (previous && row.action !== previous.action) reasons.push(`Signal ${ACTION_LABELS[previous.action] || previous.action} to ${ACTION_LABELS[row.action] || row.action}`);
   if (previous && row.setup !== previous.setup) reasons.push(`Pattern changed to ${setupLabel(row.setup)}`);
-  if (previous && Math.abs(scoreMove) >= 6) reasons.push(`Strength ${scoreMove > 0 ? "improved" : "weakened"}`);
+  if (previous && Math.abs(scoreMove) >= 6) reasons.push(`Trend quality ${scoreMove > 0 ? "improved" : "weakened"}`);
   if (Number.isFinite(buyer) && Number.isFinite(seller) && buyer >= seller + 12) reasons.push("Buyer tape confirmed");
   if (Number.isFinite(buyer) && Number.isFinite(seller) && seller >= buyer + 12) reasons.push("Seller pressure increased");
   const zoneMove = previous ? referenceZoneMove(row, previous) : "";
@@ -925,7 +925,7 @@ function renderGauge(row) {
   const pointer = gaugePointerPath(point);
   return `
     <div class="conviction-gauge score-${band}">
-      <svg viewBox="0 0 180 104" role="img" aria-label="Scanner strength ${strengthLabel(row)}">
+      <svg viewBox="0 0 180 104" role="img" aria-label="Trend quality ${strengthLabel(row)}">
         <path class="gauge-track" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-risk" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
         <path class="gauge-zone zone-weak" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
@@ -984,7 +984,7 @@ function renderHistoryChangeChips(row, previous) {
   }
   const scoreMove = convictionScore(row) - convictionScore(previous);
   if (Math.abs(scoreMove) >= 4) {
-    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Strength ${fmtSignedNumber(scoreMove, 0)}</span>`);
+    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Quality ${fmtSignedNumber(scoreMove, 0)}</span>`);
   }
   return chips.join(" ") || `<span class="change-chip quiet">Steady</span>`;
 }
@@ -1718,7 +1718,7 @@ function renderLatestHistoryPanel(latest) {
       </div>
       <div class="latest-metrics">
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
-        <div><span>Strength</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
+        <div><span>Trend Quality</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Ref Zone</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
       </div>
@@ -1775,7 +1775,7 @@ function renderHistoryVisual(rows) {
     const x = xFor(index) - barWidth / 2;
     return `
       <rect class="score-bar score-${scoreBand(score)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, baselineY - y).toFixed(1)}" rx="3">
-        <title>${escapeHtml(row.history_date)} · strength ${escapeHtml(strengthLabel(row))} · raw rank ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
+        <title>${escapeHtml(row.history_date)} · trend quality ${escapeHtml(strengthLabel(row))} · raw rank ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
       </rect>
     `;
   }).join("");
@@ -1808,16 +1808,16 @@ function renderHistoryVisual(rows) {
       <div class="chart-card">
       <div class="chart-heading">
         <div>
-          <span>Strength Detail</span>
-          <strong>Daily scanner-strength bars</strong>
-          <p class="chart-note">Bars show normalized scanner strength. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
+          <span>Trend Quality Detail</span>
+          <strong>Daily trend-quality bars</strong>
+          <p class="chart-note">Bars show normalized scanner trend quality. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
         </div>
         <div class="chart-latest">
           <span>Latest</span>
           <strong>${escapeHtml(strengthLabel(latest))}</strong>
         </div>
       </div>
-      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day scanner strength and price chart">
+      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day trend quality and price chart">
         <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
         ${gridLines}
         ${scoreBars}
@@ -1825,7 +1825,7 @@ function renderHistoryVisual(rows) {
         ${dateTicks}
       </svg>
       <div class="chart-legend">
-        <span><i class="legend-score"></i> daily strength bars</span>
+        <span><i class="legend-score"></i> daily quality bars</span>
         <span><i class="legend-price"></i> price direction</span>
       </div>
       <div class="chart-insights">
@@ -1862,7 +1862,7 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previousByDate.get(row.history_date))}</div>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Strength ${escapeHtml(strengthLabel(row))} · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
+          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Trend Quality ${escapeHtml(strengthLabel(row))} · Pattern ${escapeHtml(setupLabel(row.setup))} · ${escapeHtml(row.adaptive_mode || "Mixed")}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
