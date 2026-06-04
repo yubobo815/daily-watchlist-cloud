@@ -43,6 +43,21 @@ module.exports = async function handler(request, response) {
       withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {}),
     ]);
 
+    const snapshot = snapshotRows[0] ? rowDto(snapshotRows[0]) : null;
+    const rows = historyRows.map(rowDto);
+    if (snapshot && rows[0]) {
+      rows[0] = {
+        ...snapshot,
+        ...rows[0],
+        name: snapshot.name || rows[0].name,
+        data_date: snapshot.data_date || rows[0].data_date,
+        payload: {
+          ...(snapshot.payload || {}),
+          ...(rows[0].payload || {}),
+        },
+      };
+    }
+
     const profileReady = profile && Object.keys(profile).length > 0;
     response.setHeader("Cache-Control", profileReady
       ? "public, s-maxage=90, stale-while-revalidate=300"
@@ -50,8 +65,8 @@ module.exports = async function handler(request, response) {
     response.status(200).json({
       ticker,
       latest,
-      snapshot: snapshotRows[0] ? rowDto(snapshotRows[0]) : null,
-      historyRows: historyRows.map(rowDto),
+      snapshot,
+      historyRows: rows,
       runInfo: latestRunInfo,
       profile,
     });
