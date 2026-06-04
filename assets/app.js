@@ -81,6 +81,7 @@ const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
 const JSON_CACHE_PREFIX = "daily-trade-copilot:json:v1:";
 const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
+const FOCUS_PIN_KEY = "daily-trade-copilot:focus-pin:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 10;
 const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
 
@@ -311,6 +312,9 @@ const state = {
   ticker: "ORCL",
   tickerName: "",
   focusTickers: [],
+  focusPin: "",
+  focusMessage: "",
+  focusSyncing: false,
   runInfo: null
 };
 
@@ -641,16 +645,100 @@ function saveFocusTickers() {
   }
 }
 
+function loadFocusPin() {
+  try {
+    return localStorage.getItem(FOCUS_PIN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveFocusPin(pin) {
+  state.focusPin = String(pin || "").trim();
+  try {
+    if (state.focusPin) localStorage.setItem(FOCUS_PIN_KEY, state.focusPin);
+    else localStorage.removeItem(FOCUS_PIN_KEY);
+  } catch {
+    // PIN storage is optional; the user can re-enter it when needed.
+  }
+}
+
 function isFocusTicker(ticker) {
   return state.focusTickers.includes(normaliseTicker(ticker));
 }
 
-function toggleFocusTicker(ticker) {
+async function focusApiFetch(method = "GET", tickers = null) {
+  const options = {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Focus-Pin": state.focusPin,
+    },
+  };
+  if (tickers) options.body = JSON.stringify({ tickers });
+  const response = await fetch("/api/focus-list", options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Focus List unavailable.");
+  return Array.isArray(payload.tickers) ? payload.tickers.map(normaliseTicker).filter(Boolean) : [];
+}
+
+async function loadCloudFocusTickers() {
+  if (!state.focusPin) return false;
+  try {
+    state.focusSyncing = true;
+    state.focusTickers = await focusApiFetch("GET");
+    saveFocusTickers();
+    state.focusMessage = "Focus List synced.";
+    return true;
+  } catch (error) {
+    state.focusMessage = error.message || "Focus List unavailable.";
+    return false;
+  } finally {
+    state.focusSyncing = false;
+  }
+}
+
+async function saveCloudFocusTickers() {
+  if (!state.focusPin) return false;
+  try {
+    state.focusSyncing = true;
+    state.focusTickers = await focusApiFetch("PUT", state.focusTickers);
+    saveFocusTickers();
+    state.focusMessage = "Focus List saved.";
+    return true;
+  } catch (error) {
+    state.focusMessage = error.message || "Focus List unavailable.";
+    return false;
+  } finally {
+    state.focusSyncing = false;
+  }
+}
+
+async function ensureFocusPin() {
+  if (state.focusPin) return true;
+  const pin = window.prompt("Enter your Focus List PIN");
+  if (!pin) {
+    state.focusMessage = "Enter the PIN to sync your Focus List.";
+    renderFocusList();
+    attachFocusControls();
+    return false;
+  }
+  saveFocusPin(pin);
+  const unlocked = await loadCloudFocusTickers();
+  if (!unlocked) saveFocusPin("");
+  renderWatchlist();
+  return unlocked;
+}
+
+async function toggleFocusTicker(ticker) {
+  if (!await ensureFocusPin()) return;
   const normalised = normaliseTicker(ticker);
   state.focusTickers = isFocusTicker(normalised)
     ? state.focusTickers.filter((value) => value !== normalised)
     : [...state.focusTickers, normalised].sort();
   saveFocusTickers();
+  renderWatchlist();
+  await saveCloudFocusTickers();
   renderWatchlist();
 }
 
@@ -1370,6 +1458,25 @@ function renderFocusList() {
   const panel = document.querySelector("#focus-list");
   if (!panel) return;
   const runDate = state.rows[0]?.run_date || "";
+  const focusStatus = state.focusSyncing ? "Syncing..." : state.focusMessage;
+  const focusControls = state.focusPin ? `
+    <div class="focus-controls">
+      <span>${escapeHtml(focusStatus || "Cloud Focus List unlocked.")}</span>
+      <button type="button" id="focus-change-pin">Change PIN</button>
+    </div>
+  ` : `
+    <div class="focus-unlock">
+      <span>
+        <strong>Cloud Focus List</strong>
+        <small>Enter your PIN to sync starred tickers across devices.</small>
+      </span>
+      <form id="focus-pin-form">
+        <input id="focus-pin-input" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN" aria-label="Focus List PIN">
+        <button type="submit">Unlock</button>
+      </form>
+      ${focusStatus ? `<em>${escapeHtml(focusStatus)}</em>` : ""}
+    </div>
+  `;
   const focusRows = state.focusTickers
     .map((ticker) => state.rows.find((row) => row.ticker === ticker))
     .filter(Boolean)
@@ -1378,8 +1485,9 @@ function renderFocusList() {
   if (!focusRows.length) {
     panel.innerHTML = `
       ${moversSectionHeading("Focus List", runDate)}
+      ${focusControls}
       <div class="focus-empty">
-        <span>Star tickers in the watchlist to keep your personal list here.</span>
+        <span>${state.focusPin ? "Star tickers in the watchlist to keep your personal list here." : "Unlock first, then star tickers from the Watchlist."}</span>
       </div>
     `;
     return;
@@ -1387,6 +1495,7 @@ function renderFocusList() {
 
   panel.innerHTML = `
     ${moversSectionHeading("Focus List", runDate)}
+    ${focusControls}
     <div class="focus-list-grid">
       ${focusRows.map((row) => {
         const kind = actionKind(row.action);
@@ -1408,6 +1517,29 @@ function renderFocusList() {
       }).join("")}
     </div>
   `;
+}
+
+function attachFocusControls() {
+  const form = document.querySelector("#focus-pin-form");
+  if (form) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = document.querySelector("#focus-pin-input");
+      saveFocusPin(input?.value || "");
+      const unlocked = await loadCloudFocusTickers();
+      if (!unlocked) saveFocusPin("");
+      renderWatchlist();
+    });
+  }
+
+  const changePin = document.querySelector("#focus-change-pin");
+  if (changePin) {
+    changePin.addEventListener("click", () => {
+      saveFocusPin("");
+      state.focusMessage = "PIN removed from this device.";
+      renderWatchlist();
+    });
+  }
 }
 
 function renderWatchlist() {
@@ -1450,6 +1582,7 @@ function renderWatchlist() {
       toggleFocusTicker(button.dataset.focusTicker);
     });
   });
+  attachFocusControls();
   document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} shown`;
   const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
   if (watchlistTitle) watchlistTitle.textContent = searchActive ? "Search Results" : "Watchlist";
@@ -1490,6 +1623,7 @@ function initTabNavigation() {
 
 async function initWatchlist() {
   state.focusTickers = loadFocusTickers();
+  state.focusPin = loadFocusPin();
   const searchInput = document.querySelector("#search");
   const clearSearch = document.querySelector("#clear-search");
   const syncSearchClear = () => {
@@ -1528,6 +1662,7 @@ async function initWatchlist() {
       state.previousRows = fallback.previousRows;
       state.previousByTicker = rowByTicker(state.previousRows);
       state.runInfo = fallback.runInfo || null;
+      await loadCloudFocusTickers();
       const marketData = dataDateSummary(state.rows);
       setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
       renderWatchlist();
@@ -1535,6 +1670,7 @@ async function initWatchlist() {
     }
     const marketData = dataDateSummary(state.rows);
     state.runInfo = latestPayload.runInfo || null;
+    await loadCloudFocusTickers();
     setRefreshSummary(latestPayload.latest, marketData, state.rows, latestPayload.runInfo);
     renderWatchlist();
   } catch (error) {
@@ -1544,6 +1680,7 @@ async function initWatchlist() {
       state.previousRows = fallback.previousRows;
       state.previousByTicker = rowByTicker(state.previousRows);
       state.runInfo = fallback.runInfo || null;
+      await loadCloudFocusTickers();
       const marketData = dataDateSummary(state.rows);
       setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
       renderWatchlist();

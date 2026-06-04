@@ -105,15 +105,29 @@ function supabaseHeaders() {
 
 async function supabaseSelect(path) {
   assertSupabaseConfig();
-  const response = await fetch(`${supabaseBaseUrl()}/rest/v1/${path}`, {
-    headers: supabaseHeaders(),
-  });
+  const response = await supabaseRequest(path);
   const text = await response.text();
   if (!response.ok) {
     console.error(`Supabase query failed (${response.status}): ${text.slice(0, 500)}`);
     throw new Error("Data service unavailable.");
   }
   return text ? JSON.parse(text) : [];
+}
+
+async function supabaseRequest(path, options = {}) {
+  assertSupabaseConfig();
+  const headers = {
+    ...supabaseHeaders(),
+    ...(options.headers || {}),
+  };
+  if (options.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  return fetch(`${supabaseBaseUrl()}/rest/v1/${path}`, {
+    ...options,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
 }
 
 function encodeFilterValue(value) {
@@ -214,5 +228,6 @@ module.exports = {
   selectList,
   SNAPSHOT_FIELDS,
   sortRows,
+  supabaseRequest,
   supabaseSelect,
 };

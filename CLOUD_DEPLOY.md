@@ -26,11 +26,13 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 3. In GitHub, open `Settings -> Secrets and variables -> Actions`.
 4. Add `SUPABASE_URL`.
 5. Add `SUPABASE_SECRET_KEY` with a Supabase `sb_secret_...` key.
+6. In Vercel, add `FOCUS_LIST_PIN` to protect the personal cloud Focus List.
 
 After that, every cloud refresh writes:
 
 - `watchlist_snapshots`: one row per ticker per run date.
 - `watchlist_behavior_history`: one row per ticker per replayed history date.
+- `focus_tickers`: your private PIN-protected Focus List, read and written only through Vercel API routes.
 
 The secret key is only for GitHub Actions and server-side Vercel API routes. Do not put it into browser JavaScript.
 The published app should use Vercel API routes or static fallback JSON rather than exposing Supabase query config in browser JavaScript.
