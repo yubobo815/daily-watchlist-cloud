@@ -1462,7 +1462,7 @@ function renderFocusList() {
   const focusControls = state.focusPin ? `
     <div class="focus-controls">
       <span>${escapeHtml(focusStatus || "Cloud Focus List unlocked.")}</span>
-      <button type="button" id="focus-change-pin">Change PIN</button>
+      <button type="button" id="focus-sign-out">Sign out</button>
     </div>
   ` : `
     <div class="focus-unlock">
@@ -1532,11 +1532,11 @@ function attachFocusControls() {
     });
   }
 
-  const changePin = document.querySelector("#focus-change-pin");
-  if (changePin) {
-    changePin.addEventListener("click", () => {
+  const signOut = document.querySelector("#focus-sign-out");
+  if (signOut) {
+    signOut.addEventListener("click", () => {
       saveFocusPin("");
-      state.focusMessage = "PIN removed from this device.";
+      state.focusMessage = "Signed out on this device.";
       renderWatchlist();
     });
   }
