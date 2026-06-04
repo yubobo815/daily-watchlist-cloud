@@ -2000,7 +2000,7 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previousByDate.get(row.history_date))}</div>
-          <p class="subtle">Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Trend Quality ${escapeHtml(strengthLabel(row))} · Pattern ${escapeHtml(setupLabel(row.setup))}</p>
+          <p class="subtle">Close: ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Trend Quality: ${escapeHtml(strengthLabel(row))} · Pattern: ${escapeHtml(setupLabel(row.setup))}</p>
           ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
