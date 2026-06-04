@@ -832,7 +832,7 @@ function transitionBadge(row, previous = previousRowFor(row)) {
   return `<span class="change-chip ${transitionTone(label)}">${escapeHtml(label)}</span>`;
 }
 
-function dailyChangeItems(rows, previousRows) {
+function dailyChangeItems(rows, previousRows, limit = 8) {
   if (!rows.length || !previousRows.length) return [];
   const previousByTicker = rowByTicker(previousRows);
   return rows
@@ -858,7 +858,7 @@ function dailyChangeItems(rows, previousRows) {
     })
     .filter(Boolean)
     .sort((a, b) => b.priority - a.priority)
-    .slice(0, 8);
+    .slice(0, limit);
 }
 
 function currentDayMoverItems(rows) {
@@ -1262,15 +1262,27 @@ function tickerList(items, limit = 3) {
   return tickers.length ? tickers.slice(0, limit).join(" / ") : "none";
 }
 
+function riskPriority(row) {
+  const seller = Number(payloadValue(row, "seller_score"));
+  const volume = String(payloadValue(row, "volume_state") || "").toUpperCase();
+  const dayChange = numericValue(row, "day_change_pct");
+  return (
+    (Number.isFinite(seller) ? seller : 0) +
+    (volume === "BREAKDOWN" ? 25 : volume === "DISTRIBUTION" ? 15 : 0) +
+    (dayChange < 0 ? Math.min(Math.abs(dayChange) * 3, 25) : 0) -
+    convictionScore(row) * 0.25
+  );
+}
+
 function renderDailyBrief(counts) {
   const panel = document.querySelector("#daily-brief");
   if (!panel) return;
-  const changes = dailyChangeItems(state.rows, state.previousRows);
-  const fresh = changes.filter((item) => item.transition === "New Today");
-  const upgrades = changes.filter((item) => ["Fresh Setup To Buy", "Upgraded"].includes(item.transition));
+  const allChanges = dailyChangeItems(state.rows, state.previousRows, state.rows.length);
+  const fresh = allChanges.filter((item) => item.transition === "New Today");
+  const upgrades = allChanges.filter((item) => ["Fresh Setup To Buy", "Upgraded"].includes(item.transition));
   const exits = state.rows
     .filter((row) => actionKind(row.action) === "exit")
-    .sort((a, b) => convictionScore(a) - convictionScore(b));
+    .sort((a, b) => riskPriority(b) - riskPriority(a));
   const priceMovers = currentDayMoverItems(state.rows);
   const topBuy = [...state.rows]
     .filter((row) => actionKind(row.action) === "buy")
