@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from urllib.error import HTTPError, URLError
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -530,6 +530,8 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "reason_codes",
 }
 
+SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "90"))
+
 
 def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict], conflict_columns: list[str]) -> None:
     try:
@@ -548,6 +550,41 @@ def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict]
         ]
         print(f"Supabase {table} optional signal columns unavailable; storing transition fields in payload only.")
         supabase_upsert(table, stripped_records, conflict_columns)
+
+
+def supabase_delete_older_than(table: str, date_column: str, cutoff_date: str) -> None:
+    url, key = supabase_credentials()
+    if not url or not key:
+        return
+
+    endpoint = f"{url}/rest/v1/{table}?{urllib.parse.quote(date_column)}=lt.{urllib.parse.quote(cutoff_date)}"
+    req = urllib.request.Request(
+        endpoint,
+        method="DELETE",
+        headers=supabase_headers(key),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in {200, 202, 204}:
+                raise RuntimeError(f"Supabase retention cleanup for {table} returned HTTP {resp.status}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase retention cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
+
+
+def cleanup_supabase_retention(run_date: str) -> None:
+    if SUPABASE_RETENTION_DAYS <= 0:
+        return
+
+    cutoff = (datetime.fromisoformat(run_date).date() - timedelta(days=SUPABASE_RETENTION_DAYS)).isoformat()
+    cleanup_targets = [
+        ("watchlist_snapshots", "run_date"),
+        ("watchlist_behavior_history", "run_date"),
+        ("watchlist_refresh_runs", "run_date"),
+    ]
+    for table, date_column in cleanup_targets:
+        supabase_delete_older_than(table, date_column, cutoff)
+    print(f"Supabase retention cleanup complete: kept rows from {cutoff} onward ({SUPABASE_RETENTION_DAYS} days).")
 
 
 def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
@@ -636,6 +673,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
     supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
     supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
     print(f"Synced {len(report_records)} snapshot rows and {len(history_records)} history rows to Supabase.")
+    cleanup_supabase_retention(run_date)
 
 
 def ema(series: pd.Series, length: int) -> pd.Series:
