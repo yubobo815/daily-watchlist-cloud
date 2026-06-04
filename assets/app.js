@@ -79,7 +79,8 @@ const REASON_LABELS = {
   event_risk: "Event risk",
   personality_extended: "Extended for this stock type",
   weak_reward_risk: "Weak reward/risk",
-  buyer_quality_low: "Buyer quality below threshold"
+  buyer_quality_low: "Buyer quality below threshold",
+  high_beta_entry_quality: "High-beta entry quality"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";

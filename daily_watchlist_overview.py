@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.04-adaptive-quality"
+SCANNER_VERSION = "2026.06.04-high-beta-entry"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -1266,8 +1266,29 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
             and reward_risk_ok
         )
     )
+    high_quality_entry_override = (
+        setup_forming
+        and not no_chase
+        and setup in {"BREAKOUT BUY", "MOMENTUM BUY"}
+        and personality_profile["personality_type"] == "HIGH_BETA"
+        and volume_ok
+        and setup_atr_ok
+        and close_ok
+        and buyer_quality_ok
+        and high_beta_no_chase
+        and personality_entry_ok
+        and profile_buy_ok
+        and not avoid
+        and not seller_control
+        and not fomo
+        and not greed_rejected
+        and not extended_from_zone
+        and buyer_score >= 65
+        and not math.isnan(distance_from_ref_zone_pct)
+        and distance_from_ref_zone_pct <= float(personality_profile["max_zone_distance_pct"])
+    )
     if setup_forming:
-        filters_ok = filters_ok and profile_buy_ok
+        filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
         continuation_ok = continuation_ok and not profile_extended_from_zone
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
@@ -1313,6 +1334,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         notes.append(entry_note)
     if profile_extended_from_zone:
         notes.append("Personality-adjusted zone is extended")
+    if high_quality_entry_override:
+        notes.append("High-beta breakout entry quality accepted")
     if setup_forming and not reward_risk_ok:
         notes.append("Reward/risk is below personality threshold")
     if exit_pressure:
@@ -1343,6 +1366,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         reason_codes.append("extended_from_zone")
     if profile_extended_from_zone:
         reason_codes.append("personality_extended")
+    if high_quality_entry_override:
+        reason_codes.append("high_beta_entry_quality")
     if setup_forming and not reward_risk_ok:
         reason_codes.append("weak_reward_risk")
     if setup_forming and not buyer_quality_ok:
