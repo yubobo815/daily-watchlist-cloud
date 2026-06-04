@@ -1501,18 +1501,21 @@ function renderFocusList() {
         const kind = actionKind(row.action);
         const previous = previousRowFor(row);
         return `
-          <a class="focus-list-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
-            <span>
-              <strong>${escapeHtml(row.ticker)}</strong>
-              <small>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</small>
-            </span>
-            <span class="focus-list-tags">
-              ${transitionBadge(row, previous)}
-              <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-              <span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>
-              ${renderMovePct(row.day_change_pct)}
-            </span>
-          </a>
+          <div class="focus-list-item tone-${kind}">
+            <a class="focus-list-link" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+              <span>
+                <strong>${escapeHtml(row.ticker)}</strong>
+                <small>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</small>
+              </span>
+              <span class="focus-list-tags">
+                ${transitionBadge(row, previous)}
+                <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+                <span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>
+                ${renderMovePct(row.day_change_pct)}
+              </span>
+            </a>
+            <button class="focus-remove" type="button" data-remove-focus="${escapeHtml(row.ticker)}" aria-label="Remove ${escapeHtml(row.ticker)} from Focus List">×</button>
+          </div>
         `;
       }).join("")}
     </div>
@@ -1540,6 +1543,17 @@ function attachFocusControls() {
       renderWatchlist();
     });
   }
+
+  document.querySelectorAll("[data-remove-focus]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const ticker = normaliseTicker(button.dataset.removeFocus);
+      state.focusTickers = state.focusTickers.filter((value) => value !== ticker);
+      saveFocusTickers();
+      renderWatchlist();
+      await saveCloudFocusTickers();
+      renderWatchlist();
+    });
+  });
 }
 
 function renderWatchlist() {
