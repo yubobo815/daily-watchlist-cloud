@@ -23,3 +23,5 @@ index_universe_fetch_failures.txt
 __pycache__/
 *.pyc
 .DS_Store
+.vercel
+supabase/.temp/
