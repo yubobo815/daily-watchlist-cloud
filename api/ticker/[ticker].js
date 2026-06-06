@@ -60,8 +60,8 @@ module.exports = async function handler(request, response) {
 
     const profileReady = profile && Object.keys(profile).length > 0;
     response.setHeader("Cache-Control", profileReady
-      ? "public, s-maxage=90, stale-while-revalidate=300"
-      : "public, s-maxage=20, stale-while-revalidate=90");
+      ? "public, max-age=0, s-maxage=30, stale-while-revalidate=60"
+      : "public, max-age=0, s-maxage=10, stale-while-revalidate=20");
     response.status(200).json({
       ticker,
       latest,
@@ -73,7 +73,7 @@ module.exports = async function handler(request, response) {
   } catch (error) {
     console.error(error);
     const profile = await withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {});
-    response.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
+    response.setHeader("Cache-Control", "no-store");
     response.status(200).json(staticTickerPayload(ticker, profile));
   }
 };

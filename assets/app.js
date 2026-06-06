@@ -661,6 +661,7 @@ function cacheKeyFor(path, prefix = JSON_CACHE_PREFIX) {
 }
 
 function readJsonCache(path, prefix = JSON_CACHE_PREFIX, ttl = SUPABASE_CACHE_TTL_MS) {
+  if (ttl <= 0) return null;
   try {
     const cached = sessionStorage.getItem(cacheKeyFor(path, prefix));
     if (!cached) return null;
@@ -680,16 +681,26 @@ function writeJsonCache(path, value, prefix = JSON_CACHE_PREFIX) {
   }
 }
 
-async function appApiFetch(path, ttl = SUPABASE_CACHE_TTL_MS) {
-  const cached = readJsonCache(path, API_CACHE_PREFIX, ttl);
+function cacheBustedPath(path) {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}fresh=${Date.now()}`;
+}
+
+async function appApiFetch(path, options = {}) {
+  const settings = typeof options === "number" ? { ttl: options } : options;
+  const ttl = settings.ttl ?? SUPABASE_CACHE_TTL_MS;
+  const fresh = Boolean(settings.fresh);
+  const cached = fresh ? null : readJsonCache(path, API_CACHE_PREFIX, ttl);
   if (cached) return cached;
-  const response = await fetch(path);
+  const response = await fetch(fresh ? cacheBustedPath(path) : path, {
+    cache: fresh ? "no-store" : "default",
+  });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || `API returned HTTP ${response.status}.`);
   }
   const value = await response.json();
-  writeJsonCache(path, value, API_CACHE_PREFIX);
+  if (ttl > 0 && !fresh) writeJsonCache(path, value, API_CACHE_PREFIX);
   return value;
 }
 
@@ -1803,7 +1814,7 @@ async function initWatchlist() {
   syncSearchClear();
   initTabNavigation();
   try {
-    const latestPayload = await appApiFetch("/api/watchlist/latest");
+    const latestPayload = await appApiFetch("/api/watchlist/latest", { fresh: true, ttl: 0 });
     state.rows = (latestPayload.rows || [])
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
     state.previousRows = latestPayload.previousRows || [];
@@ -2049,7 +2060,7 @@ async function loadHistory(ticker) {
   document.querySelector("#run-status").textContent = "No history loaded";
   document.querySelector("#run-status").classList.add("bad");
   try {
-    const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`);
+    const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`, { fresh: true, ttl: 0 });
     const latest = tickerPayload.latest;
     state.tickerName = displaySecurityName(tickerPayload.snapshot?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();

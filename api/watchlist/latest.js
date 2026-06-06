@@ -14,7 +14,7 @@ module.exports = async function handler(request, response) {
   try {
     const [latest, previous] = await recentRunDates(2);
     if (!latest) {
-      response.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
+      response.setHeader("Cache-Control", "no-store");
       response.status(200).json({
         latest: "",
         previous: "",
@@ -35,7 +35,7 @@ module.exports = async function handler(request, response) {
       runInfo(latest),
     ]);
 
-    response.setHeader("Cache-Control", "public, s-maxage=45, stale-while-revalidate=180");
+    response.setHeader("Cache-Control", "public, max-age=0, s-maxage=15, stale-while-revalidate=30");
     response.status(200).json({
       latest,
       previous: previous || "",
@@ -45,7 +45,7 @@ module.exports = async function handler(request, response) {
     });
   } catch (error) {
     console.error(error);
-    response.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
+    response.setHeader("Cache-Control", "no-store");
     response.status(200).json(staticLatestPayload());
   }
 };
