@@ -186,13 +186,36 @@ function cleanPayload(row) {
   }, {});
 }
 
+function applyAuditGateFallback(output) {
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  const gateFields = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
+  const hasAllGates = gateFields.every((field) => output[field] || payload[field]);
+  if (hasAllGates) {
+    output.payload = payload;
+    return output;
+  }
+
+  payload.market_permission = payload.market_permission || output.market_permission || "UNKNOWN";
+  payload.ticker_permission = payload.ticker_permission || output.ticker_permission || "UNKNOWN";
+  payload.walk_forward_permission = payload.walk_forward_permission || output.walk_forward_permission || "UNKNOWN";
+  payload.risk_permission = payload.risk_permission || output.risk_permission || "UNKNOWN";
+  payload.signal_quality = payload.signal_quality || "LEGACY DATA";
+  output.notes = [output.notes, "Live row lacks current audit-gate proof"].filter(Boolean).join("; ");
+  if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
+    output.action = "SETUP FORMING";
+    payload.signal_stage = "SETUP";
+  }
+  output.payload = payload;
+  return output;
+}
+
 function rowDto(row) {
   const output = {};
   [...new Set([...SNAPSHOT_FIELDS, ...HISTORY_FIELDS])].forEach((field) => {
     if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
   });
   output.payload = cleanPayload(row);
-  return output;
+  return applyAuditGateFallback(output);
 }
 
 function runDto(row) {
