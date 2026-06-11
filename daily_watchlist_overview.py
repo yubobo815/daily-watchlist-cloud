@@ -1158,6 +1158,7 @@ def classify_and_score(
     raw: pd.DataFrame,
     prepared: bool = False,
     include_setup_stats: bool = True,
+    include_audit_gates: bool = True,
     market_permission: Optional[dict] = None,
 ) -> dict:
     d = raw.copy() if prepared else prepare(raw)
@@ -1306,14 +1307,39 @@ def classify_and_score(
     )
     setup = next((name for name, flag in selected if flag), "NONE")
     setup_forming = setup != "NONE"
-    d = ensure_setup_names(d)
+    if include_setup_stats or include_audit_gates:
+        d = ensure_setup_names(d)
     setup_stats = (
         historical_setup_stats(d, setup)
         if include_setup_stats
         else {"hist_trades": "", "hist_win_rate": "", "hist_avg_return": ""}
     )
-    ticker_profile = ticker_learning_profile(d)
-    walk_forward_stats = walk_forward_setup_stats(d, setup)
+    ticker_profile = (
+        ticker_learning_profile(d)
+        if include_audit_gates
+        else {
+            "ticker_trades": "",
+            "ticker_win_rate": "",
+            "ticker_avg_return": "",
+            "ticker_worst_return": "",
+            "ticker_permission": "UNKNOWN",
+            "ticker_learning_notes": "",
+        }
+    )
+    walk_forward_stats = (
+        walk_forward_setup_stats(d, setup)
+        if include_audit_gates
+        else {
+            "wf_train_trades": "",
+            "wf_train_win_rate": "",
+            "wf_train_avg_return": "",
+            "wf_test_trades": "",
+            "wf_test_win_rate": "",
+            "wf_test_avg_return": "",
+            "walk_forward_permission": "UNKNOWN",
+            "wf_notes": "",
+        }
+    )
 
     setup_max_atr = 12.0 if setup == "BREAKOUT BUY" else 10.0 if setup == "MOMENTUM BUY" else 8.0
     setup_atr_ok = row.atr_pct <= setup_max_atr
@@ -1521,7 +1547,7 @@ def classify_and_score(
         entry_quality_label = ""
         entry_quality_score = 0.0
 
-    if setup_forming:
+    if setup_forming and include_audit_gates:
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
         filters_ok = filters_ok and all_permission_gates_allow
         continuation_ok = continuation_ok and not profile_extended_from_zone and all_permission_gates_allow
@@ -1800,7 +1826,13 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
     start = max(220, len(d) - days + 1)
     for end in range(start, len(d) + 1):
         try:
-            snapshot = classify_and_score(ticker, d.iloc[:end].copy(), prepared=True, include_setup_stats=False)
+            snapshot = classify_and_score(
+                ticker,
+                d.iloc[:end].copy(),
+                prepared=True,
+                include_setup_stats=False,
+                include_audit_gates=False,
+            )
         except Exception:
             continue
         snapshot["history_day"] = len(d) - end
@@ -2728,6 +2760,12 @@ def main() -> None:
     parser.add_argument("--years", type=int, default=3)
     parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
     parser.add_argument("--no-supabase", action="store_true", help="Skip Supabase sync even if credentials are configured.")
+    parser.add_argument("--cache-only", action="store_true", help="Use only existing cached price CSV files and skip live Yahoo chart fetches.")
+    parser.add_argument(
+        "--skip-profiles",
+        action="store_true",
+        help="Skip Yahoo company profile enrichment so signal and Supabase refreshes cannot stall on non-signal data.",
+    )
     args = parser.parse_args()
 
     tickers = read_watchlist(Path(args.watchlist))
@@ -2743,7 +2781,7 @@ def main() -> None:
     benchmark_frames: dict[str, pd.DataFrame] = {}
     for benchmark in ("SPY", "QQQ", "SMH"):
         try:
-            if args.refresh and not live_access_ok:
+            if args.cache_only or (args.refresh and not live_access_ok):
                 benchmark_frames[benchmark] = cached_chart(benchmark, years=args.years)
             else:
                 benchmark_frames[benchmark] = fetch_chart(benchmark, years=args.years, refresh=args.refresh)
@@ -2753,22 +2791,24 @@ def main() -> None:
 
     for ticker in tickers:
         try:
-            if args.refresh and not live_access_ok:
+            if args.cache_only or (args.refresh and not live_access_ok):
                 df = cached_chart(ticker, years=args.years)
-                stale_cache_fallbacks.append(
-                    {"ticker": display_ticker(ticker), "error": live_access_message}
-                )
+                if args.refresh and not live_access_ok:
+                    stale_cache_fallbacks.append(
+                        {"ticker": display_ticker(ticker), "error": live_access_message}
+                    )
             else:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
             row = classify_and_score(ticker, df, market_permission=market_permission)
             ticker_history = build_behavior_history(ticker, df, days=args.history_days)
             row = apply_latest_signal_context(row, ticker_history)
-            row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
+            if not args.skip_profiles:
+                row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
             row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
             rows.append(row)
             history_rows.extend(ticker_history)
         except URLError as exc:
-            if not args.refresh:
+            if not args.refresh or args.cache_only:
                 failures.append({"ticker": display_ticker(ticker), "error": str(exc)})
                 continue
             try:
@@ -2776,7 +2816,8 @@ def main() -> None:
                 row = classify_and_score(ticker, df, market_permission=market_permission)
                 ticker_history = build_behavior_history(ticker, df, days=args.history_days)
                 row = apply_latest_signal_context(row, ticker_history)
-                row.update(fetch_company_profile(ticker, refresh=False))
+                if not args.skip_profiles:
+                    row.update(fetch_company_profile(ticker, refresh=False))
                 row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
                 rows.append(row)
                 history_rows.extend(ticker_history)

@@ -4,7 +4,7 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 
 ## What it does
 
-- Runs `python daily_watchlist_overview.py --refresh`.
+- Runs `python daily_watchlist_overview.py --refresh --skip-profiles`.
 - Publishes the app shell (`index.html`) as the site homepage.
 - Publishes the latest CSV beside the HTML report.
 - Saves each refresh into Supabase when the Supabase secrets are configured.

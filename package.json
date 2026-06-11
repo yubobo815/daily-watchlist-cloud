@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "audit:watchlist": "node scripts/audit_watchlist_app.js",
     "vercel-build": "echo Static watchlist app ready"
   }
 }
