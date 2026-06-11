@@ -30,6 +30,9 @@ const WATCHLIST_COLUMNS = [
   ["entry_est", "Ref Zone"],
   ["stop_est", "Stop"],
   ["target_est", "Target"],
+  ["risk_pct_to_stop", "Risk%"],
+  ["position_value_1k_risk", "Pos@1k"],
+  ["permission_gates", "Gates"],
   ["notes", "Behavior Note"]
 ];
 
@@ -82,7 +85,14 @@ const REASON_LABELS = {
   buyer_quality_low: "Buyer quality below threshold",
   high_beta_entry_quality: "High-beta entry quality",
   fast_breakout_entry: "Fast breakout entry",
-  pullback_reclaim_entry: "Pullback/reclaim entry"
+  pullback_reclaim_entry: "Pullback/reclaim entry",
+  market_regime_block: "Market regime block",
+  ticker_edge_weak: "Ticker edge weak",
+  ticker_caution: "Ticker caution",
+  ticker_insufficient: "Ticker history insufficient",
+  failed_walk_forward: "Failed walk-forward",
+  walk_forward_insufficient: "Walk-forward insufficient",
+  risk_governor_block: "Risk governor block"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -571,6 +581,37 @@ function renderEntryQualityPill(row) {
   const label = entryQualityLabel(row);
   if (!label) return "";
   return `<span class="badge entry-pill entry-${entryQualityTone(row)}">${escapeHtml(label)}</span>`;
+}
+
+function permissionShort(value) {
+  const text = String(value || "").toUpperCase();
+  if (text === "ALLOW") return "A";
+  if (text === "CAUTION") return "C";
+  if (text === "BLOCK") return "B";
+  if (text === "INSUFFICIENT") return "I";
+  if (text === "NONE") return "-";
+  if (!text || text === "UNKNOWN") return "?";
+  return "?";
+}
+
+function permissionTone(value) {
+  const text = String(value || "").toUpperCase();
+  if (text === "ALLOW") return "strong";
+  if (text === "CAUTION" || text === "INSUFFICIENT") return "watch";
+  if (text === "BLOCK") return "risk";
+  return "risk";
+}
+
+function renderPermissionGates(row) {
+  const gates = [
+    ["M", payloadValue(row, "market_permission")],
+    ["T", payloadValue(row, "ticker_permission")],
+    ["W", payloadValue(row, "walk_forward_permission")],
+    ["R", payloadValue(row, "risk_permission")]
+  ];
+  return `<span class="gate-stack">${gates.map(([label, value]) => `
+    <span class="badge gate-pill gate-${permissionTone(value)}" title="${label}: ${escapeHtml(String(value || "UNKNOWN"))}">${label}${permissionShort(value)}</span>
+  `).join("")}</span>`;
 }
 
 function scoreBand(value) {
@@ -1305,6 +1346,9 @@ function renderWatchlistCell(row, key) {
   }
   if (key === "score") return `<span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>`;
   if (key === "day_change_pct") return renderMovePct(row[key]);
+  if (key === "permission_gates") return renderPermissionGates(row);
+  if (key === "risk_pct_to_stop") return escapeHtml(fmtNumber(payloadValue(row, "risk_pct_to_stop"), 1));
+  if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }
@@ -1318,6 +1362,10 @@ function searchableRowText(row) {
     entryQualityLabel(row),
     payloadValue(row, "signal_quality"),
     payloadValue(row, "market_context"),
+    payloadValue(row, "market_permission"),
+    payloadValue(row, "ticker_permission"),
+    payloadValue(row, "walk_forward_permission"),
+    payloadValue(row, "risk_permission"),
     reasonCodes(row).map((code) => REASON_LABELS[code] || code.replaceAll("_", " ")).join(" "),
     whyThisMatters(row).join(" "),
   ].filter(Boolean).join(" ").toLowerCase();
@@ -1708,7 +1756,7 @@ function renderWatchlist() {
   document.querySelector("#watchlist-head").innerHTML = `<tr>${WATCHLIST_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("")}</tr>`;
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
     <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
-      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "close", "day_change_pct", "entry_est", "stop_est", "target_est"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
+      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");

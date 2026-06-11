@@ -1377,6 +1377,42 @@ td:nth-child(13) {
   align-items: center;
 }
 
+.gate-stack {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  align-items: center;
+}
+
+.badge.gate-pill {
+  min-width: 28px;
+  min-height: 20px;
+  padding: 2px 5px;
+  font-size: 10px;
+  letter-spacing: .02em;
+  border-color: rgba(226, 232, 218, 0.12);
+  background: rgba(242, 245, 236, 0.05);
+  color: #a9b1a7;
+}
+
+.badge.gate-pill.gate-strong {
+  border-color: rgba(57, 217, 138, 0.24);
+  background: rgba(57, 217, 138, 0.10);
+  color: #9cebc2;
+}
+
+.badge.gate-pill.gate-watch {
+  border-color: rgba(255, 204, 102, 0.24);
+  background: rgba(255, 204, 102, 0.09);
+  color: #ffe0a1;
+}
+
+.badge.gate-pill.gate-risk {
+  border-color: rgba(255, 121, 121, 0.22);
+  background: rgba(255, 121, 121, 0.09);
+  color: #ffc2c2;
+}
+
 .badge.entry-pill {
   min-height: 21px;
   padding-inline: 7px;

@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.04-entry-quality"
+SCANNER_VERSION = "2026.06.11-audit-gated"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -37,6 +37,12 @@ EVENT_RISK_DAYS = 10
 MARKET_LEADER_THRESHOLD_PCT = 3.0
 MARKET_LAGGARD_THRESHOLD_PCT = -3.0
 BUY_QUALITY_MINIMUM = 60.0
+SCANNER_RISK_DOLLARS = 1000.0
+MAX_SCANNER_POSITION_VALUE = 25000.0
+MAX_SIGNAL_RISK_PCT = 7.0
+NUMERIC_TOLERANCE = 1e-6
+TICKER_EDGE_MIN_TRADES = 6
+WALK_FORWARD_MIN_TEST_TRADES = 3
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -967,15 +973,28 @@ def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     return "NONE"
 
 
+def ensure_setup_names(d: pd.DataFrame) -> pd.DataFrame:
+    if "setup_name" in d.columns and d["setup_name"].notna().any():
+        return d
+
+    out = d.copy()
+    setups = ["NONE"] * len(out)
+    for i in range(210, len(out)):
+        setups[i] = detect_setup_at(out, i)
+    out["setup_name"] = setups
+    return out
+
+
 def historical_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10, lookback_days: int = 500) -> dict:
     if setup == "NONE":
         return {"hist_trades": "", "hist_win_rate": "", "hist_avg_return": ""}
 
+    d = ensure_setup_names(d)
     returns: list[float] = []
     end = len(d) - holding_days - 1
     start = max(210, end - lookback_days)
     for i in range(start, end):
-        if detect_setup_at(d, i) != setup:
+        if d.iloc[i].setup_name != setup:
             continue
         entry = float(d.iloc[i].close)
         exit_ = float(d.iloc[i + holding_days].close)
@@ -993,7 +1012,154 @@ def historical_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10, 
     }
 
 
-def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, include_setup_stats: bool = True) -> dict:
+def summarize_returns(returns: list[float], prefix: str = "") -> dict:
+    if not returns:
+        return {
+            f"{prefix}trades": 0,
+            f"{prefix}win_rate": "",
+            f"{prefix}avg_return": "",
+            f"{prefix}worst_return": "",
+        }
+
+    wins = sum(1 for value in returns if value > 0)
+    return {
+        f"{prefix}trades": len(returns),
+        f"{prefix}win_rate": round(wins / len(returns) * 100, 1),
+        f"{prefix}avg_return": round(float(np.mean(returns)), 2),
+        f"{prefix}worst_return": round(float(np.min(returns)), 2),
+    }
+
+
+def setup_forward_returns(
+    d: pd.DataFrame,
+    setup: str,
+    *,
+    start_index: int,
+    end_index: int,
+    holding_days: int = 10,
+) -> list[float]:
+    if setup == "NONE":
+        return []
+
+    d = ensure_setup_names(d)
+    returns: list[float] = []
+    start = max(210, start_index)
+    end = min(end_index, len(d) - holding_days - 1)
+    for i in range(start, end):
+        if d.iloc[i].setup_name != setup:
+            continue
+        entry = float(d.iloc[i].close)
+        exit_ = float(d.iloc[i + holding_days].close)
+        if entry > 0:
+            returns.append((exit_ / entry - 1) * 100)
+    return returns
+
+
+def ticker_learning_profile(d: pd.DataFrame, holding_days: int = 10, lookback_days: int = 500) -> dict:
+    d = ensure_setup_names(d)
+    start = max(210, len(d) - holding_days - lookback_days)
+    end = len(d) - holding_days - 1
+    returns: list[float] = []
+    for i in range(start, end):
+        setup = d.iloc[i].setup_name
+        if setup == "NONE":
+            continue
+        entry = float(d.iloc[i].close)
+        exit_ = float(d.iloc[i + holding_days].close)
+        if entry > 0:
+            returns.append((exit_ / entry - 1) * 100)
+
+    stats = summarize_returns(returns, prefix="ticker_")
+    trades = int(stats["ticker_trades"] or 0)
+    win_rate = stats["ticker_win_rate"]
+    avg_return = stats["ticker_avg_return"]
+    worst_return = stats["ticker_worst_return"]
+    permission = "INSUFFICIENT"
+    reasons: list[str] = []
+    if trades >= TICKER_EDGE_MIN_TRADES:
+        weak_avg = avg_return != "" and avg_return <= 0
+        weak_win = win_rate != "" and win_rate < 42
+        severe_left_tail = worst_return != "" and worst_return <= -8
+        if weak_avg or weak_win:
+            permission = "BLOCK"
+            reasons.append("ticker edge weak")
+        elif severe_left_tail:
+            permission = "CAUTION"
+            reasons.append("ticker left-tail risk")
+        else:
+            permission = "ALLOW"
+
+    stats["ticker_permission"] = permission
+    stats["ticker_learning_notes"] = "; ".join(reasons)
+    return stats
+
+
+def walk_forward_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10, lookback_days: int = 720) -> dict:
+    if setup == "NONE":
+        return {
+            "wf_train_trades": "",
+            "wf_train_win_rate": "",
+            "wf_train_avg_return": "",
+            "wf_test_trades": "",
+            "wf_test_win_rate": "",
+            "wf_test_avg_return": "",
+            "walk_forward_permission": "NONE",
+            "wf_notes": "",
+        }
+
+    start = max(210, len(d) - holding_days - lookback_days)
+    end = len(d) - holding_days - 1
+    split = start + int((end - start) * 0.60)
+    train = setup_forward_returns(d, setup, start_index=start, end_index=split, holding_days=holding_days)
+    test = setup_forward_returns(d, setup, start_index=split, end_index=end, holding_days=holding_days)
+    train_stats = summarize_returns(train, prefix="wf_train_")
+    test_stats = summarize_returns(test, prefix="wf_test_")
+
+    test_trades = int(test_stats["wf_test_trades"] or 0)
+    test_win = test_stats["wf_test_win_rate"]
+    test_avg = test_stats["wf_test_avg_return"]
+    permission = "INSUFFICIENT"
+    notes = ""
+    if test_trades >= WALK_FORWARD_MIN_TEST_TRADES:
+        if test_avg != "" and test_avg > 0 and test_win != "" and test_win >= 40:
+            permission = "ALLOW"
+        else:
+            permission = "BLOCK"
+            notes = "failed walk-forward"
+
+    return {
+        **train_stats,
+        **test_stats,
+        "walk_forward_permission": permission,
+        "wf_notes": notes,
+    }
+
+
+def market_regime_snapshot(frame: Optional[pd.DataFrame]) -> dict:
+    if frame is None or len(frame) < 60:
+        return {"ok": False, "note": "missing"}
+    d = prepare(frame) if "ema_slow" not in frame.columns else frame
+    row = d.iloc[-1]
+    close = float(row.close)
+    ok = close > float(row.ema_slow) and float(row.ema_fast) > float(row.ema_slow)
+    return {"ok": ok, "note": "risk-on" if ok else "risk-off", "close": round(close, 2)}
+
+
+def market_permission_from_frames(benchmarks: dict[str, pd.DataFrame]) -> dict:
+    probes = {symbol: market_regime_snapshot(benchmarks.get(symbol)) for symbol in ("SPY", "QQQ", "SMH")}
+    ok_count = sum(1 for item in probes.values() if item.get("ok"))
+    permission = "ALLOW" if ok_count >= 2 else "BLOCK"
+    summary = ", ".join(f"{symbol} {item.get('note', 'unknown')}" for symbol, item in probes.items())
+    return {"market_permission": permission, "market_ok_count": ok_count, "market_regime_summary": summary}
+
+
+def classify_and_score(
+    ticker: str,
+    raw: pd.DataFrame,
+    prepared: bool = False,
+    include_setup_stats: bool = True,
+    market_permission: Optional[dict] = None,
+) -> dict:
     d = raw.copy() if prepared else prepare(raw)
     if len(d) < 220:
         raise ValueError("not enough history")
@@ -1140,11 +1306,14 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     )
     setup = next((name for name, flag in selected if flag), "NONE")
     setup_forming = setup != "NONE"
+    d = ensure_setup_names(d)
     setup_stats = (
         historical_setup_stats(d, setup)
         if include_setup_stats
         else {"hist_trades": "", "hist_win_rate": "", "hist_avg_return": ""}
     )
+    ticker_profile = ticker_learning_profile(d)
+    walk_forward_stats = walk_forward_setup_stats(d, setup)
 
     setup_max_atr = 12.0 if setup == "BREAKOUT BUY" else 10.0 if setup == "MOMENTUM BUY" else 8.0
     setup_atr_ok = row.atr_pct <= setup_max_atr
@@ -1221,6 +1390,30 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     stop = max(percent_stop, atr_stop)
     target = close + atr_now * 3.0 if atr_now > 0 else close * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
     reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
+    risk_pct_to_stop = (trade_entry - stop) / trade_entry * 100 if trade_entry > stop else np.nan
+    position_value_1k_risk = SCANNER_RISK_DOLLARS / (risk_pct_to_stop / 100) if not math.isnan(risk_pct_to_stop) and risk_pct_to_stop > 0 else np.nan
+    market_permission_value = (market_permission or {}).get("market_permission", "UNKNOWN")
+    ticker_permission = ticker_profile["ticker_permission"]
+    walk_forward_permission = walk_forward_stats["walk_forward_permission"]
+    risk_permission = (
+        "ALLOW"
+        if (
+            not setup_forming
+            or (
+                not math.isnan(risk_pct_to_stop)
+                and risk_pct_to_stop <= MAX_SIGNAL_RISK_PCT + NUMERIC_TOLERANCE
+                and not math.isnan(position_value_1k_risk)
+                and position_value_1k_risk <= MAX_SCANNER_POSITION_VALUE + NUMERIC_TOLERANCE
+            )
+        )
+        else "BLOCK"
+    )
+    all_permission_gates_allow = (
+        market_permission_value == "ALLOW"
+        and ticker_permission == "ALLOW"
+        and walk_forward_permission == "ALLOW"
+        and risk_permission == "ALLOW"
+    )
     distance_from_ref_zone_pct = (
         (close - float(entry_est)) / float(entry_est) * 100
         if setup_forming and not math.isnan(entry_est) and float(entry_est) > 0
@@ -1330,7 +1523,8 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
 
     if setup_forming:
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
-        continuation_ok = continuation_ok and not profile_extended_from_zone
+        filters_ok = filters_ok and all_permission_gates_allow
+        continuation_ok = continuation_ok and not profile_extended_from_zone and all_permission_gates_allow
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     if filters_ok:
@@ -1361,6 +1555,14 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
     score += min(max(trend_efficiency * 20, 0), 10)
     score -= min(max(row.atr_pct - setup_max_atr, 0), 15)
     score -= max(0.0, (float(personality_profile["min_buy_quality"]) - buy_quality_score) * 0.25) if setup_forming else 0.0
+    if setup_forming and market_permission_value == "BLOCK":
+        score -= 12
+    if setup_forming and ticker_permission != "ALLOW":
+        score -= 10 if ticker_permission == "CAUTION" else 16
+    if setup_forming and walk_forward_permission != "ALLOW":
+        score -= 10 if walk_forward_permission == "INSUFFICIENT" else 16
+    if setup_forming and risk_permission != "ALLOW":
+        score -= 8
 
     notes = []
     if fear_rejected:
@@ -1379,6 +1581,14 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         notes.append("High-beta breakout entry quality accepted")
     if setup_forming and not reward_risk_ok:
         notes.append("Reward/risk is below personality threshold")
+    if setup_forming and market_permission_value == "BLOCK":
+        notes.append("Market regime hostile")
+    if setup_forming and ticker_permission != "ALLOW":
+        notes.append(ticker_profile["ticker_learning_notes"] or f"Ticker permission {ticker_permission.lower()}")
+    if setup_forming and walk_forward_permission != "ALLOW":
+        notes.append(walk_forward_stats["wf_notes"] or f"Walk-forward {walk_forward_permission.lower()}")
+    if setup_forming and risk_permission != "ALLOW":
+        notes.append("Risk governor blocked")
     if exit_pressure:
         notes.append("Exit pressure")
     if avoid:
@@ -1415,6 +1625,20 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         reason_codes.append("pullback_reclaim_entry")
     if setup_forming and not reward_risk_ok:
         reason_codes.append("weak_reward_risk")
+    if setup_forming and market_permission_value == "BLOCK":
+        reason_codes.append("market_regime_block")
+    if setup_forming and ticker_permission == "BLOCK":
+        reason_codes.append("ticker_edge_weak")
+    elif setup_forming and ticker_permission == "CAUTION":
+        reason_codes.append("ticker_caution")
+    elif setup_forming and ticker_permission == "INSUFFICIENT":
+        reason_codes.append("ticker_insufficient")
+    if setup_forming and walk_forward_permission == "BLOCK":
+        reason_codes.append("failed_walk_forward")
+    elif setup_forming and walk_forward_permission == "INSUFFICIENT":
+        reason_codes.append("walk_forward_insufficient")
+    if setup_forming and risk_permission != "ALLOW":
+        reason_codes.append("risk_governor_block")
     if setup_forming and not buyer_quality_ok:
         reason_codes.append("buyer_quality_low")
     if entry_note:
@@ -1452,6 +1676,19 @@ def classify_and_score(ticker: str, raw: pd.DataFrame, prepared: bool = False, i
         "stop_est": round(float(stop), 2) if setup_forming else "",
         "target_est": round(float(target), 2) if setup_forming else "",
         "reward_risk": round(float(reward_risk), 2) if setup_forming and not math.isnan(reward_risk) else "",
+        "risk_pct_to_stop": round(float(risk_pct_to_stop), 2) if setup_forming and not math.isnan(risk_pct_to_stop) else "",
+        "position_value_1k_risk": round(float(position_value_1k_risk), 0) if setup_forming and not math.isnan(position_value_1k_risk) else "",
+        "market_permission": market_permission_value,
+        "ticker_permission": ticker_permission,
+        "walk_forward_permission": walk_forward_permission,
+        "risk_permission": risk_permission,
+        "ticker_trades": ticker_profile["ticker_trades"],
+        "ticker_win_rate": ticker_profile["ticker_win_rate"],
+        "ticker_avg_return": ticker_profile["ticker_avg_return"],
+        "ticker_worst_return": ticker_profile["ticker_worst_return"],
+        "wf_test_trades": walk_forward_stats["wf_test_trades"],
+        "wf_test_win_rate": walk_forward_stats["wf_test_win_rate"],
+        "wf_test_avg_return": walk_forward_stats["wf_test_avg_return"],
         "distance_from_ref_zone_pct": round(float(distance_from_ref_zone_pct), 2) if setup_forming and not math.isnan(distance_from_ref_zone_pct) else "",
         "extension_state": extension_state,
         "reason_codes": reason_codes,
@@ -2003,6 +2240,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
         "setup", "adaptive_mode", "psychology", "hist_win_rate", "reward_risk",
+        "risk_pct_to_stop", "position_value_1k_risk",
+        "market_permission", "ticker_permission", "walk_forward_permission", "risk_permission",
         "volume_state", "entry_est", "stop_est", "target_est", "notes",
     ]
     display_columns = [col for col in display_columns if col in df.columns]
@@ -2033,6 +2272,12 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "psychology": "Tape",
         "hist_win_rate": "Win%",
         "reward_risk": "R/R",
+        "risk_pct_to_stop": "Risk%",
+        "position_value_1k_risk": "Pos@1k",
+        "market_permission": "Mkt",
+        "ticker_permission": "Ticker",
+        "walk_forward_permission": "WF",
+        "risk_permission": "Risk",
         "volume_state": "Vol",
         "entry_est": "Ref Zone",
         "stop_est": "Stop",
@@ -2093,9 +2338,14 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         if col == "adaptive_mode":
             short = html.escape(mode_labels.get(text, text.title()))
             return f"<span class='mode'>{short}</span>"
-        if col in {"score", "hist_win_rate", "reward_risk", "day_change_pct"}:
+        if col in {"score", "hist_win_rate", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
             try:
                 return f"{float(value):.1f}"
+            except (TypeError, ValueError):
+                return escaped
+        if col == "position_value_1k_risk":
+            try:
+                return f"{float(value):,.0f}"
             except (TypeError, ValueError):
                 return escaped
         if col in {"close", "entry_est", "stop_est", "target_est"}:
@@ -2105,7 +2355,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return escaped
         return escaped
 
-    numeric_columns = {"score", "hist_win_rate", "reward_risk", "day_change_pct", "close", "entry_est", "stop_est", "target_est"}
+    numeric_columns = {"score", "hist_win_rate", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
 
     rows = []
     for _, row in visible_df.iterrows():
@@ -2491,7 +2741,7 @@ def main() -> None:
     failures = []
     stale_cache_fallbacks = []
     benchmark_frames: dict[str, pd.DataFrame] = {}
-    for benchmark in ("SPY", "QQQ"):
+    for benchmark in ("SPY", "QQQ", "SMH"):
         try:
             if args.refresh and not live_access_ok:
                 benchmark_frames[benchmark] = cached_chart(benchmark, years=args.years)
@@ -2499,6 +2749,7 @@ def main() -> None:
                 benchmark_frames[benchmark] = fetch_chart(benchmark, years=args.years, refresh=args.refresh)
         except Exception as exc:
             print(f"Benchmark context unavailable for {benchmark}: {exc}")
+    market_permission = market_permission_from_frames(benchmark_frames)
 
     for ticker in tickers:
         try:
@@ -2509,7 +2760,7 @@ def main() -> None:
                 )
             else:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
-            row = classify_and_score(ticker, df)
+            row = classify_and_score(ticker, df, market_permission=market_permission)
             ticker_history = build_behavior_history(ticker, df, days=args.history_days)
             row = apply_latest_signal_context(row, ticker_history)
             row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
@@ -2522,7 +2773,7 @@ def main() -> None:
                 continue
             try:
                 df = cached_chart(ticker, years=args.years)
-                row = classify_and_score(ticker, df)
+                row = classify_and_score(ticker, df, market_permission=market_permission)
                 ticker_history = build_behavior_history(ticker, df, days=args.history_days)
                 row = apply_latest_signal_context(row, ticker_history)
                 row.update(fetch_company_profile(ticker, refresh=False))
@@ -2558,6 +2809,7 @@ def main() -> None:
         status_parts.append(f"{len(stale_cache_fallbacks)} symbols used cached data")
     if failures:
         status_parts.append(f"{len(failures)} symbols failed")
+    status_parts.append(f"market {market_permission['market_permission']}: {market_permission['market_regime_summary']}")
     status_text = " | ".join(status_parts)
     preflight_text = None if live_access_ok else f"{live_access_message} Running cache-backed refresh."
     run_status = "ok"
@@ -2613,7 +2865,11 @@ def main() -> None:
     if not args.no_supabase:
         sync_supabase(report, history, today, run_metadata)
 
-    columns = ["ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct", "notes"]
+    columns = [
+        "ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct",
+        "market_permission", "ticker_permission", "walk_forward_permission", "risk_permission",
+        "risk_pct_to_stop", "position_value_1k_risk", "notes",
+    ]
     print(report[columns].to_string(index=False))
     print(live_access_message)
     print(f"\nWrote {csv_path}, {html_path}, daily_watchlist_overview_latest.csv, daily_watchlist_overview_latest.html, watchlist_behavior_history_latest.csv, and history.html")

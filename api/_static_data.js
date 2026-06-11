@@ -5,8 +5,29 @@ function normalizeTicker(value) {
   return String(value || "").trim().toUpperCase().replace("BRK.B", "BRK-B");
 }
 
+function conservativeFallbackRow(row) {
+  const next = { ...(row || {}) };
+  const payload = next.payload && typeof next.payload === "object" ? { ...next.payload } : {};
+  const requiredGates = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
+  const hasAllGates = requiredGates.every((field) => next[field] || payload[field]);
+  if (!hasAllGates) {
+    payload.market_permission = payload.market_permission || next.market_permission || "UNKNOWN";
+    payload.ticker_permission = payload.ticker_permission || next.ticker_permission || "UNKNOWN";
+    payload.walk_forward_permission = payload.walk_forward_permission || next.walk_forward_permission || "UNKNOWN";
+    payload.risk_permission = payload.risk_permission || next.risk_permission || "UNKNOWN";
+    next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
+    if (next.action === "BUY CANDIDATE" || next.action === "STRONG CONTINUATION") {
+      next.action = "SETUP FORMING";
+      payload.signal_stage = "SETUP";
+      payload.signal_quality = "STATIC FALLBACK";
+    }
+  }
+  next.payload = payload;
+  return next;
+}
+
 function staticLatestPayload() {
-  const rows = Array.isArray(latestData.rows) ? latestData.rows : [];
+  const rows = Array.isArray(latestData.rows) ? latestData.rows.map(conservativeFallbackRow) : [];
   return {
     latest: latestData.run_date || rows[0]?.run_date || "",
     previous: "",
@@ -35,7 +56,7 @@ function staticLatestPayload() {
 
 function staticTickerPayload(ticker, profile = {}) {
   const normalized = normalizeTicker(ticker);
-  const rows = Array.isArray(latestData.rows) ? latestData.rows : [];
+  const rows = Array.isArray(latestData.rows) ? latestData.rows.map(conservativeFallbackRow) : [];
   const snapshot = rows.find((row) => normalizeTicker(row.ticker) === normalized) || null;
   const historyRows = Array.isArray(historyData.by_ticker?.[normalized])
     ? historyData.by_ticker[normalized]
