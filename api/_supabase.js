@@ -110,6 +110,9 @@ const PAYLOAD_FIELDS = [
   "position_value_1k_risk",
 ];
 
+const AUDIT_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
+const UNGATED_SCORE_CAP = 49;
+
 function assertSupabaseConfig() {
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.apiKey) {
     throw new Error("Supabase server config is missing.");
@@ -186,10 +189,33 @@ function cleanPayload(row) {
   }, {});
 }
 
+function numericOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function capScore(value, cap = UNGATED_SCORE_CAP) {
+  const number = numericOrNull(value);
+  return number === null ? value : Math.min(number, cap);
+}
+
+function appendReasonCode(payload, code) {
+  const raw = payload.reason_codes;
+  const codes = Array.isArray(raw)
+    ? raw
+    : (typeof raw === "string" && raw ? raw.split(",").map((item) => item.trim()) : []);
+  if (!codes.includes(code)) codes.push(code);
+  payload.reason_codes = codes.filter(Boolean);
+}
+
+function hasKnownAuditGate(value) {
+  const text = String(value || "").toUpperCase();
+  return Boolean(text) && text !== "UNKNOWN";
+}
+
 function applyAuditGateFallback(output) {
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
-  const gateFields = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
-  const hasAllGates = gateFields.every((field) => output[field] || payload[field]);
+  const hasAllGates = AUDIT_GATE_FIELDS.every((field) => hasKnownAuditGate(output[field] || payload[field]));
   if (hasAllGates) {
     output.payload = payload;
     return output;
@@ -199,7 +225,14 @@ function applyAuditGateFallback(output) {
   payload.ticker_permission = payload.ticker_permission || output.ticker_permission || "UNKNOWN";
   payload.walk_forward_permission = payload.walk_forward_permission || output.walk_forward_permission || "UNKNOWN";
   payload.risk_permission = payload.risk_permission || output.risk_permission || "UNKNOWN";
-  payload.signal_quality = payload.signal_quality || "LEGACY DATA";
+  payload.audit_gate_status = "MISSING";
+  payload.signal_quality = "NEEDS GATE PROOF";
+  payload.transition_label = "Needs Gate Proof";
+  payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -25, -25);
+  payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
+  output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
+  output.score = capScore(output.score);
+  appendReasonCode(payload, "missing_audit_gates");
   output.notes = [output.notes, "Live row lacks current audit-gate proof"].filter(Boolean).join("; ");
   if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
     output.action = "SETUP FORMING";

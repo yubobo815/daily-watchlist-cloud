@@ -92,7 +92,8 @@ const REASON_LABELS = {
   ticker_insufficient: "Ticker history insufficient",
   failed_walk_forward: "Failed walk-forward",
   walk_forward_insufficient: "Walk-forward insufficient",
-  risk_governor_block: "Risk governor block"
+  risk_governor_block: "Risk governor block",
+  missing_audit_gates: "Audit gates pending"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -614,6 +615,24 @@ function renderPermissionGates(row) {
   `).join("")}</span>`;
 }
 
+function auditGateValues(row) {
+  return [
+    payloadValue(row, "market_permission"),
+    payloadValue(row, "ticker_permission"),
+    payloadValue(row, "walk_forward_permission"),
+    payloadValue(row, "risk_permission")
+  ].map((value) => String(value || "UNKNOWN").toUpperCase());
+}
+
+function isAuditGatePending(row) {
+  const values = auditGateValues(row);
+  return values.some((value) => !value || value === "UNKNOWN");
+}
+
+function auditGatePendingCount(rows = []) {
+  return rows.filter(isAuditGatePending).length;
+}
+
 function scoreBand(value) {
   const score = Number(value);
   if (score >= 75) return "strong";
@@ -909,7 +928,7 @@ function displayTransitionLabel(label) {
 
 function transitionTone(label) {
   if (label === "Upgraded" || label === "New Today" || label === "Fresh Setup To Buy") return "up";
-  if (label === "Downgraded" || label === "Stale Buy") return "down";
+  if (label === "Downgraded" || label === "Stale Buy" || label === "Needs Gate Proof") return "down";
   if (label === "Extended" || label === "Changed") return "setup";
   return "quiet";
 }
@@ -1151,15 +1170,17 @@ function renderRunHealthPanel(runInfo, rows = []) {
 function runHealthStatus(runInfo, rows = []) {
   const failed = Number(runInfo?.symbols_failed || 0);
   const stale = Number(runInfo?.symbols_stale_cache || 0);
+  const pendingGates = auditGatePendingCount(rows);
   const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
   const total = Number(runInfo?.symbols_total || rows.length || 0);
   const liveOk = runInfo?.live_access_ok;
   const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
   const hasRows = rows.length > 0 || analyzed > 0;
-  const hasIssue = liveOk === false || failed > 0 || stale > 0;
+  const hasIssue = liveOk === false || failed > 0 || stale > 0 || pendingGates > 0;
   const tone = !hasRows ? "bad" : hasIssue ? "warn" : "ok";
   const label = tone === "bad" ? "Data issue" : tone === "warn" ? "Data caution" : "Live data healthy";
   const caveats = [
+    pendingGates ? `${pendingGates} audit-gate pending` : "",
     stale ? `${stale} cached` : "",
     failed ? `${failed} failed` : "",
     liveOk === false ? "source degraded" : "",
@@ -1192,8 +1213,17 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const runStatus = document.querySelector("#run-status");
   if (runStatus) {
     const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
-    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
-    runStatus.classList.toggle("warn", Boolean(runInfo && (runInfo.live_access_ok === false || Number(runInfo.symbols_failed || 0) || Number(runInfo.symbols_stale_cache || 0))));
+    const pendingGates = auditGatePendingCount(rows);
+    const gateSummary = pendingGates ? ` · ${pendingGates} audit-gate pending` : "";
+    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}${gateSummary}`;
+    runStatus.classList.toggle("warn", Boolean(
+      runInfo && (
+        runInfo.live_access_ok === false
+        || Number(runInfo.symbols_failed || 0)
+        || Number(runInfo.symbols_stale_cache || 0)
+        || auditGatePendingCount(rows)
+      )
+    ));
   }
   if (status) status.textContent = "";
   if (disclaimer) disclaimer.textContent = APP_DISCLAIMER;

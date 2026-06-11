@@ -27,6 +27,14 @@ function allGatesAllow(row) {
   return gateValues(row).every((value) => value === "ALLOW");
 }
 
+function hasMissingGate(row) {
+  return gateValues(row).some((value) => !value || value === "UNKNOWN");
+}
+
+function adjustedScore(row) {
+  return Number(row.adjusted_score ?? row.payload?.adjusted_score ?? row.score ?? 0);
+}
+
 function auditStaticFallback() {
   const payload = staticLatestPayload();
   assert(Array.isArray(payload.rows), "static fallback rows must be an array");
@@ -34,14 +42,17 @@ function auditStaticFallback() {
 
   const missingGates = payload.rows.filter((row) => gateValues(row).some((value) => !value));
   const unsafeBuys = payload.rows.filter((row) => isBuyLike(row) && !allGatesAllow(row));
+  const overRankedMissingGates = payload.rows.filter((row) => hasMissingGate(row) && adjustedScore(row) > 49);
 
   assert(missingGates.length === 0, `static fallback rows missing gate payloads: ${missingGates.length}`);
   assert(unsafeBuys.length === 0, `static fallback exposes ungated BUY-like rows: ${unsafeBuys.length}`);
+  assert(overRankedMissingGates.length === 0, `static fallback over-ranks missing-gate rows: ${overRankedMissingGates.length}`);
 
   return {
     rows: payload.rows.length,
     missingGates: missingGates.length,
     unsafeBuys: unsafeBuys.length,
+    overRankedMissingGates: overRankedMissingGates.length,
   };
 }
 
@@ -51,10 +62,37 @@ function auditSupabaseFallback() {
     action: "BUY CANDIDATE",
     setup: "BREAKOUT BUY",
     score: 99,
-    payload: {},
+    payload: {
+      adjusted_score: 128,
+      signal_quality: "FRESH",
+      transition_label: "Fresh Setup To Buy",
+      transition_score: 35,
+    },
   });
   assert(legacy.action === "SETUP FORMING", "legacy ungated BUY row must be downgraded");
   assert(gateValues(legacy).every((value) => value === "UNKNOWN"), "legacy row must carry UNKNOWN gates");
+  assert(adjustedScore(legacy) <= 49, "legacy ungated row must be capped below actionable rank");
+  assert(legacy.payload.signal_quality === "NEEDS GATE PROOF", "legacy ungated row must not keep FRESH quality");
+  assert(legacy.payload.transition_label === "Needs Gate Proof", "legacy ungated row must not keep promotion transition");
+
+  const unknownGated = rowDto({
+    ticker: "TEST",
+    action: "SETUP FORMING",
+    setup: "MOMENTUM BUY",
+    score: 91,
+    payload: {
+      adjusted_score: 128,
+      signal_quality: "FRESH",
+      transition_label: "Fresh Setup To Buy",
+      market_permission: "UNKNOWN",
+      ticker_permission: "UNKNOWN",
+      walk_forward_permission: "UNKNOWN",
+      risk_permission: "UNKNOWN",
+    },
+  });
+  assert(adjustedScore(unknownGated) <= 49, "UNKNOWN-gate row must be capped below actionable rank");
+  assert(unknownGated.payload.signal_quality === "NEEDS GATE PROOF", "UNKNOWN-gate row must not keep FRESH quality");
+  assert(unknownGated.payload.transition_label === "Needs Gate Proof", "UNKNOWN-gate row must not keep promotion transition");
 
   const gated = rowDto({
     ticker: "TEST",
@@ -74,6 +112,11 @@ function auditSupabaseFallback() {
   return {
     legacyAction: legacy.action,
     legacyGates: gateValues(legacy),
+    legacyAdjustedScore: adjustedScore(legacy),
+    legacyQuality: legacy.payload.signal_quality,
+    legacyTransition: legacy.payload.transition_label,
+    unknownGatedAdjustedScore: adjustedScore(unknownGated),
+    unknownGatedQuality: unknownGated.payload.signal_quality,
     gatedAction: gated.action,
     gatedGates: gateValues(gated),
   };
