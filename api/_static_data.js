@@ -91,9 +91,10 @@ function staticTickerPayload(ticker, profile = {}) {
   const normalized = normalizeTicker(ticker);
   const rows = Array.isArray(latestData.rows) ? latestData.rows.map(conservativeFallbackRow) : [];
   const snapshot = rows.find((row) => normalizeTicker(row.ticker) === normalized) || null;
-  const historyRows = Array.isArray(historyData.by_ticker?.[normalized])
+  const rawHistoryRows = Array.isArray(historyData.by_ticker?.[normalized])
     ? historyData.by_ticker[normalized]
     : (Array.isArray(historyData.rows) ? historyData.rows.filter((row) => normalizeTicker(row.ticker) === normalized) : []);
+  const historyRows = rawHistoryRows.map(conservativeFallbackRow);
   const latest = snapshot?.run_date || historyRows[0]?.run_date || latestData.run_date || "";
 
   return {

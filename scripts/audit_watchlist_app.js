@@ -1,4 +1,4 @@
-const { staticLatestPayload } = require("../api/_static_data");
+const { staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
 const { rowDto } = require("../api/_supabase");
 
 const REQUIRED_GATES = [
@@ -53,6 +53,31 @@ function auditStaticFallback() {
     missingGates: missingGates.length,
     unsafeBuys: unsafeBuys.length,
     overRankedMissingGates: overRankedMissingGates.length,
+  };
+}
+
+function auditStaticTickerFallback(tickers) {
+  let historyRows = 0;
+  let unsafeBuys = 0;
+  let overRankedMissingGates = 0;
+
+  tickers.forEach((ticker) => {
+    const payload = staticTickerPayload(ticker);
+    assert(payload.snapshot, `static ticker fallback must include a snapshot for ${ticker}`);
+    const rows = payload.historyRows || [];
+    historyRows += rows.length;
+    unsafeBuys += rows.filter((row) => isBuyLike(row) && !allGatesAllow(row)).length;
+    overRankedMissingGates += rows.filter((row) => hasMissingGate(row) && adjustedScore(row) > 49).length;
+  });
+
+  assert(unsafeBuys === 0, `static ticker fallback exposes ungated BUY-like history rows: ${unsafeBuys}`);
+  assert(overRankedMissingGates === 0, `static ticker fallback over-ranks missing-gate history rows: ${overRankedMissingGates}`);
+
+  return {
+    tickers: tickers.length,
+    historyRows,
+    unsafeBuys,
+    overRankedMissingGates,
   };
 }
 
@@ -124,6 +149,7 @@ function auditSupabaseFallback() {
 
 const result = {
   staticFallback: auditStaticFallback(),
+  staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
   supabaseFallback: auditSupabaseFallback(),
 };
 

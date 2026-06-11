@@ -47,13 +47,13 @@ module.exports = async function handler(request, response) {
     const rows = historyRows.map(rowDto);
     if (snapshot && rows[0]) {
       rows[0] = {
-        ...snapshot,
         ...rows[0],
+        ...snapshot,
         name: snapshot.name || rows[0].name,
         data_date: snapshot.data_date || rows[0].data_date,
         payload: {
-          ...(snapshot.payload || {}),
           ...(rows[0].payload || {}),
+          ...(snapshot.payload || {}),
         },
       };
     }
