@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.11-audit-gated"
+SCANNER_VERSION = "2026.06.12-next-day-personality"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -550,6 +550,12 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "adjusted_score",
     "distance_from_ref_zone_pct",
     "extension_state",
+    "next_day_bias",
+    "next_day_bias_score",
+    "next_day_plan",
+    "emotion_score",
+    "trend_location_score",
+    "setup_context_score",
     "reason_codes",
 }
 
@@ -1434,12 +1440,6 @@ def classify_and_score(
         )
         else "BLOCK"
     )
-    all_permission_gates_allow = (
-        market_permission_value == "ALLOW"
-        and ticker_permission == "ALLOW"
-        and walk_forward_permission == "ALLOW"
-        and risk_permission == "ALLOW"
-    )
     distance_from_ref_zone_pct = (
         (close - float(entry_est)) / float(entry_est) * 100
         if setup_forming and not math.isnan(entry_est) and float(entry_est) > 0
@@ -1547,10 +1547,96 @@ def classify_and_score(
         entry_quality_label = ""
         entry_quality_score = 0.0
 
+    emotion_score = 50.0
+    emotion_score += (buyer_score - seller_score) * 0.32
+    emotion_score += 9.0 if fear_rejected else 0.0
+    emotion_score += 7.0 if quiet_absorption else 0.0
+    emotion_score += 6.0 if accum_vol or breakout_vol else 0.0
+    emotion_score += 4.0 if demand_tail or constructive_close else 0.0
+    emotion_score -= 10.0 if dist_vol or breakdown_vol else 0.0
+    emotion_score -= 12.0 if greed_rejected or fomo else 0.0
+    emotion_score -= 8.0 if seller_control else 0.0
+    emotion_score = clamp_float(emotion_score, 0.0, 100.0)
+
+    trend_location_score = 50.0
+    trend_location_score += 13.0 if ema_alignment_clean else 0.0
+    trend_location_score += 8.0 if close > row.ema_fast else -8.0
+    trend_location_score += 7.0 if close > row.ema_slow else -10.0
+    trend_location_score += 6.0 if slow_slope_up else -4.0
+    trend_location_score += min(max(trend_efficiency * 45.0, 0.0), 12.0)
+    trend_location_score += 4.0 if rs_up else -3.0
+    trend_location_score -= 10.0 if ema_alignment_bearish else 0.0
+    trend_location_score -= 8.0 if atr_extension >= 3.5 else 0.0
+    trend_location_score = clamp_float(trend_location_score, 0.0, 100.0)
+
+    setup_context_score = 45.0
+    setup_context_score += 18.0 if filters_ok else 0.0
+    setup_context_score += 12.0 if continuation_ok else 0.0
+    setup_context_score += 8.0 if setup_forming else 0.0
+    setup_context_score += 8.0 if profile_buy_ok else -8.0
+    setup_context_score += 6.0 if reward_risk_ok else -6.0
+    setup_context_score += 5.0 if volume_ok else -6.0
+    setup_context_score += 4.0 if close_ok and buyer_quality_ok else -7.0
+    setup_context_score += 5.0 if fast_breakout_entry or pullback_reclaim_entry or high_quality_entry_override else 0.0
+    setup_context_score -= 14.0 if profile_extended_from_zone or extended_from_zone else 0.0
+    setup_context_score -= 10.0 if avoid or exit_pressure else 0.0
+    setup_context_score = clamp_float(setup_context_score, 0.0, 100.0)
+
+    market_risk_adjustment = 0.0
+    market_risk_adjustment -= 10.0 if market_permission_value == "BLOCK" else 0.0
+    market_risk_adjustment -= 14.0 if risk_permission == "BLOCK" else 0.0
+    personality_bias_bonus = 0.0
+    personality_bias_bonus += 4.0 if personality_profile["personality_type"] == "HIGH_BETA" and (fast_breakout_entry or momentum) else 0.0
+    personality_bias_bonus += 4.0 if personality_profile["personality_type"] == "COMPOUNDER" and steady_trend and not profile_extended_from_zone else 0.0
+    personality_bias_bonus += 3.0 if personality_profile["personality_type"] == "RANGE_BOUND" and (fear_rejected or quiet_absorption) else 0.0
+    next_day_bias_score = clamp_float(
+        emotion_score * 0.36
+        + trend_location_score * 0.34
+        + setup_context_score * 0.30
+        + market_risk_adjustment
+        + personality_bias_bonus,
+        0.0,
+        100.0,
+    )
+
+    execution_safety_ok = market_permission_value != "BLOCK" and risk_permission == "ALLOW"
+    next_day_constructive = next_day_bias_score >= 62.0 and not exit_pressure and not avoid
+    next_day_buyable = (
+        next_day_bias_score >= 70.0
+        and execution_safety_ok
+        and not profile_extended_from_zone
+        and not extended_from_zone
+        and not fomo
+        and not greed_rejected
+        and not seller_control
+    )
+
+    if exit_pressure or (seller_control and trend_damage):
+        next_day_bias = "DEFENSIVE / EXIT RISK"
+        next_day_plan = "Protect capital first; wait for buyer reclaim before considering new exposure."
+    elif profile_extended_from_zone or extended_from_zone or fomo or greed_rejected:
+        next_day_bias = "AVOID CHASE"
+        next_day_plan = "Do not chase strength; wait for price to reset into the reference zone."
+    elif next_day_buyable and setup_forming:
+        next_day_bias = "BULLISH CONFIRM"
+        next_day_plan = "Confirm on Pine chart; prefer entry near the reference zone with the listed stop."
+    elif next_day_constructive and setup_forming:
+        next_day_bias = "CONSTRUCTIVE PULLBACK"
+        next_day_plan = "Setup is forming; wait for reclaim or a controlled pullback into the reference zone."
+    elif mode in {"POWER TREND", "STEADY TREND"} and next_day_bias_score >= 55.0:
+        next_day_bias = "WATCH TREND"
+        next_day_plan = "Trend personality is healthy; wait for a cleaner setup or reference-zone entry."
+    elif market_permission_value == "BLOCK" or risk_permission == "BLOCK":
+        next_day_bias = "EXECUTION BLOCKED"
+        next_day_plan = "Structure is not enough; market or risk governor blocks fresh execution."
+    else:
+        next_day_bias = "NEUTRAL"
+        next_day_plan = "No clean next-day edge; wait for stronger buyer tape or cleaner structure."
+
     if setup_forming and include_audit_gates:
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
-        filters_ok = filters_ok and all_permission_gates_allow
-        continuation_ok = continuation_ok and not profile_extended_from_zone and all_permission_gates_allow
+        filters_ok = filters_ok and next_day_buyable
+        continuation_ok = continuation_ok and not profile_extended_from_zone and execution_safety_ok and next_day_constructive
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     if filters_ok:
@@ -1583,10 +1669,9 @@ def classify_and_score(
     score -= max(0.0, (float(personality_profile["min_buy_quality"]) - buy_quality_score) * 0.25) if setup_forming else 0.0
     if setup_forming and market_permission_value == "BLOCK":
         score -= 12
-    if setup_forming and ticker_permission != "ALLOW":
-        score -= 10 if ticker_permission == "CAUTION" else 16
-    if setup_forming and walk_forward_permission != "ALLOW":
-        score -= 10 if walk_forward_permission == "INSUFFICIENT" else 16
+    legacy_history_caution = ticker_permission in {"BLOCK", "CAUTION"} or walk_forward_permission == "BLOCK"
+    if setup_forming and legacy_history_caution and next_day_bias_score < 72.0:
+        score -= 4
     if setup_forming and risk_permission != "ALLOW":
         score -= 8
 
@@ -1609,12 +1694,10 @@ def classify_and_score(
         notes.append("Reward/risk is below personality threshold")
     if setup_forming and market_permission_value == "BLOCK":
         notes.append("Market regime hostile")
-    if setup_forming and ticker_permission != "ALLOW":
-        notes.append(ticker_profile["ticker_learning_notes"] or f"Ticker permission {ticker_permission.lower()}")
-    if setup_forming and walk_forward_permission != "ALLOW":
-        notes.append(walk_forward_stats["wf_notes"] or f"Walk-forward {walk_forward_permission.lower()}")
     if setup_forming and risk_permission != "ALLOW":
         notes.append("Risk governor blocked")
+    if next_day_plan:
+        notes.append(next_day_plan)
     if exit_pressure:
         notes.append("Exit pressure")
     if avoid:
@@ -1639,6 +1722,16 @@ def classify_and_score(
         reason_codes.append("seller_pressure")
     if exit_pressure:
         reason_codes.append("exit_pressure")
+    if next_day_bias == "BULLISH CONFIRM":
+        reason_codes.append("next_day_bullish_confirm")
+    elif next_day_bias == "CONSTRUCTIVE PULLBACK":
+        reason_codes.append("next_day_constructive_pullback")
+    elif next_day_bias == "WATCH TREND":
+        reason_codes.append("next_day_watch_trend")
+    elif next_day_bias == "AVOID CHASE":
+        reason_codes.append("avoid_chase")
+    elif next_day_bias in {"DEFENSIVE / EXIT RISK", "EXECUTION BLOCKED"}:
+        reason_codes.append("execution_risk")
     if extended_from_zone:
         reason_codes.append("extended_from_zone")
     if profile_extended_from_zone:
@@ -1653,16 +1746,8 @@ def classify_and_score(
         reason_codes.append("weak_reward_risk")
     if setup_forming and market_permission_value == "BLOCK":
         reason_codes.append("market_regime_block")
-    if setup_forming and ticker_permission == "BLOCK":
-        reason_codes.append("ticker_edge_weak")
-    elif setup_forming and ticker_permission == "CAUTION":
-        reason_codes.append("ticker_caution")
-    elif setup_forming and ticker_permission == "INSUFFICIENT":
-        reason_codes.append("ticker_insufficient")
-    if setup_forming and walk_forward_permission == "BLOCK":
-        reason_codes.append("failed_walk_forward")
-    elif setup_forming and walk_forward_permission == "INSUFFICIENT":
-        reason_codes.append("walk_forward_insufficient")
+    if setup_forming and legacy_history_caution and next_day_bias_score < 62.0:
+        reason_codes.append("historical_edge_caution")
     if setup_forming and risk_permission != "ALLOW":
         reason_codes.append("risk_governor_block")
     if setup_forming and not buyer_quality_ok:
@@ -1694,6 +1779,12 @@ def classify_and_score(
         "buy_quality_minimum": round(float(personality_profile["min_buy_quality"]), 1),
         "entry_quality_label": entry_quality_label,
         "entry_quality_score": round(float(entry_quality_score), 1),
+        "next_day_bias": next_day_bias,
+        "next_day_bias_score": round(float(next_day_bias_score), 1),
+        "next_day_plan": next_day_plan,
+        "emotion_score": round(float(emotion_score), 1),
+        "trend_location_score": round(float(trend_location_score), 1),
+        "setup_context_score": round(float(setup_context_score), 1),
         "profile_zone_limit_pct": round(float(personality_profile["max_zone_distance_pct"]), 2),
         "buyer_score": round(float(buyer_score), 0),
         "seller_score": round(float(seller_score), 0),
@@ -1850,6 +1941,12 @@ LATEST_SIGNAL_FIELDS = [
     "adjusted_score",
     "distance_from_ref_zone_pct",
     "extension_state",
+    "next_day_bias",
+    "next_day_bias_score",
+    "next_day_plan",
+    "emotion_score",
+    "trend_location_score",
+    "setup_context_score",
     "reason_codes",
 ]
 
@@ -1945,10 +2042,17 @@ def apply_quality_overlays(row: dict, market_context: dict) -> dict:
         if transition_label in {"New Today", "Upgraded", "Fresh Setup To Buy"}:
             row["transition_label"] = "Event Risk"
 
+    next_day_bias = row.get("next_day_bias", "")
     if row.get("extension_state") == "EXTENDED":
         signal_quality = "EXTENDED"
     elif event_risk and actionable:
         signal_quality = "EVENT RISK"
+    elif next_day_bias == "BULLISH CONFIRM" and actionable:
+        signal_quality = "NEXT-DAY BULLISH"
+    elif next_day_bias == "CONSTRUCTIVE PULLBACK" and actionable:
+        signal_quality = "NEXT-DAY BUILDING"
+    elif next_day_bias in {"AVOID CHASE", "DEFENSIVE / EXIT RISK", "EXECUTION BLOCKED"}:
+        signal_quality = next_day_bias
     elif row.get("transition_label") in {"New Today", "Upgraded", "Fresh Setup To Buy"}:
         signal_quality = "FRESH"
     elif row.get("transition_label") == "Stale Buy":
@@ -2271,9 +2375,10 @@ def write_history_html(path: Path) -> None:
 def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, preflight_text: Optional[str] = None) -> None:
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
-        "setup", "adaptive_mode", "psychology", "hist_win_rate", "reward_risk",
+        "next_day_bias", "next_day_bias_score", "next_day_plan",
+        "setup", "adaptive_mode", "psychology", "reward_risk",
         "risk_pct_to_stop", "position_value_1k_risk",
-        "market_permission", "ticker_permission", "walk_forward_permission", "risk_permission",
+        "market_permission", "risk_permission",
         "volume_state", "entry_est", "stop_est", "target_est", "notes",
     ]
     display_columns = [col for col in display_columns if col in df.columns]
@@ -2299,16 +2404,16 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "score": "Score",
         "close": "Last",
         "day_change_pct": "Chg%",
+        "next_day_bias": "Next Day",
+        "next_day_bias_score": "Bias",
+        "next_day_plan": "Plan",
         "setup": "Setup",
         "adaptive_mode": "Mode",
         "psychology": "Tape",
-        "hist_win_rate": "Win%",
         "reward_risk": "R/R",
         "risk_pct_to_stop": "Risk%",
         "position_value_1k_risk": "Pos@1k",
         "market_permission": "Mkt",
-        "ticker_permission": "Ticker",
-        "walk_forward_permission": "WF",
         "risk_permission": "Risk",
         "volume_state": "Vol",
         "entry_est": "Ref Zone",
@@ -2370,7 +2475,9 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         if col == "adaptive_mode":
             short = html.escape(mode_labels.get(text, text.title()))
             return f"<span class='mode'>{short}</span>"
-        if col in {"score", "hist_win_rate", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
+        if col == "next_day_bias":
+            return f"<span class='badge setup'>{escaped}</span>" if text else "<span class='dash'>-</span>"
+        if col in {"score", "next_day_bias_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
             try:
                 return f"{float(value):.1f}"
             except (TypeError, ValueError):
@@ -2387,7 +2494,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return escaped
         return escaped
 
-    numeric_columns = {"score", "hist_win_rate", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
+    numeric_columns = {"score", "next_day_bias_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
 
     rows = []
     for _, row in visible_df.iterrows():

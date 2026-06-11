@@ -4,8 +4,6 @@ const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 
 const REQUIRED_GATES = [
   "market_permission",
-  "ticker_permission",
-  "walk_forward_permission",
   "risk_permission",
 ];
 
@@ -95,11 +93,11 @@ function auditSupabaseFallback() {
       transition_score: 35,
     },
   });
-  assert(legacy.action === "SETUP FORMING", "legacy ungated BUY row must be downgraded");
-  assert(gateValues(legacy).every((value) => value === "UNKNOWN"), "legacy row must carry UNKNOWN gates");
-  assert(adjustedScore(legacy) <= 49, "legacy ungated row must be capped below actionable rank");
-  assert(legacy.payload.signal_quality === "NEEDS GATE PROOF", "legacy ungated row must not keep FRESH quality");
-  assert(legacy.payload.transition_label === "Needs Gate Proof", "legacy ungated row must not keep promotion transition");
+  assert(legacy.action === "SETUP FORMING", "legacy missing-execution BUY row must be downgraded");
+  assert(gateValues(legacy).every((value) => value === "UNKNOWN"), "legacy row must carry UNKNOWN execution gates");
+  assert(adjustedScore(legacy) <= 49, "legacy missing-execution row must be capped below actionable rank");
+  assert(legacy.payload.signal_quality === "NEEDS EXECUTION PROOF", "legacy missing-execution row must not keep FRESH quality");
+  assert(legacy.payload.transition_label === "Needs Execution Proof", "legacy missing-execution row must not keep promotion transition");
 
   const unknownGated = rowDto({
     ticker: "TEST",
@@ -111,14 +109,12 @@ function auditSupabaseFallback() {
       signal_quality: "FRESH",
       transition_label: "Fresh Setup To Buy",
       market_permission: "UNKNOWN",
-      ticker_permission: "UNKNOWN",
-      walk_forward_permission: "UNKNOWN",
       risk_permission: "UNKNOWN",
     },
   });
-  assert(adjustedScore(unknownGated) <= 49, "UNKNOWN-gate row must be capped below actionable rank");
-  assert(unknownGated.payload.signal_quality === "NEEDS GATE PROOF", "UNKNOWN-gate row must not keep FRESH quality");
-  assert(unknownGated.payload.transition_label === "Needs Gate Proof", "UNKNOWN-gate row must not keep promotion transition");
+  assert(adjustedScore(unknownGated) <= 49, "UNKNOWN execution-gate row must be capped below actionable rank");
+  assert(unknownGated.payload.signal_quality === "NEEDS EXECUTION PROOF", "UNKNOWN execution-gate row must not keep FRESH quality");
+  assert(unknownGated.payload.transition_label === "Needs Execution Proof", "UNKNOWN execution-gate row must not keep promotion transition");
 
   const gated = rowDto({
     ticker: "TEST",
@@ -127,13 +123,15 @@ function auditSupabaseFallback() {
     score: 99,
     payload: {
       market_permission: "ALLOW",
-      ticker_permission: "ALLOW",
-      walk_forward_permission: "ALLOW",
       risk_permission: "ALLOW",
+      next_day_bias: "BULLISH CONFIRM",
+      next_day_bias_score: 82,
+      next_day_plan: "Confirm on Pine chart; prefer entry near the reference zone with the listed stop.",
     },
   });
-  assert(gated.action === "BUY CANDIDATE", "fully gated BUY row must be preserved");
-  assert(allGatesAllow(gated), "fully gated BUY row must carry ALLOW gates");
+  assert(gated.action === "BUY CANDIDATE", "execution-gated BUY row must be preserved");
+  assert(allGatesAllow(gated), "execution-gated BUY row must carry ALLOW gates");
+  assert(gated.payload.next_day_bias === "BULLISH CONFIRM", "execution-gated BUY row must keep next-day bias");
 
   return {
     legacyAction: legacy.action,
@@ -170,7 +168,7 @@ function auditTickerDetailMerge() {
       history_date: "2026-06-10",
       payload: {
         adjusted_score: 0,
-        signal_quality: "NEEDS GATE PROOF",
+        signal_quality: "NEEDS EXECUTION PROOF",
         market_permission: "UNKNOWN",
         ticker_permission: "UNKNOWN",
         walk_forward_permission: "UNKNOWN",
@@ -182,7 +180,7 @@ function auditTickerDetailMerge() {
   assert(merged.action === "EXIT PRESSURE", "ticker detail latest row must use snapshot action");
   assert(merged.adjusted_score === 12.7, "ticker detail latest row top-level score must match snapshot adjusted score");
   assert(merged.payload.signal_quality === "EXIT RISK", "ticker detail latest row must use snapshot quality");
-  assert(gateValues(merged).join(",") === "ALLOW,CAUTION,NONE,ALLOW", "ticker detail latest row must use snapshot gates");
+  assert(gateValues(merged).join(",") === "ALLOW,ALLOW", "ticker detail latest row must use snapshot execution gates");
 
   return {
     action: merged.action,

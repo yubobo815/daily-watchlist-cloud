@@ -73,12 +73,16 @@ const PAYLOAD_FIELDS = [
   "distance_from_ref_zone_pct",
   "entry_quality_label",
   "entry_quality_score",
+  "emotion_score",
   "event_risk",
   "extension_state",
   "freshness_penalty",
   "market_context",
   "market_permission",
   "market_regime_summary",
+  "next_day_bias",
+  "next_day_bias_score",
+  "next_day_plan",
   "price_progress_since_signal_pct",
   "profile_zone_limit_pct",
   "personality_abs_move_pct",
@@ -102,6 +106,8 @@ const PAYLOAD_FIELDS = [
   "ticker_worst_return",
   "transition_label",
   "transition_score",
+  "trend_location_score",
+  "setup_context_score",
   "volume_state",
   "walk_forward_permission",
   "wf_test_avg_return",
@@ -110,7 +116,7 @@ const PAYLOAD_FIELDS = [
   "position_value_1k_risk",
 ];
 
-const AUDIT_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
+const AUDIT_GATE_FIELDS = ["market_permission", "risk_permission"];
 const UNGATED_SCORE_CAP = 49;
 
 function assertSupabaseConfig() {
@@ -222,18 +228,16 @@ function applyAuditGateFallback(output) {
   }
 
   payload.market_permission = payload.market_permission || output.market_permission || "UNKNOWN";
-  payload.ticker_permission = payload.ticker_permission || output.ticker_permission || "UNKNOWN";
-  payload.walk_forward_permission = payload.walk_forward_permission || output.walk_forward_permission || "UNKNOWN";
   payload.risk_permission = payload.risk_permission || output.risk_permission || "UNKNOWN";
   payload.audit_gate_status = "MISSING";
-  payload.signal_quality = "NEEDS GATE PROOF";
-  payload.transition_label = "Needs Gate Proof";
+  payload.signal_quality = "NEEDS EXECUTION PROOF";
+  payload.transition_label = "Needs Execution Proof";
   payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -25, -25);
   payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
   output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
   output.score = capScore(output.score);
-  appendReasonCode(payload, "missing_audit_gates");
-  output.notes = [output.notes, "Live row lacks current audit-gate proof"].filter(Boolean).join("; ");
+  appendReasonCode(payload, "missing_execution_proof");
+  output.notes = [output.notes, "Live row lacks current market/risk execution proof"].filter(Boolean).join("; ");
   if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
     output.action = "SETUP FORMING";
     payload.signal_stage = "SETUP";

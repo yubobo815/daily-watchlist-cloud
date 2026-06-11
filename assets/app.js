@@ -21,6 +21,8 @@ const WATCHLIST_COLUMNS = [
   ["ticker", "Sym"],
   ["name", "Name"],
   ["action", "Signal"],
+  ["next_day_bias", "Next Day"],
+  ["next_day_plan", "Plan"],
   ["score", "Trend Quality"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
@@ -32,7 +34,6 @@ const WATCHLIST_COLUMNS = [
   ["target_est", "Target"],
   ["risk_pct_to_stop", "Risk%"],
   ["position_value_1k_risk", "Pos@1k"],
-  ["permission_gates", "Gates"],
   ["notes", "Behavior Note"]
 ];
 
@@ -87,13 +88,20 @@ const REASON_LABELS = {
   fast_breakout_entry: "Fast breakout entry",
   pullback_reclaim_entry: "Pullback/reclaim entry",
   market_regime_block: "Market regime block",
+  next_day_bullish_confirm: "Next-day bullish confirm",
+  next_day_constructive_pullback: "Constructive pullback",
+  next_day_watch_trend: "Watch trend personality",
+  avoid_chase: "Avoid chase",
+  execution_risk: "Execution risk",
+  historical_edge_caution: "Historical edge caution",
   ticker_edge_weak: "Ticker edge weak",
   ticker_caution: "Ticker caution",
   ticker_insufficient: "Ticker history insufficient",
   failed_walk_forward: "Failed walk-forward",
   walk_forward_insufficient: "Walk-forward insufficient",
   risk_governor_block: "Risk governor block",
-  missing_audit_gates: "Audit gates pending"
+  missing_audit_gates: "Audit gates pending",
+  missing_execution_proof: "Execution proof pending"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -584,6 +592,21 @@ function renderEntryQualityPill(row) {
   return `<span class="badge entry-pill entry-${entryQualityTone(row)}">${escapeHtml(label)}</span>`;
 }
 
+function nextDayBiasTone(value) {
+  const text = String(value || "").toUpperCase();
+  if (text.includes("BULLISH")) return "strong";
+  if (text.includes("CONSTRUCTIVE") || text.includes("WATCH")) return "constructive";
+  if (text.includes("AVOID") || text.includes("DEFENSIVE") || text.includes("BLOCK")) return "risk";
+  return "watch";
+}
+
+function renderNextDayBias(row) {
+  const bias = payloadValue(row, "next_day_bias") || "NEUTRAL";
+  const score = Number(payloadValue(row, "next_day_bias_score"));
+  const suffix = Number.isFinite(score) ? ` ${fmtNumber(score, 0)}` : "";
+  return `<span class="badge entry-pill entry-${nextDayBiasTone(bias)}">${escapeHtml(`${bias}${suffix}`)}</span>`;
+}
+
 function permissionShort(value) {
   const text = String(value || "").toUpperCase();
   if (text === "ALLOW") return "A";
@@ -606,8 +629,6 @@ function permissionTone(value) {
 function renderPermissionGates(row) {
   const gates = [
     ["M", payloadValue(row, "market_permission")],
-    ["T", payloadValue(row, "ticker_permission")],
-    ["W", payloadValue(row, "walk_forward_permission")],
     ["R", payloadValue(row, "risk_permission")]
   ];
   return `<span class="gate-stack">${gates.map(([label, value]) => `
@@ -618,8 +639,6 @@ function renderPermissionGates(row) {
 function auditGateValues(row) {
   return [
     payloadValue(row, "market_permission"),
-    payloadValue(row, "ticker_permission"),
-    payloadValue(row, "walk_forward_permission"),
     payloadValue(row, "risk_permission")
   ].map((value) => String(value || "UNKNOWN").toUpperCase());
 }
@@ -686,6 +705,7 @@ function behaviorDetail(row) {
   const tape = row.psychology || "Mixed tape";
   const mode = row.adaptive_mode || "Mixed mode";
   const note = String(row.notes || "").trim();
+  const nextDayPlan = String(payloadValue(row, "next_day_plan") || "").trim();
   const transition = transitionLabel(row);
   const distanceFromZone = payloadNumeric(row, "distance_from_ref_zone_pct");
   const marketContext = payloadValue(row, "market_context");
@@ -702,6 +722,7 @@ function behaviorDetail(row) {
     return `${pattern} behavior is forming, but it is lagging SPY/QQQ over the last 20 sessions.`;
   }
   if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
+  if (nextDayPlan) return nextDayPlan;
   if (note) return note;
   if (kind === "buy") return `${pattern} behavior with strong trend quality and ${tape.toLowerCase()} tape.`;
   if (kind === "continue") return `Trending: leadership behavior remains constructive, but fresh entry quality may be extended.`;
@@ -928,7 +949,7 @@ function displayTransitionLabel(label) {
 
 function transitionTone(label) {
   if (label === "Upgraded" || label === "New Today" || label === "Fresh Setup To Buy") return "up";
-  if (label === "Downgraded" || label === "Stale Buy" || label === "Needs Gate Proof") return "down";
+  if (label === "Downgraded" || label === "Stale Buy" || label === "Needs Gate Proof" || label === "Needs Execution Proof") return "down";
   if (label === "Extended" || label === "Changed") return "setup";
   return "quiet";
 }
@@ -1093,7 +1114,13 @@ function renderScoreBreakdown(row) {
   const personality = payloadValue(row, "personality_type") || "BALANCED";
   const entryQuality = entryQualityLabel(row);
   const entryQualityScore = Number(payloadValue(row, "entry_quality_score") || payloadValue(row, "buy_quality_score"));
+  const nextDayBias = payloadValue(row, "next_day_bias") || "NEUTRAL";
+  const nextDayScore = Number(payloadValue(row, "next_day_bias_score"));
+  const emotion = Number(payloadValue(row, "emotion_score"));
+  const location = Number(payloadValue(row, "trend_location_score"));
+  const setupContext = Number(payloadValue(row, "setup_context_score"));
   const items = [
+    ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
     ["Volume", volume],
@@ -1103,6 +1130,9 @@ function renderScoreBreakdown(row) {
       ? `${entryQuality}${Number.isFinite(entryQualityScore) ? ` ${fmtNumber(entryQualityScore, 0)}/100` : ""}`
       : "n/a"],
     ["Personality", String(personality).replace(/_/g, " ")],
+    ["Emotion", Number.isFinite(emotion) ? `${fmtNumber(emotion, 0)}/100` : "n/a"],
+    ["MA Location", Number.isFinite(location) ? `${fmtNumber(location, 0)}/100` : "n/a"],
+    ["Setup Context", Number.isFinite(setupContext) ? `${fmtNumber(setupContext, 0)}/100` : "n/a"],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"]
   ];
   return `
@@ -1180,7 +1210,7 @@ function runHealthStatus(runInfo, rows = []) {
   const tone = !hasRows ? "bad" : hasIssue ? "warn" : "ok";
   const label = tone === "bad" ? "Data issue" : tone === "warn" ? "Data caution" : "Live data healthy";
   const caveats = [
-    pendingGates ? `${pendingGates} audit-gate pending` : "",
+    pendingGates ? `${pendingGates} execution proof pending` : "",
     stale ? `${stale} cached` : "",
     failed ? `${failed} failed` : "",
     liveOk === false ? "source degraded" : "",
@@ -1214,7 +1244,7 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   if (runStatus) {
     const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
     const pendingGates = auditGatePendingCount(rows);
-    const gateSummary = pendingGates ? ` · ${pendingGates} audit-gate pending` : "";
+    const gateSummary = pendingGates ? ` · ${pendingGates} execution proof pending` : "";
     runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}${gateSummary}`;
     runStatus.classList.toggle("warn", Boolean(
       runInfo && (
@@ -1371,12 +1401,13 @@ function renderWatchlistCell(row, key) {
   if (key === "setup") {
     return `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
+  if (key === "next_day_bias") return renderNextDayBias(row);
+  if (key === "next_day_plan") return `<span class="behavior-detail">${escapeHtml(payloadValue(row, "next_day_plan") || "")}</span>`;
   if (key === "notes") {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
   }
   if (key === "score") return `<span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>`;
   if (key === "day_change_pct") return renderMovePct(row[key]);
-  if (key === "permission_gates") return renderPermissionGates(row);
   if (key === "risk_pct_to_stop") return escapeHtml(fmtNumber(payloadValue(row, "risk_pct_to_stop"), 1));
   if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
@@ -1390,6 +1421,8 @@ function searchableRowText(row) {
     setupLabel(row.setup),
     strengthLabel(row),
     entryQualityLabel(row),
+    payloadValue(row, "next_day_bias"),
+    payloadValue(row, "next_day_plan"),
     payloadValue(row, "signal_quality"),
     payloadValue(row, "market_context"),
     payloadValue(row, "market_permission"),
