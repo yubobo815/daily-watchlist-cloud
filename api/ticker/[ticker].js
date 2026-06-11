@@ -21,7 +21,21 @@ function withTimeout(promise, milliseconds, fallback) {
   ]);
 }
 
-module.exports = async function handler(request, response) {
+function mergeSnapshotIntoLatestHistory(snapshot, historyRow) {
+  return {
+    ...historyRow,
+    ...snapshot,
+    name: snapshot.name || historyRow.name,
+    data_date: snapshot.data_date || historyRow.data_date,
+    adjusted_score: snapshot.adjusted_score ?? snapshot.payload?.adjusted_score ?? historyRow.adjusted_score,
+    payload: {
+      ...(historyRow.payload || {}),
+      ...(snapshot.payload || {}),
+    },
+  };
+}
+
+async function handler(request, response) {
   const ticker = normalizeTicker(request.query?.ticker);
   if (!isValidTicker(ticker)) {
     response.status(400).json({ error: "Invalid ticker." });
@@ -46,16 +60,7 @@ module.exports = async function handler(request, response) {
     const snapshot = snapshotRows[0] ? rowDto(snapshotRows[0]) : null;
     const rows = historyRows.map(rowDto);
     if (snapshot && rows[0]) {
-      rows[0] = {
-        ...rows[0],
-        ...snapshot,
-        name: snapshot.name || rows[0].name,
-        data_date: snapshot.data_date || rows[0].data_date,
-        payload: {
-          ...(rows[0].payload || {}),
-          ...(snapshot.payload || {}),
-        },
-      };
+      rows[0] = mergeSnapshotIntoLatestHistory(snapshot, rows[0]);
     }
 
     const profileReady = profile && Object.keys(profile).length > 0;
@@ -76,4 +81,7 @@ module.exports = async function handler(request, response) {
     response.setHeader("Cache-Control", "no-store");
     response.status(200).json(staticTickerPayload(ticker, profile));
   }
-};
+}
+
+module.exports = handler;
+module.exports.mergeSnapshotIntoLatestHistory = mergeSnapshotIntoLatestHistory;

@@ -1,5 +1,6 @@
 const { staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
 const { rowDto } = require("../api/_supabase");
+const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 
 const REQUIRED_GATES = [
   "market_permission",
@@ -147,10 +148,55 @@ function auditSupabaseFallback() {
   };
 }
 
+function auditTickerDetailMerge() {
+  const merged = mergeSnapshotIntoLatestHistory(
+    {
+      ticker: "TEST",
+      action: "EXIT PRESSURE",
+      adjusted_score: undefined,
+      payload: {
+        adjusted_score: 12.7,
+        signal_quality: "EXIT RISK",
+        market_permission: "ALLOW",
+        ticker_permission: "CAUTION",
+        walk_forward_permission: "NONE",
+        risk_permission: "ALLOW",
+      },
+    },
+    {
+      ticker: "TEST",
+      action: "WAIT",
+      adjusted_score: 0,
+      history_date: "2026-06-10",
+      payload: {
+        adjusted_score: 0,
+        signal_quality: "NEEDS GATE PROOF",
+        market_permission: "UNKNOWN",
+        ticker_permission: "UNKNOWN",
+        walk_forward_permission: "UNKNOWN",
+        risk_permission: "UNKNOWN",
+      },
+    }
+  );
+
+  assert(merged.action === "EXIT PRESSURE", "ticker detail latest row must use snapshot action");
+  assert(merged.adjusted_score === 12.7, "ticker detail latest row top-level score must match snapshot adjusted score");
+  assert(merged.payload.signal_quality === "EXIT RISK", "ticker detail latest row must use snapshot quality");
+  assert(gateValues(merged).join(",") === "ALLOW,CAUTION,NONE,ALLOW", "ticker detail latest row must use snapshot gates");
+
+  return {
+    action: merged.action,
+    adjustedScore: merged.adjusted_score,
+    quality: merged.payload.signal_quality,
+    gates: gateValues(merged),
+  };
+}
+
 const result = {
   staticFallback: auditStaticFallback(),
   staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
   supabaseFallback: auditSupabaseFallback(),
+  tickerDetailMerge: auditTickerDetailMerge(),
 };
 
 console.log(JSON.stringify(result, null, 2));
