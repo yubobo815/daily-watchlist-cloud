@@ -36,7 +36,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            if [[ "${{ github.event.head_commit.message }}" == *"[refresh-watchlist]"* ]]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
