@@ -81,7 +81,7 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           DATA_PROVIDER_PRIORITY: polygon,twelvedata,stooq,yahoo
-        run: python daily_watchlist_overview.py --refresh --skip-profiles
+        run: python daily_watchlist_overview.py --refresh --skip-profiles --history-days 5
 
       - name: Prepare Pages artifact
         if: steps.time_gate.outputs.run == 'true'
