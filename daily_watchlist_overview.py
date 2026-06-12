@@ -343,7 +343,7 @@ def record_stale_cache_fallback(fallbacks: list[dict], ticker: str, df: pd.DataF
 def normalize_provider_ticker(ticker: str, provider: str) -> str:
     symbol = display_ticker(ticker)
     if provider == "polygon":
-        return symbol.replace("BRK.B", "BRK.B")
+        return symbol
     if provider == "twelvedata":
         return symbol
     return ticker

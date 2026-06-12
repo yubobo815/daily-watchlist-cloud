@@ -402,3 +402,5 @@ drop policy if exists "Public read focus tickers" on public.focus_tickers;
 drop policy if exists "Public write focus tickers" on public.focus_tickers;
 drop policy if exists "Server API read focus tickers" on public.focus_tickers;
 drop policy if exists "Server API write focus tickers" on public.focus_tickers;
+
+select pg_notify('pgrst', 'reload schema');

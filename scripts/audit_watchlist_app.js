@@ -42,16 +42,22 @@ function auditStaticFallback() {
   const missingGates = payload.rows.filter((row) => gateValues(row).some((value) => !value));
   const unsafeBuys = payload.rows.filter((row) => isBuyLike(row) && !allGatesAllow(row));
   const overRankedMissingGates = payload.rows.filter((row) => hasMissingGate(row) && adjustedScore(row) > 49);
+  const nonStaticRows = payload.rows.filter((row) => row.payload?.data_provider !== "static_bundle");
+  const unblockedStaticRows = payload.rows.filter((row) => row.payload?.freshness_block !== "YES");
 
   assert(missingGates.length === 0, `static fallback rows missing gate payloads: ${missingGates.length}`);
   assert(unsafeBuys.length === 0, `static fallback exposes ungated BUY-like rows: ${unsafeBuys.length}`);
   assert(overRankedMissingGates.length === 0, `static fallback over-ranks missing-gate rows: ${overRankedMissingGates.length}`);
+  assert(nonStaticRows.length === 0, `static fallback rows must identify bundled source: ${nonStaticRows.length}`);
+  assert(unblockedStaticRows.length === 0, `static fallback rows must block execution: ${unblockedStaticRows.length}`);
+  assert(Number(payload.runInfo.payload?.stale_execution_blocks || 0) === payload.rows.length, "static fallback run health must count all rows as execution-blocked");
 
   return {
     rows: payload.rows.length,
     missingGates: missingGates.length,
     unsafeBuys: unsafeBuys.length,
     overRankedMissingGates: overRankedMissingGates.length,
+    staleExecutionBlocks: payload.runInfo.payload.stale_execution_blocks,
   };
 }
 
@@ -267,12 +273,14 @@ function auditRunHealthProviderPayload() {
     payload: {
       data_provider_counts: { polygon: 185, twelvedata: 3 },
       data_provider_priority: ["polygon", "twelvedata", "stooq", "yahoo"],
+      failures: [{ ticker: "FAIL", error: "provider timeout" }],
       stale_execution_blocks: 0,
     },
   };
   const dto = runDto(run);
   assert(dto.payload.data_provider_counts.polygon === 185, "run health must expose provider counts");
   assert(dto.payload.data_provider_priority.includes("stooq"), "run health must expose provider priority");
+  assert(dto.payload.failed_symbols[0]?.ticker === "FAIL", "run health must expose Python failures as failed symbols");
   return dto.payload;
 }
 

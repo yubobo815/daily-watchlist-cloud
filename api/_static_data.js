@@ -114,6 +114,22 @@ function hasKnownAuditGate(value) {
 function conservativeFallbackRow(row) {
   const next = { ...(row || {}) };
   const payload = next.payload && typeof next.payload === "object" ? { ...next.payload } : {};
+  payload.data_provider = "static_bundle";
+  payload.data_provider_status = "STALE_STATIC_FALLBACK";
+  payload.data_provider_error = payload.data_provider_error || "Live database unavailable; bundled static data is not execution-grade.";
+  payload.data_age_days = payload.data_age_days ?? "";
+  payload.freshness_block = "YES";
+  payload.freshness_status = "STATIC_FALLBACK_BLOCK";
+  payload.freshness_plan = "Execution blocked: this is bundled fallback data. Refresh live Supabase data before acting.";
+  payload.buy_tier = payload.buy_tier === "EXIT RISK" ? payload.buy_tier : "SETUP ONLY";
+  payload.execution_priority = Math.max(Number(payload.execution_priority || 4), 4);
+  payload.execution_plan = payload.freshness_plan;
+  payload.signal_quality = "STALE DATA";
+  payload.next_day_bias = "EXECUTION BLOCKED";
+  payload.next_day_plan = payload.freshness_plan;
+  appendReasonCode(payload, "static_fallback_block");
+  appendReasonCode(payload, "data_stale_block");
+
   const hasAllGates = AUDIT_GATE_FIELDS.every((field) => hasKnownAuditGate(next[field] || payload[field]));
   if (!hasAllGates) {
     payload.market_permission = payload.market_permission || next.market_permission || "UNKNOWN";
@@ -134,6 +150,13 @@ function conservativeFallbackRow(row) {
       payload.signal_stage = "SETUP";
     }
   }
+  if (next.action === "BUY CANDIDATE" || next.action === "STRONG CONTINUATION") {
+    next.action = "SETUP FORMING";
+    payload.signal_stage = "SETUP";
+  }
+  payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
+  next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
+  next.score = capScore(next.score);
   next.payload = payload;
   return applyAntiSignalFallback(next);
 }
@@ -159,8 +182,12 @@ function staticLatestPayload() {
       scanner_version: "static-fallback",
       notes: "Static fallback served by Vercel API.",
       payload: {
+        data_provider_counts: { static_bundle: rows.length },
+        data_provider_priority: ["supabase", "static_bundle"],
         failed_symbols: [],
         stale_cache_fallbacks: [],
+        stale_execution_blocks: rows.length,
+        max_execution_data_age_days: 0,
       },
     },
   };
@@ -188,8 +215,12 @@ function staticTickerPayload(ticker, profile = {}) {
       live_access_message: "Using bundled published data because the live database is unavailable.",
       scanner_version: "static-fallback",
       payload: {
+        data_provider_counts: { static_bundle: snapshot ? 1 : 0 },
+        data_provider_priority: ["supabase", "static_bundle"],
         failed_symbols: [],
         stale_cache_fallbacks: [],
+        stale_execution_blocks: snapshot ? 1 : 0,
+        max_execution_data_age_days: 0,
       },
     },
     profile,

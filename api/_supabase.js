@@ -504,10 +504,13 @@ function runDto(row) {
     if (field !== "payload" && row[field] !== undefined) output[field] = row[field];
   });
   const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+  const failedSymbols = Array.isArray(payload.failed_symbols)
+    ? payload.failed_symbols
+    : (Array.isArray(payload.failures) ? payload.failures : []);
   output.payload = {
     data_provider_counts: payload.data_provider_counts && typeof payload.data_provider_counts === "object" ? payload.data_provider_counts : {},
     data_provider_priority: Array.isArray(payload.data_provider_priority) ? payload.data_provider_priority : [],
-    failed_symbols: Array.isArray(payload.failed_symbols) ? payload.failed_symbols.slice(0, 25) : [],
+    failed_symbols: failedSymbols.slice(0, 25),
     stale_cache_fallbacks: Array.isArray(payload.stale_cache_fallbacks) ? payload.stale_cache_fallbacks.slice(0, 25) : [],
     stale_execution_blocks: Number(payload.stale_execution_blocks || 0),
     signal_outcomes: payload.signal_outcomes && typeof payload.signal_outcomes === "object" ? payload.signal_outcomes : {},
