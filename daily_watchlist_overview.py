@@ -1003,6 +1003,51 @@ def supabase_delete_run_history_before(run_date: str, min_history_date: str) -> 
         raise RuntimeError(f"Supabase obsolete-history cleanup failed with HTTP {exc.code}: {body}") from exc
 
 
+def postgrest_in_list(values: list[str]) -> str:
+    return ",".join(urllib.parse.quote(str(value), safe="") for value in values if str(value))
+
+
+def supabase_delete_run_not_in(table: str, run_date: str, column: str, allowed_values: list[str]) -> None:
+    url, key = supabase_credentials()
+    values = sorted({str(value) for value in allowed_values if str(value)})
+    if not url or not key or not values:
+        return
+
+    endpoint = (
+        f"{url}/rest/v1/{table}"
+        f"?run_date=eq.{urllib.parse.quote(str(run_date))}"
+        f"&{urllib.parse.quote(column)}=not.in.({postgrest_in_list(values)})"
+    )
+    req = urllib.request.Request(
+        endpoint,
+        method="DELETE",
+        headers=supabase_headers(key),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in {200, 202, 204}:
+                raise RuntimeError(f"Supabase replacement cleanup for {table}.{column} returned HTTP {resp.status}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase replacement cleanup for {table}.{column} failed with HTTP {exc.code}: {body}") from exc
+
+
+def cleanup_supabase_run_replacement(run_date: str, report_records: list[dict], history_records: list[dict]) -> None:
+    tickers = sorted({str(record.get("ticker") or "").strip().upper() for record in report_records if record.get("ticker")})
+    history_dates = sorted({str(record.get("history_date") or "") for record in history_records if record.get("history_date")})
+
+    if tickers:
+        supabase_delete_run_not_in("watchlist_snapshots", run_date, "ticker", tickers)
+        supabase_delete_run_not_in("watchlist_behavior_history", run_date, "ticker", tickers)
+    if history_dates:
+        supabase_delete_run_not_in("watchlist_behavior_history", run_date, "history_date", history_dates)
+
+    print(
+        f"Supabase replacement cleanup complete: kept {len(tickers)} ticker(s) "
+        f"and {len(history_dates)} history date(s) for {run_date}."
+    )
+
+
 def cleanup_supabase_obsolete_history(run_date: str, history_records: list[dict]) -> None:
     history_dates = sorted({
         str(record.get("history_date") or "")
@@ -1233,10 +1278,15 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
         outcome_synced = len(outcome_records)
     except RuntimeError as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
-    try:
-        cleanup_supabase_obsolete_history(run_date, history_records)
-    except RuntimeError as exc:
-        print(f"Supabase obsolete-history cleanup skipped: {exc}")
+    if snapshot_synced == len(report_records) and history_synced == len(history_records):
+        try:
+            cleanup_supabase_run_replacement(run_date, report_records, history_records)
+        except RuntimeError as exc:
+            print(f"Supabase replacement cleanup skipped: {exc}")
+        try:
+            cleanup_supabase_obsolete_history(run_date, history_records)
+        except RuntimeError as exc:
+            print(f"Supabase obsolete-history cleanup skipped: {exc}")
     try:
         cleanup_supabase_failed_tickers(run_date, run_metadata)
     except RuntimeError as exc:
