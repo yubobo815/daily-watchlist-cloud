@@ -276,6 +276,10 @@ alter table public.watchlist_snapshots add column if not exists learning_trap_av
 alter table public.watchlist_snapshots add column if not exists learning_avg_score numeric;
 alter table public.watchlist_snapshots add column if not exists learning_adjustment numeric;
 alter table public.watchlist_snapshots add column if not exists learning_plan text;
+alter table public.watchlist_snapshots add column if not exists contextual_overlay text;
+alter table public.watchlist_snapshots add column if not exists contextual_score_adjustment numeric;
+alter table public.watchlist_snapshots add column if not exists contextual_plan text;
+alter table public.watchlist_snapshots add column if not exists execution_block text;
 alter table public.watchlist_snapshots add column if not exists data_provider text;
 alter table public.watchlist_snapshots add column if not exists data_provider_status text;
 alter table public.watchlist_snapshots add column if not exists data_provider_latency_ms numeric;
@@ -337,6 +341,10 @@ alter table public.watchlist_behavior_history add column if not exists learning_
 alter table public.watchlist_behavior_history add column if not exists learning_avg_score numeric;
 alter table public.watchlist_behavior_history add column if not exists learning_adjustment numeric;
 alter table public.watchlist_behavior_history add column if not exists learning_plan text;
+alter table public.watchlist_behavior_history add column if not exists contextual_overlay text;
+alter table public.watchlist_behavior_history add column if not exists contextual_score_adjustment numeric;
+alter table public.watchlist_behavior_history add column if not exists contextual_plan text;
+alter table public.watchlist_behavior_history add column if not exists execution_block text;
 alter table public.watchlist_behavior_history add column if not exists data_provider text;
 alter table public.watchlist_behavior_history add column if not exists data_provider_status text;
 alter table public.watchlist_behavior_history add column if not exists data_provider_latency_ms numeric;

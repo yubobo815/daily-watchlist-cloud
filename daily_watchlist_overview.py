@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.12-candle-operator-demand-control"
+SCANNER_VERSION = "2026.06.12-context-overlays"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -52,6 +52,12 @@ SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
 LEARNING_MIN_SAMPLES = int(os.getenv("LEARNING_MIN_SAMPLES", "3"))
 LEARNING_ADJUSTMENT_CAP = float(os.getenv("LEARNING_ADJUSTMENT_CAP", "10"))
+POST_EXIT_COOLDOWN_BARS = int(os.getenv("POST_EXIT_COOLDOWN_BARS", "2"))
+POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
+PROFIT_PROTECT_LOOKBACK_BARS = int(os.getenv("PROFIT_PROTECT_LOOKBACK_BARS", "5"))
+PROFIT_PROTECT_TRIGGER_GAIN_PCT = float(os.getenv("PROFIT_PROTECT_TRIGGER_GAIN_PCT", "7"))
+PROFIT_PROTECT_GIVEBACK_PCT = float(os.getenv("PROFIT_PROTECT_GIVEBACK_PCT", "4"))
+VOLATILE_TREND_MAX_SUPPLY_SCORE = float(os.getenv("VOLATILE_TREND_MAX_SUPPLY_SCORE", "45"))
 DATA_PROVIDER_PRIORITY = [
     provider.strip().lower()
     for provider in os.getenv("DATA_PROVIDER_PRIORITY", "polygon,twelvedata,stooq,yahoo").split(",")
@@ -855,6 +861,10 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "learning_avg_score",
     "learning_adjustment",
     "learning_plan",
+    "contextual_overlay",
+    "contextual_score_adjustment",
+    "contextual_plan",
+    "execution_block",
     "data_provider",
     "data_provider_status",
     "data_provider_latency_ms",
@@ -1130,6 +1140,10 @@ def optional_signal_values(row: dict) -> dict:
         "learning_avg_score": numeric_or_none(row.get("learning_avg_score")),
         "learning_adjustment": numeric_or_none(row.get("learning_adjustment")),
         "learning_plan": row.get("learning_plan"),
+        "contextual_overlay": row.get("contextual_overlay"),
+        "contextual_score_adjustment": numeric_or_none(row.get("contextual_score_adjustment")),
+        "contextual_plan": row.get("contextual_plan"),
+        "execution_block": row.get("execution_block"),
         "data_provider": row.get("data_provider"),
         "data_provider_status": row.get("data_provider_status"),
         "data_provider_latency_ms": numeric_or_none(row.get("data_provider_latency_ms")),
@@ -1570,6 +1584,171 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
     if action == "EXIT PRESSURE":
         return "EXIT RISK", 8, "Risk pressure is elevated."
     return "NO TRADE", 9 if score >= 25 else 10, "No actionable edge."
+
+
+def row_float(row: dict, field: str, default: float = 0.0) -> float:
+    value = numeric_or_none(row.get(field))
+    return float(value) if value is not None else default
+
+
+def append_context_note(row: dict, note: str) -> None:
+    row["notes"] = "; ".join([item for item in [row.get("notes"), note] if item])
+
+
+def set_context_overlay(row: dict, label: str, adjustment: float, plan: str) -> None:
+    row["contextual_overlay"] = label
+    row["contextual_score_adjustment"] = round(float(adjustment), 1)
+    row["contextual_plan"] = plan
+    append_context_note(row, plan)
+
+
+def post_exit_reclaim_is_strong(row: dict, prior_exit: dict) -> bool:
+    close = row_float(row, "close")
+    prior_close = row_float(prior_exit, "close")
+    reclaim_pct = (close / prior_close - 1) * 100 if close > 0 and prior_close > 0 else 0.0
+    operator_state = str(row.get("operator_state") or "").upper()
+    next_day = str(row.get("next_day_bias") or "").upper()
+    mode = str(row.get("adaptive_mode") or "").upper()
+    personality = str(row.get("personality_type") or "").upper()
+    supply_score = max(row_float(row, "distribution_score"), row_float(row, "bull_trap_score"))
+    standard_reclaim = (
+        reclaim_pct >= POST_EXIT_RECLAIM_MIN_PCT
+        and next_day == "BULLISH CONFIRM"
+        and operator_state in {"MARKUP / DEMAND CONTROL", "ACCUMULATION", "BEAR_TRAP / SQUEEZE WATCH"}
+        and row_float(row, "buyer_score") >= 75.0
+        and supply_score < 35.0
+    )
+    trend_reclaim = (
+        reclaim_pct >= 2.5
+        and next_day == "BULLISH CONFIRM"
+        and mode in {"POWER TREND", "STEADY TREND"}
+        and personality != "RANGE_BOUND"
+        and operator_state == "MARKUP / DEMAND CONTROL"
+        and row_float(row, "demand_control_score") >= 80.0
+        and row_float(row, "buyer_score") >= 65.0
+        and supply_score < 30.0
+    )
+    return standard_reclaim or trend_reclaim
+
+
+def apply_post_exit_cooldown(row: dict, prior_rows: list[dict]) -> bool:
+    if row.get("action") not in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+        return False
+    recent = prior_rows[-POST_EXIT_COOLDOWN_BARS:] if POST_EXIT_COOLDOWN_BARS > 0 else []
+    prior_exit = next((item for item in reversed(recent) if item.get("action") == "EXIT PRESSURE"), None)
+    if not prior_exit or post_exit_reclaim_is_strong(row, prior_exit):
+        return False
+
+    row["action"] = "SETUP FORMING"
+    row["signal_stage"] = "SETUP"
+    row["next_day_bias"] = "EXECUTION BLOCKED"
+    row["next_day_plan"] = "Post-exit cooldown: require a stronger reclaim before upgrading back to BUY."
+    row["execution_block"] = "YES"
+    append_unique_reason(row, "post_exit_cooldown")
+    set_context_overlay(
+        row,
+        "POST-EXIT COOLDOWN",
+        -35.0,
+        "EXIT pressure was too recent; downgrade any ordinary rebound to SETUP until buyers prove control.",
+    )
+    return True
+
+
+def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[dict]:
+    start = max(0, index - PROFIT_PROTECT_LOOKBACK_BARS)
+    current_close = row_float(history_rows[index], "close")
+    if current_close <= 0:
+        return None
+
+    best_context: Optional[dict] = None
+    for buy_index in range(index - 1, start - 1, -1):
+        buy_row = history_rows[buy_index]
+        if buy_row.get("action") not in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            continue
+        buy_close = row_float(buy_row, "close")
+        if buy_close <= 0:
+            continue
+        closes = [row_float(item, "close") for item in history_rows[buy_index : index + 1]]
+        peak_close = max([value for value in closes if value > 0], default=0.0)
+        if peak_close <= 0:
+            continue
+        peak_gain_pct = (peak_close / buy_close - 1) * 100
+        giveback_pct = (current_close / peak_close - 1) * 100
+        context = {
+            "buy_index": buy_index,
+            "buy_date": buy_row.get("date"),
+            "peak_gain_pct": peak_gain_pct,
+            "giveback_pct": giveback_pct,
+        }
+        if not best_context or peak_gain_pct > float(best_context["peak_gain_pct"]):
+            best_context = context
+    return best_context
+
+
+def apply_profit_protection(row: dict, history_rows: list[dict], index: int) -> bool:
+    context = recent_buy_profit_context(history_rows, index)
+    if not context or float(context["peak_gain_pct"]) < PROFIT_PROTECT_TRIGGER_GAIN_PCT:
+        return False
+
+    action = row.get("action")
+    giveback_pct = float(context["giveback_pct"])
+    should_protect = (
+        action in {"WATCH TREND", "EXIT PRESSURE"}
+        or row.get("extension_state") == "EXTENDED"
+        or giveback_pct <= -PROFIT_PROTECT_GIVEBACK_PCT
+    )
+    if not should_protect:
+        return False
+
+    row["next_day_bias"] = "DEFENSIVE / EXIT RISK"
+    row["next_day_plan"] = "Profit-protection mode: a recent BUY already worked; do not let a trend score hide giveback risk."
+    if action in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+        row["action"] = "SETUP FORMING"
+        row["signal_stage"] = "SETUP"
+        row["execution_block"] = "YES"
+    append_unique_reason(row, "profit_protect")
+    set_context_overlay(
+        row,
+        "PROFIT PROTECT",
+        -24.0,
+        f"Recent BUY from {context['buy_date']} reached +{float(context['peak_gain_pct']):.1f}%; protect gains before adding exposure.",
+    )
+    return True
+
+
+def apply_volatile_trend_hold(row: dict) -> bool:
+    if row.get("action") != "EXIT PRESSURE":
+        return False
+    if row.get("personality_type") != "HIGH_BETA":
+        return False
+    if row.get("extension_state") == "EXTENDED":
+        return False
+    hard_supply = max(
+        row_float(row, "distribution_score"),
+        row_float(row, "bull_trap_score"),
+        row_float(row, "short_pressure_proxy"),
+    )
+    if hard_supply >= VOLATILE_TREND_MAX_SUPPLY_SCORE:
+        return False
+    if str(row.get("operator_state") or "").upper() in {"BULL_TRAP", "DISTRIBUTION"}:
+        return False
+    if str(row.get("adaptive_mode") or "").upper() not in {"POWER TREND", "STEADY TREND", "HIGH VOLATILITY"}:
+        return False
+    if row_float(row, "demand_control_score") < 45.0 and row_float(row, "absorption_score") < 45.0:
+        return False
+
+    row["action"] = "WATCH TREND"
+    row["signal_stage"] = "WATCH"
+    row["next_day_bias"] = "WATCH TREND"
+    row["next_day_plan"] = "High-beta trend hold: volatility is elevated, but supply evidence is not strong enough for EXIT."
+    append_unique_reason(row, "volatile_trend_hold")
+    set_context_overlay(
+        row,
+        "VOLATILE TREND HOLD",
+        14.0,
+        "High-beta trend personality: treat ordinary volatility as WATCH unless distribution or bull-trap evidence is clear.",
+    )
+    return True
 
 
 def apply_buy_tiers(rows: list[dict]) -> list[dict]:
@@ -3213,6 +3392,7 @@ def enrich_signal_transitions(history_rows: list[dict]) -> list[dict]:
         previous_rank = signal_stage_rank(previous_action)
         transition_label = "New Today"
         transition_score = 0.0
+        context_adjustment = 0.0
 
         if previous:
             if action == previous_action and row.get("setup") == previous.get("setup"):
@@ -3233,6 +3413,17 @@ def enrich_signal_transitions(history_rows: list[dict]) -> list[dict]:
             else:
                 transition_label = "Changed"
                 transition_score = 5.0
+
+        if apply_post_exit_cooldown(row, enriched):
+            transition_label = "Post-Exit Cooldown"
+            context_adjustment += row_float(row, "contextual_score_adjustment")
+        if apply_profit_protection(row, history_rows, index):
+            transition_label = "Profit Protect"
+            context_adjustment += row_float(row, "contextual_score_adjustment")
+        if apply_volatile_trend_hold(row):
+            transition_label = "Volatile Trend Hold"
+            context_adjustment += row_float(row, "contextual_score_adjustment")
+        action = row.get("action", "")
 
         streak_start = index
         while streak_start > 0 and history_rows[streak_start - 1].get("action") == action:
@@ -3260,12 +3451,12 @@ def enrich_signal_transitions(history_rows: list[dict]) -> list[dict]:
             transition_label = "Extended"
             reason_codes.append("extended_from_zone")
 
-        adjusted_score = max(0.0, min(128.0, float(numeric_or_none(row.get("score")) or 0) + transition_score - stale_penalty))
+        adjusted_score = max(0.0, min(128.0, float(numeric_or_none(row.get("score")) or 0) + transition_score + context_adjustment - stale_penalty))
         row.update(
             {
                 "signal_stage": signal_stage(action),
                 "transition_label": transition_label,
-                "transition_score": round(float(transition_score - stale_penalty), 1),
+                "transition_score": round(float(transition_score + context_adjustment - stale_penalty), 1),
                 "signal_age_days": signal_age_days,
                 "price_progress_since_signal_pct": round(float(price_progress), 2) if price_progress is not None else "",
                 "freshness_penalty": round(float(stale_penalty), 1),
@@ -3332,6 +3523,10 @@ LATEST_SIGNAL_FIELDS = [
     "anti_signal_score",
     "anti_signal_level",
     "anti_signal_plan",
+    "contextual_overlay",
+    "contextual_score_adjustment",
+    "contextual_plan",
+    "execution_block",
     "reason_codes",
 ]
 
@@ -3350,6 +3545,22 @@ def apply_latest_signal_context(row: dict, ticker_history: list[dict]) -> dict:
     for field in LATEST_SIGNAL_FIELDS:
         if field in latest:
             row[field] = latest[field]
+    latest_date = str(latest.get("date") or "")
+    row_date = str(row.get("date") or "")
+    if latest_date and latest_date == row_date:
+        overlay = str(latest.get("contextual_overlay") or "").upper()
+        if latest.get("execution_block") == "YES" and row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            row["action"] = "SETUP FORMING"
+            row["signal_stage"] = "SETUP"
+            row["score"] = min(row_float(row, "score"), 69.0)
+            row["adjusted_score"] = min(row_float(row, "adjusted_score", row_float(row, "score")), 49.0)
+            append_unique_reason(row, "latest_context_execution_block")
+        elif overlay == "VOLATILE TREND HOLD" and row.get("action") == "EXIT PRESSURE":
+            row["action"] = "WATCH TREND"
+            row["signal_stage"] = "WATCH"
+            row["score"] = max(row_float(row, "score"), 50.0)
+            row["adjusted_score"] = max(row_float(row, "adjusted_score", row_float(row, "score")), 50.0)
+            append_unique_reason(row, "latest_context_volatile_hold")
     return row
 
 
@@ -3428,7 +3639,14 @@ def apply_quality_overlays(row: dict, market_context: dict) -> dict:
             row["transition_label"] = "Event Risk"
 
     next_day_bias = row.get("next_day_bias", "")
-    if row.get("extension_state") == "EXTENDED":
+    overlay = str(row.get("contextual_overlay") or "").upper()
+    if overlay == "POST-EXIT COOLDOWN":
+        signal_quality = "COOLDOWN"
+    elif overlay == "PROFIT PROTECT":
+        signal_quality = "PROFIT PROTECT"
+    elif overlay == "VOLATILE TREND HOLD":
+        signal_quality = "VOLATILE HOLD"
+    elif row.get("extension_state") == "EXTENDED":
         signal_quality = "EXTENDED"
     elif event_risk and actionable:
         signal_quality = "EVENT RISK"
@@ -3774,6 +3992,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
         "buy_tier",
+        "contextual_overlay",
         "last_outcome_label", "last_outcome_return_pct",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
         "operator_state", "operator_state_score", "operator_state_plan",

@@ -785,6 +785,7 @@ function behaviorDetail(row) {
   const note = String(row.notes || "").trim();
   const antiPlan = String(payloadValue(row, "anti_signal_plan") || "").trim();
   const antiLevel = String(payloadValue(row, "anti_signal_level") || "NONE").toUpperCase();
+  const contextualPlan = String(payloadValue(row, "contextual_plan") || "").trim();
   const nextDayPlan = String(payloadValue(row, "next_day_plan") || "").trim();
   const operatorStatePlan = String(payloadValue(row, "operator_state_plan") || "").trim();
   const operatorPlan = String(payloadValue(row, "operator_plan") || "").trim();
@@ -796,6 +797,7 @@ function behaviorDetail(row) {
   const marketContext = payloadValue(row, "market_context");
   const daysToReport = payloadValue(row, "days_to_report");
 
+  if (contextualPlan) return contextualPlan;
   if (antiLevel === "BLOCK" || antiLevel === "CAUTION") return antiPlan || "Anti-signal penalty active; downgrade execution.";
   if (payloadValue(row, "extension_state") === "EXTENDED") {
     const distance = distanceFromZone ? `${fmtNumber(distanceFromZone, 1)}% above ` : "above ";
@@ -1219,6 +1221,8 @@ function renderScoreBreakdown(row) {
   const absorption = Number(payloadValue(row, "absorption_score"));
   const shortProxy = Number(payloadValue(row, "short_pressure_proxy"));
   const buyTier = payloadValue(row, "buy_tier") || "n/a";
+  const contextualOverlay = payloadValue(row, "contextual_overlay") || "n/a";
+  const contextualAdjustment = Number(payloadValue(row, "contextual_score_adjustment"));
   const freshnessStatus = payloadValue(row, "freshness_status") || "UNKNOWN";
   const dataAge = Number(payloadValue(row, "data_age_days"));
   const feedbackQuality = payloadValue(row, "feedback_quality") || "NO HISTORY";
@@ -1234,6 +1238,7 @@ function renderScoreBreakdown(row) {
   const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
   const items = [
     ["Execution Tier", buyTier],
+    ["Context", `${contextualOverlay}${Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
     ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}`],
@@ -1559,6 +1564,8 @@ function searchableRowText(row) {
     strengthLabel(row),
     entryQualityLabel(row),
     payloadValue(row, "buy_tier"),
+    payloadValue(row, "contextual_overlay"),
+    payloadValue(row, "contextual_plan"),
     payloadValue(row, "anti_signal_level"),
     payloadValue(row, "anti_signal_plan"),
     payloadValue(row, "last_outcome_label"),
