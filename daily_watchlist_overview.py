@@ -46,6 +46,10 @@ WALK_FORWARD_MIN_TEST_TRADES = 3
 MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
+SELF_SCORE_ACTIONS = {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING", "WATCH TREND", "EXIT PRESSURE"}
+SELF_SCORE_WORKING_RETURN_PCT = 2.0
+SELF_SCORE_FAILED_RETURN_PCT = -2.0
+SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -543,6 +547,23 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
         raise RuntimeError(f"Supabase upsert to {table} failed with HTTP {exc.code}: {body}") from exc
 
 
+def supabase_select(path: str) -> list[dict]:
+    url, key = supabase_credentials()
+    if not url or not key:
+        return []
+
+    endpoint = f"{url}/rest/v1/{path}"
+    req = urllib.request.Request(endpoint, method="GET", headers=supabase_headers(key))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Supabase select returned HTTP {resp.status}")
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase select failed with HTTP {exc.code}: {body}") from exc
+
+
 OPTIONAL_SIGNAL_COLUMNS = {
     "signal_stage",
     "transition_label",
@@ -575,6 +596,10 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "anti_signal_score",
     "anti_signal_level",
     "anti_signal_plan",
+    "last_outcome_label",
+    "last_outcome_score",
+    "last_outcome_reason",
+    "last_outcome_return_pct",
     "data_age_days",
     "freshness_status",
     "freshness_block",
@@ -668,6 +693,7 @@ def cleanup_supabase_retention(run_date: str) -> None:
     cleanup_targets = [
         ("watchlist_snapshots", "run_date"),
         ("watchlist_behavior_history", "run_date"),
+        ("watchlist_signal_outcomes", "evaluation_run_date"),
         ("watchlist_refresh_runs", "run_date"),
     ]
     for table, date_column in cleanup_targets:
@@ -696,6 +722,13 @@ def optional_signal_values(row: dict) -> dict:
         "absorption_score": numeric_or_none(row.get("absorption_score")),
         "short_pressure_proxy": numeric_or_none(row.get("short_pressure_proxy")),
         "squeeze_watch": row.get("squeeze_watch"),
+        "anti_signal_score": numeric_or_none(row.get("anti_signal_score")),
+        "anti_signal_level": row.get("anti_signal_level"),
+        "anti_signal_plan": row.get("anti_signal_plan"),
+        "last_outcome_label": row.get("last_outcome_label"),
+        "last_outcome_score": numeric_or_none(row.get("last_outcome_score")),
+        "last_outcome_reason": row.get("last_outcome_reason"),
+        "last_outcome_return_pct": numeric_or_none(row.get("last_outcome_return_pct")),
         "data_age_days": numeric_or_none(row.get("data_age_days")),
         "freshness_status": row.get("freshness_status"),
         "freshness_block": row.get("freshness_block"),
@@ -712,7 +745,7 @@ def optional_signal_values(row: dict) -> dict:
     }
 
 
-def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
+def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
     url, key = supabase_credentials()
     if not url or not key:
         print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SECRET_KEY are not set.")
@@ -789,6 +822,33 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
             history_record.update(optional_signal_values(row))
             history_records.append(history_record)
 
+    outcome_records = []
+    if not outcomes.empty:
+        for record in outcomes.to_dict(orient="records"):
+            row = clean_record(record)
+            outcome_records.append(
+                {
+                    "signal_run_date": row.get("signal_run_date"),
+                    "evaluation_run_date": row.get("evaluation_run_date"),
+                    "ticker": row.get("ticker"),
+                    "prior_action": row.get("prior_action"),
+                    "prior_setup": row.get("prior_setup"),
+                    "prior_buy_tier": row.get("prior_buy_tier"),
+                    "prior_operator_state": row.get("prior_operator_state"),
+                    "prior_anti_signal_level": row.get("prior_anti_signal_level"),
+                    "prior_close": numeric_or_none(row.get("prior_close")),
+                    "current_action": row.get("current_action"),
+                    "current_operator_state": row.get("current_operator_state"),
+                    "current_close": numeric_or_none(row.get("current_close")),
+                    "close_return_pct": numeric_or_none(row.get("close_return_pct")),
+                    "outcome_label": row.get("outcome_label"),
+                    "outcome_score": numeric_or_none(row.get("outcome_score")),
+                    "outcome_reason": row.get("outcome_reason"),
+                    "learning_key": row.get("learning_key"),
+                    "payload": row,
+                }
+            )
+
     if run_metadata:
         try:
             supabase_upsert("watchlist_refresh_runs", [clean_record(run_metadata)], ["run_date"])
@@ -797,7 +857,11 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
 
     supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
     supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
-    print(f"Synced {len(report_records)} snapshot rows and {len(history_records)} history rows to Supabase.")
+    try:
+        supabase_upsert("watchlist_signal_outcomes", outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
+    except RuntimeError as exc:
+        print(f"Supabase signal-outcome sync skipped: {exc}")
+    print(f"Synced {len(report_records)} snapshot rows, {len(history_records)} history rows, and {len(outcome_records)} signal-outcome rows to Supabase.")
     try:
         cleanup_supabase_retention(run_date)
     except RuntimeError as exc:
@@ -1157,6 +1221,199 @@ def signal_outcome_from_history(row: dict, ticker_history: list[dict]) -> dict:
         "feedback_stop_hit": bool_text(stop_hit),
         "feedback_quality": quality,
         "feedback_plan": plan,
+    }
+
+
+def merge_payload_row(row: dict) -> dict:
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    merged = {**payload, **{key: value for key, value in row.items() if key != "payload"}}
+    if "date" not in merged:
+        merged["date"] = merged.get("data_date") or merged.get("history_date") or merged.get("run_date")
+    return merged
+
+
+def fetch_previous_snapshot_rows(run_date: str) -> list[dict]:
+    try:
+        date_rows = supabase_select(
+            f"watchlist_snapshots?select=run_date&run_date=lt.{urllib.parse.quote(run_date)}&order=run_date.desc&limit=1"
+        )
+        if not date_rows:
+            return []
+        previous_run_date = date_rows[0].get("run_date")
+        rows = supabase_select(
+            f"watchlist_snapshots?select=*&run_date=eq.{urllib.parse.quote(str(previous_run_date))}&limit=1000"
+        )
+        return [merge_payload_row(row) for row in rows]
+    except RuntimeError as exc:
+        print(f"Previous snapshot fetch skipped: {exc}")
+        return []
+
+
+def load_previous_local_report(run_date: str) -> list[dict]:
+    candidates: list[tuple[str, Path]] = []
+    for path in Path(".").glob("daily_watchlist_overview_*.csv"):
+        stem_date = path.stem.replace("daily_watchlist_overview_", "")
+        if stem_date == "latest" or stem_date >= run_date:
+            continue
+        if len(stem_date) == 10:
+            candidates.append((stem_date, path))
+    if not candidates:
+        return []
+    _, path = sorted(candidates)[-1]
+    try:
+        return pd.read_csv(path).to_dict(orient="records")
+    except Exception as exc:
+        print(f"Previous local report load skipped ({path}): {exc}")
+        return []
+
+
+def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str) -> dict:
+    prior_action = prior.get("action", "")
+    prior_close = numeric_or_none(prior.get("close"))
+    current_close = numeric_or_none(current.get("close"))
+    current_stale = str(current.get("freshness_block") or "").upper() == "YES"
+    if not prior_close or not current_close or float(prior_close) <= 0:
+        outcome = "PENDING"
+        score = 0.0
+        reason = "No valid close-to-close result yet."
+        return_pct = ""
+    else:
+        return_pct = (float(current_close) / float(prior_close) - 1) * 100
+        current_action = current.get("action", "")
+        prior_anti = str(prior.get("anti_signal_level") or "NONE").upper()
+        prior_operator = str(prior.get("operator_state") or "").upper()
+        current_operator = str(current.get("operator_state") or "").upper()
+        current_risk = current_action == "EXIT PRESSURE" or current_operator in {"BULL_TRAP", "DISTRIBUTION"}
+        prior_trap_warning = prior_anti in {"BLOCK", "CAUTION"} or prior_operator in {"BULL_TRAP", "DISTRIBUTION"}
+
+        if current_stale:
+            outcome = "PENDING"
+            score = 0.0
+            reason = "Current market data is stale; do not learn from this comparison."
+        elif prior_trap_warning and prior_action in {"SETUP FORMING", "WATCH TREND", "EXIT PRESSURE"} and return_pct <= 1.0 and current_action != "BUY CANDIDATE":
+            outcome = "TRAP_AVOIDED"
+            score = 1.0
+            reason = "Prior risk warning avoided a low-quality chase."
+        elif prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            if return_pct >= SELF_SCORE_WORKING_RETURN_PCT:
+                outcome = "WORKING"
+                score = 1.0
+                reason = "BUY followed through close-to-close."
+            elif return_pct <= SELF_SCORE_FAILED_RETURN_PCT or current_risk:
+                outcome = "FAILED"
+                score = -1.0
+                reason = "BUY failed or moved into risk pressure."
+            else:
+                outcome = "STALE"
+                score = 0.0
+                reason = "BUY did not progress enough yet."
+        elif prior_action == "SETUP FORMING":
+            if current_action in {"BUY CANDIDATE", "STRONG CONTINUATION"} and return_pct >= 1.0:
+                outcome = "WORKING"
+                score = 1.0
+                reason = "SETUP upgraded with positive follow-through."
+            elif return_pct <= -2.5 or current_risk:
+                outcome = "FAILED"
+                score = -1.0
+                reason = "SETUP broke down instead of improving."
+            else:
+                outcome = "STALE"
+                score = 0.0
+                reason = "SETUP remains unresolved."
+        elif prior_action == "WATCH TREND":
+            if return_pct >= SELF_SCORE_WORKING_RETURN_PCT or current_action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"}:
+                outcome = "WORKING"
+                score = 0.7
+                reason = "WATCH trend improved or upgraded."
+            elif return_pct <= -3.0 or current_risk:
+                outcome = "FAILED"
+                score = -0.7
+                reason = "WATCH trend deteriorated."
+            else:
+                outcome = "STALE"
+                score = 0.0
+                reason = "WATCH trend stayed neutral."
+        elif prior_action == "EXIT PRESSURE":
+            if return_pct <= SELF_SCORE_EXIT_AVOIDED_RETURN_PCT or current_action in {"EXIT PRESSURE", "WAIT", "WAIT / AVOID"}:
+                outcome = "TRAP_AVOIDED"
+                score = 1.0
+                reason = "EXIT pressure warning helped avoid weak follow-through."
+            elif return_pct >= 2.5 and current_action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"}:
+                outcome = "FAILED"
+                score = -0.7
+                reason = "EXIT pressure was too defensive."
+            else:
+                outcome = "STALE"
+                score = 0.0
+                reason = "EXIT pressure remains unresolved."
+        else:
+            outcome = "PENDING"
+            score = 0.0
+            reason = "Prior row was not a scored signal type."
+
+    learning_key = "|".join(
+        [
+            str(prior_action or "UNKNOWN"),
+            str(prior.get("setup") or "NONE"),
+            str(prior.get("operator_state") or "NEUTRAL"),
+            str(prior.get("anti_signal_level") or "NONE"),
+        ]
+    )
+    return {
+        "signal_run_date": prior.get("run_date") or prior.get("date") or prior.get("data_date"),
+        "evaluation_run_date": evaluation_run_date,
+        "ticker": prior.get("ticker"),
+        "prior_action": prior_action,
+        "prior_setup": prior.get("setup"),
+        "prior_buy_tier": prior.get("buy_tier"),
+        "prior_operator_state": prior.get("operator_state"),
+        "prior_anti_signal_level": prior.get("anti_signal_level"),
+        "prior_close": round(float(prior_close), 2) if prior_close else "",
+        "current_action": current.get("action"),
+        "current_operator_state": current.get("operator_state"),
+        "current_close": round(float(current_close), 2) if current_close else "",
+        "close_return_pct": round(float(return_pct), 2) if return_pct != "" else "",
+        "outcome_label": outcome,
+        "outcome_score": score,
+        "outcome_reason": reason,
+        "learning_key": learning_key,
+    }
+
+
+def build_daily_signal_outcomes(previous_rows: list[dict], current_rows: list[dict], evaluation_run_date: str) -> pd.DataFrame:
+    current_by_ticker = {str(row.get("ticker", "")).upper(): row for row in current_rows}
+    outcomes = []
+    for prior in previous_rows:
+        prior_action = prior.get("action", "")
+        ticker = str(prior.get("ticker", "")).upper()
+        if prior_action not in SELF_SCORE_ACTIONS or ticker not in current_by_ticker:
+            continue
+        outcomes.append(self_score_prior_signal(prior, current_by_ticker[ticker], evaluation_run_date))
+    return pd.DataFrame(outcomes)
+
+
+def attach_latest_outcomes(rows: list[dict], outcomes: pd.DataFrame) -> None:
+    if outcomes.empty:
+        return
+    outcome_by_ticker = {str(row["ticker"]).upper(): row for row in outcomes.to_dict(orient="records")}
+    for row in rows:
+        outcome = outcome_by_ticker.get(str(row.get("ticker", "")).upper())
+        if not outcome:
+            continue
+        row["last_outcome_label"] = outcome.get("outcome_label")
+        row["last_outcome_score"] = outcome.get("outcome_score")
+        row["last_outcome_reason"] = outcome.get("outcome_reason")
+        row["last_outcome_return_pct"] = outcome.get("close_return_pct")
+
+
+def summarize_signal_outcomes(outcomes: pd.DataFrame) -> dict:
+    if outcomes.empty:
+        return {"total": 0, "counts": {}, "avg_score": None}
+    counts = outcomes["outcome_label"].value_counts().to_dict()
+    return {
+        "total": int(len(outcomes)),
+        "counts": {key: int(value) for key, value in counts.items()},
+        "avg_score": round(float(outcomes["outcome_score"].mean()), 3),
     }
 
 
@@ -2965,6 +3222,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
         "buy_tier",
+        "last_outcome_label", "last_outcome_return_pct",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
         "operator_state", "operator_state_score", "operator_state_plan",
         "setup", "adaptive_mode", "psychology", "reward_risk",
@@ -2996,6 +3254,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "close": "Last",
         "day_change_pct": "Chg%",
         "buy_tier": "Exec Tier",
+        "last_outcome_label": "Self Score",
+        "last_outcome_return_pct": "Self Ret%",
         "next_day_bias": "Next Day",
         "next_day_bias_score": "Bias",
         "next_day_plan": "Plan",
@@ -3080,7 +3340,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return "<span class='dash'>-</span>"
             klass = "exit" if "DISTRIBUTION" in text or "BULL_TRAP" in text else "setup" if "BEAR_TRAP" in text or "ACCUMULATION" in text or "MARKUP" in text else "watch"
             return f"<span class='badge action {klass}'>{escaped}</span>"
-        if col in {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
+        if col in {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "last_outcome_return_pct"}:
             try:
                 return f"{float(value):.1f}"
             except (TypeError, ValueError):
@@ -3572,6 +3832,9 @@ def main() -> None:
         ),
     )
     rows = apply_buy_tiers(rows)
+    previous_rows = fetch_previous_snapshot_rows(today) or load_previous_local_report(today)
+    outcomes = build_daily_signal_outcomes(previous_rows, rows, today)
+    attach_latest_outcomes(rows, outcomes)
     report = pd.DataFrame(rows)
     sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
     report = report.sort_values(["execution_priority", sort_score_col, "score", "action", "ticker"], ascending=[True, False, False, True, True]).reset_index(drop=True)
@@ -3581,8 +3844,11 @@ def main() -> None:
     if stale_cache_fallbacks:
         status_parts.append(f"{len(stale_cache_fallbacks)} symbols used cached data")
     stale_blocks = int((report.get("freshness_block", pd.Series(dtype=str)) == "YES").sum())
+    outcome_summary = summarize_signal_outcomes(outcomes)
     if stale_blocks:
         status_parts.append(f"{stale_blocks} execution-blocked for stale data")
+    if outcome_summary["total"]:
+        status_parts.append(f"self-score {outcome_summary['avg_score']} across {outcome_summary['total']} prior signals")
     if failures:
         status_parts.append(f"{len(failures)} symbols failed")
     status_parts.append(f"market {market_permission['market_permission']}: {market_permission['market_regime_summary']}")
@@ -3612,6 +3878,7 @@ def main() -> None:
             "failures": failures[:25],
             "stale_cache_fallbacks": stale_cache_fallbacks[:25],
             "stale_execution_blocks": stale_blocks,
+            "signal_outcomes": outcome_summary,
             "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
         },
     }
@@ -3620,6 +3887,12 @@ def main() -> None:
     write_html(report, html_path, status_text=status_text, preflight_text=preflight_text)
     report.to_csv("daily_watchlist_overview_latest.csv", index=False)
     write_html(report, Path("daily_watchlist_overview_latest.html"), status_text=status_text, preflight_text=preflight_text)
+    if not outcomes.empty:
+        outcomes_path = Path(f"daily_signal_outcomes_{today}.csv")
+        outcomes.to_csv(outcomes_path, index=False)
+        outcomes.to_csv("daily_signal_outcomes_latest.csv", index=False)
+    elif Path("daily_signal_outcomes_latest.csv").exists():
+        Path("daily_signal_outcomes_latest.csv").unlink()
 
     history = pd.DataFrame(history_rows)
     if not history.empty:
@@ -3644,7 +3917,7 @@ def main() -> None:
     if not args.no_supabase:
         sync_ok, sync_reason = should_sync_supabase_snapshot(report, today)
         if sync_ok:
-            sync_supabase(report, history, today, run_metadata)
+            sync_supabase(report, history, outcomes, today, run_metadata)
         else:
             print(f"Supabase sync skipped: {sync_reason}")
 

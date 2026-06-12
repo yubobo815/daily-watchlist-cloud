@@ -45,6 +45,10 @@ create table if not exists public.watchlist_snapshots (
   anti_signal_score numeric,
   anti_signal_level text,
   anti_signal_plan text,
+  last_outcome_label text,
+  last_outcome_score numeric,
+  last_outcome_reason text,
+  last_outcome_return_pct numeric,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -111,6 +115,10 @@ create table if not exists public.watchlist_behavior_history (
   anti_signal_score numeric,
   anti_signal_level text,
   anti_signal_plan text,
+  last_outcome_label text,
+  last_outcome_score numeric,
+  last_outcome_reason text,
+  last_outcome_return_pct numeric,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -151,6 +159,30 @@ create table if not exists public.watchlist_refresh_runs (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.watchlist_signal_outcomes (
+  signal_run_date date not null,
+  evaluation_run_date date not null,
+  ticker text not null,
+  prior_action text,
+  prior_setup text,
+  prior_buy_tier text,
+  prior_operator_state text,
+  prior_anti_signal_level text,
+  prior_close numeric,
+  current_action text,
+  current_operator_state text,
+  current_close numeric,
+  close_return_pct numeric,
+  outcome_label text,
+  outcome_score numeric,
+  outcome_reason text,
+  learning_key text,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (signal_run_date, evaluation_run_date, ticker)
+);
+
 create table if not exists public.focus_tickers (
   list_id text not null default 'default',
   ticker text not null,
@@ -170,6 +202,12 @@ create index if not exists watchlist_behavior_history_ticker_date_idx
 
 create index if not exists watchlist_refresh_runs_status_idx
   on public.watchlist_refresh_runs (run_date desc, status);
+
+create index if not exists watchlist_signal_outcomes_eval_idx
+  on public.watchlist_signal_outcomes (evaluation_run_date desc, outcome_label);
+
+create index if not exists watchlist_signal_outcomes_ticker_idx
+  on public.watchlist_signal_outcomes (ticker, evaluation_run_date desc);
 
 create index if not exists focus_tickers_list_idx
   on public.focus_tickers (list_id, ticker);
@@ -205,6 +243,10 @@ alter table public.watchlist_snapshots add column if not exists squeeze_watch te
 alter table public.watchlist_snapshots add column if not exists anti_signal_score numeric;
 alter table public.watchlist_snapshots add column if not exists anti_signal_level text;
 alter table public.watchlist_snapshots add column if not exists anti_signal_plan text;
+alter table public.watchlist_snapshots add column if not exists last_outcome_label text;
+alter table public.watchlist_snapshots add column if not exists last_outcome_score numeric;
+alter table public.watchlist_snapshots add column if not exists last_outcome_reason text;
+alter table public.watchlist_snapshots add column if not exists last_outcome_return_pct numeric;
 alter table public.watchlist_snapshots add column if not exists data_age_days integer;
 alter table public.watchlist_snapshots add column if not exists freshness_status text;
 alter table public.watchlist_snapshots add column if not exists freshness_block text;
@@ -251,6 +293,10 @@ alter table public.watchlist_behavior_history add column if not exists squeeze_w
 alter table public.watchlist_behavior_history add column if not exists anti_signal_score numeric;
 alter table public.watchlist_behavior_history add column if not exists anti_signal_level text;
 alter table public.watchlist_behavior_history add column if not exists anti_signal_plan text;
+alter table public.watchlist_behavior_history add column if not exists last_outcome_label text;
+alter table public.watchlist_behavior_history add column if not exists last_outcome_score numeric;
+alter table public.watchlist_behavior_history add column if not exists last_outcome_reason text;
+alter table public.watchlist_behavior_history add column if not exists last_outcome_return_pct numeric;
 alter table public.watchlist_behavior_history add column if not exists data_age_days integer;
 alter table public.watchlist_behavior_history add column if not exists freshness_status text;
 alter table public.watchlist_behavior_history add column if not exists freshness_block text;
@@ -268,19 +314,23 @@ alter table public.watchlist_behavior_history add column if not exists reason_co
 
 alter table public.watchlist_snapshots enable row level security;
 alter table public.watchlist_behavior_history enable row level security;
+alter table public.watchlist_signal_outcomes enable row level security;
 alter table public.watchlist_refresh_runs enable row level security;
 alter table public.focus_tickers enable row level security;
 
 revoke all on public.watchlist_snapshots from anon, authenticated;
 revoke all on public.watchlist_behavior_history from anon, authenticated;
+revoke all on public.watchlist_signal_outcomes from anon, authenticated;
 revoke all on public.watchlist_refresh_runs from anon, authenticated;
 revoke all on public.focus_tickers from anon, authenticated;
 
 grant select on public.watchlist_snapshots to anon, authenticated;
 grant select on public.watchlist_behavior_history to anon, authenticated;
+grant select on public.watchlist_signal_outcomes to anon, authenticated;
 grant select on public.watchlist_refresh_runs to anon, authenticated;
 grant select, insert, update, delete on public.watchlist_snapshots to service_role;
 grant select, insert, update, delete on public.watchlist_behavior_history to service_role;
+grant select, insert, update, delete on public.watchlist_signal_outcomes to service_role;
 grant select, insert, update, delete on public.watchlist_refresh_runs to service_role;
 grant select, insert, update, delete on public.focus_tickers to service_role;
 
@@ -292,6 +342,11 @@ create policy "Public read watchlist snapshots"
 drop policy if exists "Public read behavior history" on public.watchlist_behavior_history;
 create policy "Public read behavior history"
   on public.watchlist_behavior_history for select
+  using (true);
+
+drop policy if exists "Public read signal outcomes" on public.watchlist_signal_outcomes;
+create policy "Public read signal outcomes"
+  on public.watchlist_signal_outcomes for select
   using (true);
 
 drop policy if exists "Public read refresh runs" on public.watchlist_refresh_runs;

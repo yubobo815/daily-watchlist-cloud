@@ -93,6 +93,10 @@ const PAYLOAD_FIELDS = [
   "freshness_block",
   "freshness_plan",
   "freshness_status",
+  "last_outcome_label",
+  "last_outcome_reason",
+  "last_outcome_return_pct",
+  "last_outcome_score",
   "market_context",
   "market_permission",
   "market_regime_summary",
@@ -493,6 +497,7 @@ function runDto(row) {
     failed_symbols: Array.isArray(payload.failed_symbols) ? payload.failed_symbols.slice(0, 25) : [],
     stale_cache_fallbacks: Array.isArray(payload.stale_cache_fallbacks) ? payload.stale_cache_fallbacks.slice(0, 25) : [],
     stale_execution_blocks: Number(payload.stale_execution_blocks || 0),
+    signal_outcomes: payload.signal_outcomes && typeof payload.signal_outcomes === "object" ? payload.signal_outcomes : {},
     max_execution_data_age_days: Number(payload.max_execution_data_age_days || 0),
   };
   return output;
