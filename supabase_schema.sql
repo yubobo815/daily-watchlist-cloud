@@ -35,6 +35,7 @@ create table if not exists public.watchlist_snapshots (
   operator_state text,
   operator_state_score numeric,
   operator_state_plan text,
+  demand_control_score numeric,
   bull_trap_score numeric,
   bear_trap_score numeric,
   distribution_score numeric,
@@ -97,6 +98,7 @@ create table if not exists public.watchlist_behavior_history (
   operator_state text,
   operator_state_score numeric,
   operator_state_plan text,
+  demand_control_score numeric,
   bull_trap_score numeric,
   bear_trap_score numeric,
   distribution_score numeric,
@@ -187,6 +189,7 @@ alter table public.watchlist_snapshots add column if not exists operator_plan te
 alter table public.watchlist_snapshots add column if not exists operator_state text;
 alter table public.watchlist_snapshots add column if not exists operator_state_score numeric;
 alter table public.watchlist_snapshots add column if not exists operator_state_plan text;
+alter table public.watchlist_snapshots add column if not exists demand_control_score numeric;
 alter table public.watchlist_snapshots add column if not exists bull_trap_score numeric;
 alter table public.watchlist_snapshots add column if not exists bear_trap_score numeric;
 alter table public.watchlist_snapshots add column if not exists distribution_score numeric;
@@ -229,6 +232,7 @@ alter table public.watchlist_behavior_history add column if not exists operator_
 alter table public.watchlist_behavior_history add column if not exists operator_state text;
 alter table public.watchlist_behavior_history add column if not exists operator_state_score numeric;
 alter table public.watchlist_behavior_history add column if not exists operator_state_plan text;
+alter table public.watchlist_behavior_history add column if not exists demand_control_score numeric;
 alter table public.watchlist_behavior_history add column if not exists bull_trap_score numeric;
 alter table public.watchlist_behavior_history add column if not exists bear_trap_score numeric;
 alter table public.watchlist_behavior_history add column if not exists distribution_score numeric;

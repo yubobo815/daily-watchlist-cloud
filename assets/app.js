@@ -101,6 +101,7 @@ const REASON_LABELS = {
   operator_squeeze_watch: "Squeeze watch",
   operator_bull_trap: "Bull trap",
   operator_bear_trap: "Bear trap / squeeze watch",
+  operator_markup_demand: "Markup demand control",
   data_stale_block: "Stale data blocked execution",
   cached_data_ok: "Cached data recent enough",
   top_buy_tier: "A+ buy tier",
@@ -626,13 +627,14 @@ function renderNextDayBias(row) {
 function operatorPressureTone(value) {
   const text = String(value || "").toUpperCase();
   if (text.includes("BULL_TRAP") || text.includes("DISTRIBUTION") || text === "SHORT PRESSURE") return "risk";
-  if (text.includes("BEAR_TRAP") || text.includes("SQUEEZE") || text.includes("ACCUMULATION") || text.includes("ABSORPTION")) return "constructive";
+  if (text.includes("BEAR_TRAP") || text.includes("SQUEEZE") || text.includes("ACCUMULATION") || text.includes("ABSORPTION") || text.includes("MARKUP") || text.includes("DEMAND CONTROL")) return "constructive";
   return "watch";
 }
 
 function shortOperatorPressure(value) {
   const text = String(value || "NEUTRAL").toUpperCase();
   if (text === "ACCUMULATION") return "ACCUM";
+  if (text === "MARKUP / DEMAND CONTROL") return "MARKUP";
   if (text === "BULL_TRAP") return "BULL TRAP";
   if (text === "DISTRIBUTION") return "DIST";
   if (text === "BEAR_TRAP / SQUEEZE WATCH") return "BEAR TRAP";
@@ -1189,6 +1191,7 @@ function renderScoreBreakdown(row) {
   const setupContext = Number(payloadValue(row, "setup_context_score"));
   const operatorPressure = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL";
   const operatorScore = Number(payloadValue(row, "operator_state_score") ?? payloadValue(row, "operator_pressure_score"));
+  const demandControl = Number(payloadValue(row, "demand_control_score"));
   const bullTrap = Number(payloadValue(row, "bull_trap_score"));
   const bearTrap = Number(payloadValue(row, "bear_trap_score"));
   const distribution = Number(payloadValue(row, "distribution_score"));
@@ -1218,6 +1221,7 @@ function renderScoreBreakdown(row) {
     ["Emotion", Number.isFinite(emotion) ? `${fmtNumber(emotion, 0)}/100` : "n/a"],
     ["MA Location", Number.isFinite(location) ? `${fmtNumber(location, 0)}/100` : "n/a"],
     ["Setup Context", Number.isFinite(setupContext) ? `${fmtNumber(setupContext, 0)}/100` : "n/a"],
+    ["Demand Control", Number.isFinite(demandControl) ? `${fmtNumber(demandControl, 0)}/100` : "n/a"],
     ["Distribution", Number.isFinite(distribution) ? `${fmtNumber(distribution, 0)}/100` : "n/a"],
     ["Absorption", Number.isFinite(absorption) ? `${fmtNumber(absorption, 0)}/100` : "n/a"],
     ["Bull Trap", Number.isFinite(bullTrap) ? `${fmtNumber(bullTrap, 0)}/100` : "n/a"],

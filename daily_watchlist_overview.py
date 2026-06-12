@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.12-candle-operator-state"
+SCANNER_VERSION = "2026.06.12-candle-operator-demand-control"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -565,6 +565,7 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "operator_state",
     "operator_state_score",
     "operator_state_plan",
+    "demand_control_score",
     "bull_trap_score",
     "bear_trap_score",
     "distribution_score",
@@ -685,6 +686,7 @@ def optional_signal_values(row: dict) -> dict:
         "operator_state": row.get("operator_state"),
         "operator_state_score": numeric_or_none(row.get("operator_state_score")),
         "operator_state_plan": row.get("operator_state_plan"),
+        "demand_control_score": numeric_or_none(row.get("demand_control_score")),
         "bull_trap_score": numeric_or_none(row.get("bull_trap_score")),
         "bear_trap_score": numeric_or_none(row.get("bear_trap_score")),
         "distribution_score": numeric_or_none(row.get("distribution_score")),
@@ -957,7 +959,7 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
     risk_ok = row.get("risk_permission") == "ALLOW"
     market_ok = row.get("market_permission") != "BLOCK"
     absorption_or_neutral = (
-        operator_state in {"", "NEUTRAL", "ACCUMULATION", "BEAR_TRAP / SQUEEZE WATCH"}
+        operator_state in {"", "NEUTRAL", "ACCUMULATION", "MARKUP / DEMAND CONTROL", "BEAR_TRAP / SQUEEZE WATCH"}
         or operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
     )
 
@@ -1918,6 +1920,19 @@ def classify_and_score(
     bear_trap_score += 8.0 if row.rsi > prev.rsi and close >= prev.close else 0.0
     bear_trap_score = clamp_float(bear_trap_score, 0.0, 100.0)
 
+    demand_control_score = 0.0
+    demand_control_score += 22.0 if setup in {"BREAKOUT BUY", "MOMENTUM BUY"} else 0.0
+    demand_control_score += 18.0 if mode in {"POWER TREND", "STEADY TREND"} else 10.0 if mode == "MEAN REVERSION" and setup in {"BREAKOUT BUY", "MOMENTUM BUY"} else 0.0
+    demand_control_score += 18.0 if buyer_score >= 70.0 else 12.0 if buyer_score >= 58.0 else 0.0
+    demand_control_score += 16.0 if breakout_vol else 12.0 if accum_vol else 8.0 if row.close_loc >= 0.62 and close > prev.close else 0.0
+    demand_control_score += 12.0 if close > row.ema_fast and close > row.ema_slow else 0.0
+    demand_control_score += 8.0 if next_day_bias_score >= 70.0 else 0.0
+    demand_control_score -= 18.0 if distribution_score >= 35.0 else 0.0
+    demand_control_score -= 16.0 if bull_trap_score >= 40.0 else 0.0
+    demand_control_score -= 14.0 if fomo or greed_rejected or seller_control else 0.0
+    demand_control_score -= 18.0 if confirmed_break or exit_pressure else 0.0
+    demand_control_score = clamp_float(demand_control_score, 0.0, 100.0)
+
     squeeze_watch = (
         short_pressure_proxy >= 30.0
         and max(absorption_score, bear_trap_score) >= 52.0
@@ -1974,6 +1989,10 @@ def classify_and_score(
         operator_state = "DISTRIBUTION"
         operator_state_score = max(distribution_score, short_pressure_proxy, operator_pressure_score)
         operator_state_plan = "Supply is in control; avoid fresh BUY until seller pressure cools and price reclaims."
+    elif demand_control_score >= 58.0:
+        operator_state = "MARKUP / DEMAND CONTROL"
+        operator_state_score = max(demand_control_score, next_day_bias_score, buyer_score)
+        operator_state_plan = "Demand is controlling the markup phase; avoid late chase, but favor controlled pullback or Pine-confirmed reclaim entries."
     elif absorption_score >= 55.0:
         operator_state = "ACCUMULATION"
         operator_state_score = absorption_score
@@ -1995,6 +2014,10 @@ def classify_and_score(
         operator_pressure_score = max(operator_pressure_score, operator_state_score)
         operator_plan = operator_state_plan
     elif operator_state == "ACCUMULATION" and operator_pressure == "NEUTRAL":
+        operator_pressure = "ACCUMULATION / ABSORPTION"
+        operator_pressure_score = operator_state_score
+        operator_plan = operator_state_plan
+    elif operator_state == "MARKUP / DEMAND CONTROL" and operator_pressure == "NEUTRAL":
         operator_pressure = "ACCUMULATION / ABSORPTION"
         operator_pressure_score = operator_state_score
         operator_plan = operator_state_plan
@@ -2158,6 +2181,8 @@ def classify_and_score(
         reason_codes.append("operator_bull_trap")
     elif operator_state == "BEAR_TRAP / SQUEEZE WATCH":
         reason_codes.append("operator_bear_trap")
+    elif operator_state == "MARKUP / DEMAND CONTROL":
+        reason_codes.append("operator_markup_demand")
     if extended_from_zone:
         reason_codes.append("extended_from_zone")
     if profile_extended_from_zone:
@@ -2217,6 +2242,7 @@ def classify_and_score(
         "operator_state": operator_state,
         "operator_state_score": round(float(operator_state_score), 1),
         "operator_state_plan": operator_state_plan,
+        "demand_control_score": round(float(demand_control_score), 1),
         "bull_trap_score": round(float(bull_trap_score), 1),
         "bear_trap_score": round(float(bear_trap_score), 1),
         "distribution_score": round(float(distribution_score), 1),
@@ -2391,6 +2417,7 @@ LATEST_SIGNAL_FIELDS = [
     "operator_state",
     "operator_state_score",
     "operator_state_plan",
+    "demand_control_score",
     "bull_trap_score",
     "bear_trap_score",
     "distribution_score",
@@ -2952,7 +2979,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         if col == "operator_state":
             if not text:
                 return "<span class='dash'>-</span>"
-            klass = "exit" if "DISTRIBUTION" in text or "BULL_TRAP" in text else "setup" if "BEAR_TRAP" in text or "ACCUMULATION" in text else "watch"
+            klass = "exit" if "DISTRIBUTION" in text or "BULL_TRAP" in text else "setup" if "BEAR_TRAP" in text or "ACCUMULATION" in text or "MARKUP" in text else "watch"
             return f"<span class='badge action {klass}'>{escaped}</span>"
         if col in {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
             try:

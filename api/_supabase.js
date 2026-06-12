@@ -102,6 +102,7 @@ const PAYLOAD_FIELDS = [
   "operator_state",
   "operator_state_score",
   "operator_state_plan",
+  "demand_control_score",
   "bull_trap_score",
   "bear_trap_score",
   "distribution_score",
