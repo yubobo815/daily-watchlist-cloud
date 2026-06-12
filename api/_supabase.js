@@ -68,15 +68,28 @@ const PAYLOAD_FIELDS = [
   "benchmark_return_20d_pct",
   "buy_quality_minimum",
   "buy_quality_score",
+  "buy_tier",
   "buyer_score",
+  "data_age_days",
   "days_to_report",
   "distance_from_ref_zone_pct",
   "entry_quality_label",
   "entry_quality_score",
   "emotion_score",
   "event_risk",
+  "execution_plan",
+  "execution_priority",
   "extension_state",
+  "feedback_max_drawdown_pct",
+  "feedback_plan",
+  "feedback_quality",
+  "feedback_return_pct",
+  "feedback_stop_hit",
+  "feedback_window_days",
   "freshness_penalty",
+  "freshness_block",
+  "freshness_plan",
+  "freshness_status",
   "market_context",
   "market_permission",
   "market_regime_summary",
@@ -125,6 +138,7 @@ const PAYLOAD_FIELDS = [
 
 const AUDIT_GATE_FIELDS = ["market_permission", "risk_permission"];
 const UNGATED_SCORE_CAP = 49;
+const MAX_EXECUTION_DATA_AGE_DAYS = Number(process.env.MAX_EXECUTION_DATA_AGE_DAYS || 3);
 
 function assertSupabaseConfig() {
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.apiKey) {
@@ -212,6 +226,21 @@ function capScore(value, cap = UNGATED_SCORE_CAP) {
   return number === null ? value : Math.min(number, cap);
 }
 
+function isoDateOnly(value) {
+  const text = String(value || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
+function dataAgeDays(dataDate) {
+  const dateText = isoDateOnly(dataDate);
+  if (!dateText) return null;
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const dataUtc = Date.parse(`${dateText}T00:00:00Z`);
+  if (!Number.isFinite(dataUtc)) return null;
+  return Math.floor((todayUtc - dataUtc) / 86400000);
+}
+
 function appendReasonCode(payload, code) {
   const raw = payload.reason_codes;
   const codes = Array.isArray(raw)
@@ -253,13 +282,77 @@ function applyAuditGateFallback(output) {
   return output;
 }
 
+function applyFreshnessFallback(output) {
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  const age = Number(payload.data_age_days ?? dataAgeDays(output.data_date || output.history_date || output.date));
+  const hasAge = Number.isFinite(age);
+  const stale = !hasAge || age > MAX_EXECUTION_DATA_AGE_DAYS;
+  payload.data_age_days = hasAge ? age : "";
+  payload.freshness_block = payload.freshness_block || (stale ? "YES" : "NO");
+  payload.freshness_status = payload.freshness_status || (stale ? "STALE_BLOCK" : "LIVE_OR_CURRENT");
+  payload.freshness_plan = payload.freshness_plan || (
+    stale
+      ? `Execution blocked: market data is ${hasAge ? age : "unknown"} day(s) old; refresh live data before acting.`
+      : "Data freshness is acceptable for scanner use."
+  );
+
+  if (stale) {
+    appendReasonCode(payload, "data_stale_block");
+    if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
+      output.action = "SETUP FORMING";
+      payload.signal_stage = "SETUP";
+    }
+    if (["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(output.action)) {
+      payload.signal_quality = "STALE DATA";
+      payload.transition_label = "Data Stale";
+      payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -30, -30);
+      payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
+      output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
+      output.score = capScore(output.score);
+      payload.next_day_bias = "EXECUTION BLOCKED";
+      payload.next_day_plan = payload.freshness_plan;
+      output.notes = [output.notes, payload.freshness_plan].filter(Boolean).join("; ");
+    }
+  }
+
+  output.payload = payload;
+  return output;
+}
+
+function applyBuyTierFallback(output) {
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  if (!payload.buy_tier) {
+    if (payload.freshness_block === "YES" && ["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(output.action)) {
+      payload.buy_tier = "SETUP ONLY";
+      payload.execution_priority = 4;
+      payload.execution_plan = "Do not execute directly; treat as a setup until the blocker clears.";
+      appendReasonCode(payload, "setup_only_tier");
+    } else if (output.action === "BUY CANDIDATE") {
+      payload.buy_tier = "BUY WATCH";
+      payload.execution_priority = 2;
+      payload.execution_plan = "Qualified buy watch; prefer reference-zone entry and Pine confirmation.";
+    } else if (output.action === "WATCH TREND") {
+      payload.buy_tier = "WATCH";
+      payload.execution_priority = 5;
+    } else if (output.action === "EXIT PRESSURE") {
+      payload.buy_tier = "EXIT RISK";
+      payload.execution_priority = 8;
+    } else {
+      payload.buy_tier = "NO TRADE";
+      payload.execution_priority = 9;
+    }
+  }
+  output.payload = payload;
+  return output;
+}
+
 function rowDto(row) {
   const output = {};
   [...new Set([...SNAPSHOT_FIELDS, ...HISTORY_FIELDS])].forEach((field) => {
     if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
   });
   output.payload = cleanPayload(row);
-  return applyAuditGateFallback(output);
+  return applyBuyTierFallback(applyFreshnessFallback(applyAuditGateFallback(output)));
 }
 
 function runDto(row) {
@@ -272,12 +365,17 @@ function runDto(row) {
   output.payload = {
     failed_symbols: Array.isArray(payload.failed_symbols) ? payload.failed_symbols.slice(0, 25) : [],
     stale_cache_fallbacks: Array.isArray(payload.stale_cache_fallbacks) ? payload.stale_cache_fallbacks.slice(0, 25) : [],
+    stale_execution_blocks: Number(payload.stale_execution_blocks || 0),
+    max_execution_data_age_days: Number(payload.max_execution_data_age_days || 0),
   };
   return output;
 }
 
 function sortRows(rows) {
   return [...rows].sort((a, b) => {
+    const aPriority = Number(a.execution_priority ?? a.payload?.execution_priority ?? 99);
+    const bPriority = Number(b.execution_priority ?? b.payload?.execution_priority ?? 99);
+    if (aPriority !== bPriority) return aPriority - bPriority;
     const aScore = Number(a.adjusted_score ?? a.payload?.adjusted_score ?? a.score ?? 0);
     const bScore = Number(b.adjusted_score ?? b.payload?.adjusted_score ?? b.score ?? 0);
     if (bScore !== aScore) return bScore - aScore;

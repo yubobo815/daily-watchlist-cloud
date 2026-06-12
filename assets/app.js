@@ -21,6 +21,7 @@ const WATCHLIST_COLUMNS = [
   ["ticker", "Sym"],
   ["name", "Name"],
   ["action", "Signal"],
+  ["buy_tier", "Tier"],
   ["next_day_bias", "Next Day"],
   ["operator_pressure", "Big Money"],
   ["next_day_plan", "Plan"],
@@ -98,6 +99,14 @@ const REASON_LABELS = {
   operator_distribution: "Operator distribution",
   operator_short_pressure: "Short-pressure proxy",
   operator_squeeze_watch: "Squeeze watch",
+  data_stale_block: "Stale data blocked execution",
+  cached_data_ok: "Cached data recent enough",
+  top_buy_tier: "A+ buy tier",
+  buy_watch_tier: "Buy watch tier",
+  setup_only_tier: "Setup only",
+  feedback_failed: "Prior signal failed",
+  feedback_stale: "Prior signal stale",
+  feedback_working: "Prior signal working",
   historical_edge_caution: "Historical edge caution",
   ticker_edge_weak: "Ticker edge weak",
   ticker_caution: "Ticker caution",
@@ -341,7 +350,7 @@ const state = {
   visibleRows: [],
   filter: "all",
   query: "",
-  sort: "score-desc",
+  sort: "execution_priority-asc",
   historyRows: [],
   ticker: "ORCL",
   tickerName: "",
@@ -636,6 +645,20 @@ function renderOperatorPressure(row) {
   return `<span class="badge entry-pill entry-${operatorPressureTone(pressure)}" title="${escapeHtml(String(pressure))}">${escapeHtml(`${shortOperatorPressure(pressure)}${suffix}`)}</span>`;
 }
 
+function buyTierTone(value) {
+  const text = String(value || "").toUpperCase();
+  if (text === "A+ BUY") return "strong";
+  if (text === "BUY WATCH" || text === "SETUP ONLY" || text === "WATCH") return "constructive";
+  if (text.includes("EXIT") || text.includes("NO TRADE")) return "risk";
+  return "watch";
+}
+
+function renderBuyTier(row) {
+  const tier = payloadValue(row, "buy_tier") || (row.action === "BUY CANDIDATE" ? "BUY WATCH" : "");
+  if (!tier) return "";
+  return `<span class="badge entry-pill entry-${buyTierTone(tier)}">${escapeHtml(String(tier))}</span>`;
+}
+
 function permissionShort(value) {
   const text = String(value || "").toUpperCase();
   if (text === "ALLOW") return "A";
@@ -736,6 +759,8 @@ function behaviorDetail(row) {
   const note = String(row.notes || "").trim();
   const nextDayPlan = String(payloadValue(row, "next_day_plan") || "").trim();
   const operatorPlan = String(payloadValue(row, "operator_plan") || "").trim();
+  const freshnessPlan = String(payloadValue(row, "freshness_plan") || "").trim();
+  const feedbackPlan = String(payloadValue(row, "feedback_plan") || "").trim();
   const operatorPressure = String(payloadValue(row, "operator_pressure") || "").toUpperCase();
   const transition = transitionLabel(row);
   const distanceFromZone = payloadNumeric(row, "distance_from_ref_zone_pct");
@@ -749,10 +774,13 @@ function behaviorDetail(row) {
   if (["YES", "true", true].includes(payloadValue(row, "event_risk"))) {
     return `Event risk: next report is ${daysToReport || "soon"} day(s) away; use extra caution.`;
   }
+  if (payloadValue(row, "freshness_block") === "YES") return freshnessPlan || "Execution blocked: data is stale.";
   if (marketContext === "LAGGING" && ["buy", "setup", "continue"].includes(kind)) {
     return `${pattern} behavior is forming, but it is lagging SPY/QQQ over the last 20 sessions.`;
   }
   if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
+  if (payloadValue(row, "feedback_quality") === "FAILED") return feedbackPlan;
+  if (payloadValue(row, "feedback_quality") === "STALE") return feedbackPlan;
   if (nextDayPlan) return nextDayPlan;
   if (operatorPlan && operatorPressure !== "NEUTRAL") return operatorPlan;
   if (note) return note;
@@ -1156,9 +1184,18 @@ function renderScoreBreakdown(row) {
   const distribution = Number(payloadValue(row, "distribution_score"));
   const absorption = Number(payloadValue(row, "absorption_score"));
   const shortProxy = Number(payloadValue(row, "short_pressure_proxy"));
+  const buyTier = payloadValue(row, "buy_tier") || "n/a";
+  const freshnessStatus = payloadValue(row, "freshness_status") || "UNKNOWN";
+  const dataAge = Number(payloadValue(row, "data_age_days"));
+  const feedbackQuality = payloadValue(row, "feedback_quality") || "NO HISTORY";
+  const feedbackReturn = Number(payloadValue(row, "feedback_return_pct"));
+  const feedbackDrawdown = Number(payloadValue(row, "feedback_max_drawdown_pct"));
   const items = [
+    ["Execution Tier", buyTier],
+    ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
     ["Big Money", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
+    ["Feedback", `${feedbackQuality}${Number.isFinite(feedbackReturn) ? ` ${fmtSignedNumber(feedbackReturn, 1)}%` : ""}${Number.isFinite(feedbackDrawdown) ? ` / DD ${fmtNumber(feedbackDrawdown, 1)}%` : ""}`],
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
     ["Volume", volume],
@@ -1241,16 +1278,18 @@ function renderRunHealthPanel(runInfo, rows = []) {
 function runHealthStatus(runInfo, rows = []) {
   const failed = Number(runInfo?.symbols_failed || 0);
   const stale = Number(runInfo?.symbols_stale_cache || 0);
+  const staleBlocks = Number(runInfo?.payload?.stale_execution_blocks || 0);
   const pendingGates = auditGatePendingCount(rows);
   const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
   const total = Number(runInfo?.symbols_total || rows.length || 0);
   const liveOk = runInfo?.live_access_ok;
   const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
   const hasRows = rows.length > 0 || analyzed > 0;
-  const hasIssue = liveOk === false || failed > 0 || stale > 0 || pendingGates > 0;
-  const tone = !hasRows ? "bad" : hasIssue ? "warn" : "ok";
-  const label = tone === "bad" ? "Data issue" : tone === "warn" ? "Data caution" : "Live data healthy";
+  const hasIssue = liveOk === false || failed > 0 || stale > 0 || pendingGates > 0 || staleBlocks > 0;
+  const tone = !hasRows || staleBlocks > 0 ? "bad" : hasIssue ? "warn" : "ok";
+  const label = tone === "bad" ? "Execution blocked" : tone === "warn" ? "Data caution" : "Live data healthy";
   const caveats = [
+    staleBlocks ? `${staleBlocks} stale-data blocks` : "",
     pendingGates ? `${pendingGates} execution proof pending` : "",
     stale ? `${stale} cached` : "",
     failed ? `${failed} failed` : "",
@@ -1292,13 +1331,15 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
         runInfo.live_access_ok === false
         || Number(runInfo.symbols_failed || 0)
         || Number(runInfo.symbols_stale_cache || 0)
+        || Number(runInfo.payload?.stale_execution_blocks || 0)
         || auditGatePendingCount(rows)
       )
     ));
+    runStatus.classList.toggle("bad", Boolean(runInfo && Number(runInfo.payload?.stale_execution_blocks || 0)));
   }
   if (status) status.textContent = "";
   if (disclaimer) disclaimer.textContent = APP_DISCLAIMER;
-  if (runStatus) runStatus.classList.remove("bad");
+  if (runStatus && !(runInfo && Number(runInfo.payload?.stale_execution_blocks || 0))) runStatus.classList.remove("bad");
   renderRunHealthPanel(runInfo, rows);
 }
 
@@ -1442,6 +1483,7 @@ function renderWatchlistCell(row, key) {
   if (key === "setup") {
     return `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
+  if (key === "buy_tier") return renderBuyTier(row);
   if (key === "next_day_bias") return renderNextDayBias(row);
   if (key === "operator_pressure") return renderOperatorPressure(row);
   if (key === "next_day_plan") return `<span class="behavior-detail">${escapeHtml(payloadValue(row, "next_day_plan") || "")}</span>`;
@@ -1463,6 +1505,12 @@ function searchableRowText(row) {
     setupLabel(row.setup),
     strengthLabel(row),
     entryQualityLabel(row),
+    payloadValue(row, "buy_tier"),
+    payloadValue(row, "execution_plan"),
+    payloadValue(row, "freshness_status"),
+    payloadValue(row, "freshness_plan"),
+    payloadValue(row, "feedback_quality"),
+    payloadValue(row, "feedback_plan"),
     payloadValue(row, "next_day_bias"),
     payloadValue(row, "next_day_plan"),
     payloadValue(row, "operator_pressure"),
@@ -1857,6 +1905,11 @@ function renderWatchlist() {
     .sort((a, b) => {
       if (sortKey === "ticker") return a.ticker.localeCompare(b.ticker) * multiplier;
       if (sortKey === "score") return (convictionScore(a) - convictionScore(b)) * multiplier;
+      if (sortKey === "execution_priority") {
+        const priorityMove = (payloadNumeric(a, "execution_priority") - payloadNumeric(b, "execution_priority")) * multiplier;
+        if (priorityMove) return priorityMove;
+        return convictionScore(b) - convictionScore(a);
+      }
       return (Number(a[sortKey] || 0) - Number(b[sortKey] || 0)) * multiplier;
     });
 

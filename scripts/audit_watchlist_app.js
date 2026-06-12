@@ -118,6 +118,7 @@ function auditSupabaseFallback() {
 
   const gated = rowDto({
     ticker: "TEST",
+    data_date: new Date().toISOString().slice(0, 10),
     action: "BUY CANDIDATE",
     setup: "BREAKOUT BUY",
     score: 99,
@@ -134,6 +135,15 @@ function auditSupabaseFallback() {
       absorption_score: 72,
       short_pressure_proxy: 0,
       squeeze_watch: "NO",
+      buy_tier: "A+ BUY",
+      execution_priority: 1,
+      freshness_status: "LIVE_OR_CURRENT",
+      freshness_block: "NO",
+      data_age_days: 1,
+      feedback_quality: "WORKING",
+      feedback_return_pct: 4.2,
+      feedback_max_drawdown_pct: -1.1,
+      feedback_stop_hit: "NO",
     },
   });
   assert(gated.action === "BUY CANDIDATE", "execution-gated BUY row must be preserved");
@@ -141,6 +151,9 @@ function auditSupabaseFallback() {
   assert(gated.payload.next_day_bias === "BULLISH CONFIRM", "execution-gated BUY row must keep next-day bias");
   assert(gated.payload.operator_pressure === "ACCUMULATION / ABSORPTION", "execution-gated BUY row must keep operator-pressure read");
   assert(gated.payload.absorption_score === 72, "execution-gated BUY row must keep absorption score");
+  assert(gated.payload.buy_tier === "A+ BUY", "execution-gated BUY row must keep execution tier");
+  assert(gated.payload.freshness_block === "NO", "execution-gated BUY row must keep freshness gate state");
+  assert(gated.payload.feedback_quality === "WORKING", "execution-gated BUY row must keep feedback state");
 
   return {
     legacyAction: legacy.action,

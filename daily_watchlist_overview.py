@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.12-next-day-operator-pressure"
+SCANNER_VERSION = "2026.06.12-freshness-tier-feedback"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -43,6 +43,9 @@ MAX_SIGNAL_RISK_PCT = 7.0
 NUMERIC_TOLERANCE = 1e-6
 TICKER_EDGE_MIN_TRADES = 6
 WALK_FORWARD_MIN_TEST_TRADES = 3
+MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
+TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
+BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -563,6 +566,19 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "absorption_score",
     "short_pressure_proxy",
     "squeeze_watch",
+    "data_age_days",
+    "freshness_status",
+    "freshness_block",
+    "freshness_plan",
+    "buy_tier",
+    "execution_priority",
+    "execution_plan",
+    "feedback_window_days",
+    "feedback_return_pct",
+    "feedback_max_drawdown_pct",
+    "feedback_stop_hit",
+    "feedback_quality",
+    "feedback_plan",
     "reason_codes",
 }
 
@@ -802,6 +818,176 @@ def signal_stage(action: str) -> str:
 
 def signal_stage_rank(action: str) -> int:
     return SIGNAL_STAGE_ORDER.get(action, 0)
+
+
+def days_between_dates(later: str, earlier: str) -> Optional[int]:
+    try:
+        later_date = datetime.fromisoformat(str(later)).date()
+        earlier_date = datetime.fromisoformat(str(earlier)).date()
+    except (TypeError, ValueError):
+        return None
+    return (later_date - earlier_date).days
+
+
+def append_unique_reason(row: dict, code: str) -> None:
+    codes = list(row.get("reason_codes") or [])
+    if code not in codes:
+        codes.append(code)
+    row["reason_codes"] = codes
+
+
+def apply_data_freshness_gate(row: dict, run_date: str, cached_tickers: set[str]) -> dict:
+    ticker = str(row.get("ticker", "")).upper()
+    data_date = row.get("date") or row.get("data_date") or row.get("history_date")
+    data_age_days = days_between_dates(run_date, str(data_date)) if data_date else None
+    cached_source = ticker in cached_tickers
+    freshness_block = data_age_days is None or data_age_days > MAX_EXECUTION_DATA_AGE_DAYS
+
+    if freshness_block:
+        freshness_status = "STALE_BLOCK"
+        freshness_plan = (
+            f"Execution blocked: market data is {data_age_days if data_age_days is not None else 'unknown'} day(s) old; refresh live data before acting."
+        )
+        append_unique_reason(row, "data_stale_block")
+        actionable_stale = row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+        if row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            row["action"] = "SETUP FORMING"
+            row["signal_stage"] = "SETUP"
+        if actionable_stale:
+            row["adjusted_score"] = min(float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0), 49.0)
+            row["score"] = min(float(numeric_or_none(row.get("score")) or 0), 49.0)
+            row["signal_quality"] = "STALE DATA"
+            row["transition_label"] = "Data Stale"
+            row["transition_score"] = min(float(numeric_or_none(row.get("transition_score")) or 0), -30.0)
+            row["next_day_bias"] = "EXECUTION BLOCKED"
+            row["next_day_plan"] = freshness_plan
+            row["notes"] = "; ".join([item for item in [row.get("notes"), freshness_plan] if item])
+    elif cached_source:
+        freshness_status = "CACHED_OK"
+        freshness_plan = "Cached data is recent enough for reference, but confirm live price and Pine chart before execution."
+        append_unique_reason(row, "cached_data_ok")
+    else:
+        freshness_status = "LIVE_OR_CURRENT"
+        freshness_plan = "Data freshness is acceptable for scanner use."
+
+    row["data_age_days"] = data_age_days if data_age_days is not None else ""
+    row["freshness_status"] = freshness_status
+    row["freshness_block"] = bool_text(freshness_block)
+    row["freshness_plan"] = freshness_plan
+    return row
+
+
+def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
+    action = row.get("action", "")
+    quality = str(row.get("signal_quality") or "").upper()
+    next_day = str(row.get("next_day_bias") or "").upper()
+    operator_pressure = str(row.get("operator_pressure") or "").upper()
+    adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
+    score = float(numeric_or_none(row.get("score")) or 0)
+    fresh = row.get("freshness_block") != "YES"
+    risk_ok = row.get("risk_permission") == "ALLOW"
+    market_ok = row.get("market_permission") != "BLOCK"
+    absorption_or_neutral = operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
+
+    if action == "BUY CANDIDATE" and fresh and risk_ok and market_ok and next_day == "BULLISH CONFIRM" and absorption_or_neutral and adjusted_score >= 92 and rank_index < TOP_BUY_TIER_LIMIT:
+        return "A+ BUY", 1, "Highest execution tier; still confirm on Pine before acting."
+    if action == "BUY CANDIDATE" and fresh and next_day == "BULLISH CONFIRM" and adjusted_score >= 78 and rank_index < BUY_WATCH_TIER_LIMIT:
+        return "BUY WATCH", 2, "Qualified buy watch; prefer reference-zone entry and Pine confirmation."
+    if action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
+        if quality in {"STALE DATA", "EVENT RISK", "EXTENDED"} or row.get("freshness_block") == "YES":
+            return "SETUP ONLY", 4, "Do not execute directly; treat as a setup until the blocker clears."
+        return "SETUP ONLY", 3, "Setup is useful, but not in the top execution tier."
+    if action == "WATCH TREND":
+        return "WATCH", 5, "Trend is worth monitoring, not an entry signal."
+    if action == "EXIT PRESSURE":
+        return "EXIT RISK", 8, "Risk pressure is elevated."
+    return "NO TRADE", 9 if score >= 25 else 10, "No actionable edge."
+
+
+def apply_buy_tiers(rows: list[dict]) -> list[dict]:
+    buy_rank = 0
+    for row in rows:
+        if row.get("action") == "BUY CANDIDATE":
+            tier, priority, plan = buy_tier_for(row, buy_rank)
+            buy_rank += 1
+        else:
+            tier, priority, plan = buy_tier_for(row, buy_rank)
+        row["buy_tier"] = tier
+        row["execution_priority"] = priority
+        row["execution_plan"] = plan
+        if tier == "A+ BUY":
+            append_unique_reason(row, "top_buy_tier")
+        elif tier == "BUY WATCH":
+            append_unique_reason(row, "buy_watch_tier")
+        elif tier == "SETUP ONLY":
+            append_unique_reason(row, "setup_only_tier")
+    return rows
+
+
+def signal_outcome_from_history(row: dict, ticker_history: list[dict]) -> dict:
+    if not ticker_history:
+        return {
+            "feedback_window_days": "",
+            "feedback_return_pct": "",
+            "feedback_max_drawdown_pct": "",
+            "feedback_stop_hit": "",
+            "feedback_quality": "NO HISTORY",
+            "feedback_plan": "Not enough behavior history to score this signal yet.",
+        }
+
+    latest_date = row.get("date")
+    latest_close = numeric_or_none(row.get("close"))
+    setup_rows = [
+        item for item in ticker_history
+        if item.get("action") in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"}
+        and item.get("date") != latest_date
+    ]
+    anchor = setup_rows[-1] if setup_rows else ticker_history[0]
+    anchor_close = numeric_or_none(anchor.get("close"))
+    anchor_stop = numeric_or_none(anchor.get("stop_est"))
+    if not latest_close or not anchor_close or float(anchor_close) <= 0:
+        return {
+            "feedback_window_days": "",
+            "feedback_return_pct": "",
+            "feedback_max_drawdown_pct": "",
+            "feedback_stop_hit": "",
+            "feedback_quality": "NO HISTORY",
+            "feedback_plan": "Not enough close data to score this signal yet.",
+        }
+
+    try:
+        anchor_index = next(index for index, item in enumerate(ticker_history) if item is anchor)
+    except StopIteration:
+        anchor_index = 0
+    window_rows = ticker_history[anchor_index:]
+    lows = [float(item.get("close")) for item in window_rows if numeric_or_none(item.get("close"))]
+    min_close = min(lows) if lows else float(latest_close)
+    feedback_return = (float(latest_close) / float(anchor_close) - 1) * 100
+    max_drawdown = (min_close / float(anchor_close) - 1) * 100
+    stop_hit = bool(anchor_stop and min_close <= float(anchor_stop))
+    window_days = max(1, len(window_rows))
+
+    if stop_hit or max_drawdown <= -7.0:
+        quality = "FAILED"
+        plan = "Prior signal has drawdown/stop stress; require fresh reclaim before upgrading."
+    elif feedback_return >= 3.0:
+        quality = "WORKING"
+        plan = "Prior signal is working; avoid chasing and prefer controlled pullbacks."
+    elif window_days >= 3 and feedback_return < 1.0:
+        quality = "STALE"
+        plan = "Prior signal has not progressed; downgrade urgency until price proves itself."
+    else:
+        quality = "PENDING"
+        plan = "Signal feedback is still developing."
+
+    return {
+        "feedback_window_days": window_days,
+        "feedback_return_pct": round(float(feedback_return), 2),
+        "feedback_max_drawdown_pct": round(float(max_drawdown), 2),
+        "feedback_stop_hit": bool_text(stop_hit),
+        "feedback_quality": quality,
+        "feedback_plan": plan,
+    }
 
 
 def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_pullback_pct: float) -> tuple[float, str]:
@@ -2185,6 +2371,19 @@ def apply_quality_overlays(row: dict, market_context: dict) -> dict:
     else:
         signal_quality = "NEUTRAL"
 
+    feedback_quality = row.get("feedback_quality", "")
+    if actionable and feedback_quality == "FAILED":
+        adjusted_score = max(0.0, adjusted_score - 18.0)
+        signal_quality = "FEEDBACK FAILED"
+        reason_codes.append("feedback_failed")
+    elif actionable and feedback_quality == "STALE":
+        adjusted_score = max(0.0, adjusted_score - 12.0)
+        signal_quality = "FEEDBACK STALE"
+        reason_codes.append("feedback_stale")
+    elif actionable and feedback_quality == "WORKING":
+        adjusted_score = min(128.0, adjusted_score + 4.0)
+        reason_codes.append("feedback_working")
+
     row["adjusted_score"] = round(float(adjusted_score), 1)
     row["signal_quality"] = signal_quality
     row["reason_codes"] = list(dict.fromkeys(reason_codes))
@@ -2494,6 +2693,7 @@ def write_history_html(path: Path) -> None:
 def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, preflight_text: Optional[str] = None) -> None:
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
+        "buy_tier",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
         "operator_pressure", "operator_pressure_score", "operator_plan",
         "setup", "adaptive_mode", "psychology", "reward_risk",
@@ -2524,6 +2724,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "score": "Score",
         "close": "Last",
         "day_change_pct": "Chg%",
+        "buy_tier": "Exec Tier",
         "next_day_bias": "Next Day",
         "next_day_bias_score": "Bias",
         "next_day_plan": "Plan",
@@ -2600,6 +2801,9 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
             return f"<span class='mode'>{short}</span>"
         if col == "next_day_bias":
             return f"<span class='badge setup'>{escaped}</span>" if text else "<span class='dash'>-</span>"
+        if col == "buy_tier":
+            klass = "buy" if text == "A+ BUY" else "setup" if text in {"BUY WATCH", "SETUP ONLY"} else "exit" if text == "EXIT RISK" else "watch"
+            return f"<span class='badge action {klass}'>{escaped}</span>" if text else "<span class='dash'>-</span>"
         if col == "operator_pressure":
             if not text:
                 return "<span class='dash'>-</span>"
@@ -2630,10 +2834,12 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         action_kind = action_class(row["action"])
         score_value = row.get("score", "")
         change_value = row.get("day_change_pct", "")
+        priority_value = row.get("execution_priority", "")
         data_attrs = (
             f"data-action='{action_kind}' "
             f"data-score='{html.escape(str(score_value))}' "
             f"data-change='{html.escape(str(change_value))}' "
+            f"data-priority='{html.escape(str(priority_value))}' "
             f"data-ticker='{html.escape(str(row.get('ticker', '')))}' "
             f"data-search='{html.escape(search_text)}'"
         )
@@ -2904,6 +3110,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       <input id="search" type="search" placeholder="Search ticker, setup, note, mode..." autocomplete="off">
       <button class="pill active" type="button" data-filter="all">All</button>
       <select id="sort">
+        <option value="priority-asc">Execution tier first</option>
         <option value="score-desc">Score high to low</option>
         <option value="change-desc">Best day change</option>
         <option value="change-asc">Worst day change</option>
@@ -2940,6 +3147,9 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
       rows.sort((a, b) => {{
         if (field === "ticker") {{
           return a.dataset.ticker.localeCompare(b.dataset.ticker) * multiplier;
+        }}
+        if (field === "priority") {{
+          return ((Number.parseFloat(a.dataset.priority) || 99) - (Number.parseFloat(b.dataset.priority) || 99)) * multiplier;
         }}
         const key = field === "change" ? "change" : "score";
         const av = Number.parseFloat(a.dataset[key]) || 0;
@@ -3037,6 +3247,7 @@ def main() -> None:
             row = classify_and_score(ticker, df, market_permission=market_permission)
             ticker_history = build_behavior_history(ticker, df, days=args.history_days)
             row = apply_latest_signal_context(row, ticker_history)
+            row.update(signal_outcome_from_history(row, ticker_history))
             if not args.skip_profiles:
                 row.update(fetch_company_profile(ticker, refresh=args.refresh and live_access_ok))
             row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
@@ -3051,6 +3262,7 @@ def main() -> None:
                 row = classify_and_score(ticker, df, market_permission=market_permission)
                 ticker_history = build_behavior_history(ticker, df, days=args.history_days)
                 row = apply_latest_signal_context(row, ticker_history)
+                row.update(signal_outcome_from_history(row, ticker_history))
                 if not args.skip_profiles:
                     row.update(fetch_company_profile(ticker, refresh=False))
                 row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
@@ -3074,15 +3286,32 @@ def main() -> None:
     today = local_run_date()
     csv_path = Path(f"daily_watchlist_overview_{today}.csv")
     html_path = Path(f"daily_watchlist_overview_{today}.html")
-    report.to_csv(csv_path, index=False)
     data_dates = sorted(str(value) for value in pd.to_datetime(report["date"]).dt.date.unique())
     latest_data_date = data_dates[-1]
     earliest_data_date = data_dates[0]
+    cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
+    rows = [apply_data_freshness_gate(row, today, cached_tickers) for row in rows]
+    rows = sorted(
+        rows,
+        key=lambda item: (
+            -float(numeric_or_none(item.get("adjusted_score")) or numeric_or_none(item.get("score")) or 0),
+            -float(numeric_or_none(item.get("score")) or 0),
+            str(item.get("action", "")),
+            str(item.get("ticker", "")),
+        ),
+    )
+    rows = apply_buy_tiers(rows)
+    report = pd.DataFrame(rows)
+    sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
+    report = report.sort_values(["execution_priority", sort_score_col, "score", "action", "ticker"], ascending=[True, False, False, True, True]).reset_index(drop=True)
     status_parts = [f"Report data as of {latest_data_date}"]
     if earliest_data_date != latest_data_date:
         status_parts.append(f"mixed source dates {earliest_data_date} to {latest_data_date}")
     if stale_cache_fallbacks:
         status_parts.append(f"{len(stale_cache_fallbacks)} symbols used cached data")
+    stale_blocks = int((report.get("freshness_block", pd.Series(dtype=str)) == "YES").sum())
+    if stale_blocks:
+        status_parts.append(f"{stale_blocks} execution-blocked for stale data")
     if failures:
         status_parts.append(f"{len(failures)} symbols failed")
     status_parts.append(f"market {market_permission['market_permission']}: {market_permission['market_regime_summary']}")
@@ -3111,9 +3340,12 @@ def main() -> None:
         "payload": {
             "failures": failures[:25],
             "stale_cache_fallbacks": stale_cache_fallbacks[:25],
+            "stale_execution_blocks": stale_blocks,
+            "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
         },
     }
 
+    report.to_csv(csv_path, index=False)
     write_html(report, html_path, status_text=status_text, preflight_text=preflight_text)
     report.to_csv("daily_watchlist_overview_latest.csv", index=False)
     write_html(report, Path("daily_watchlist_overview_latest.html"), status_text=status_text, preflight_text=preflight_text)
