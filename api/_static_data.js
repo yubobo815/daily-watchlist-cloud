@@ -19,12 +19,91 @@ function capScore(value, cap = UNGATED_SCORE_CAP) {
 }
 
 function appendReasonCode(payload, code) {
+  if (!code) return;
   const raw = payload.reason_codes;
   const codes = Array.isArray(raw)
     ? raw
     : (typeof raw === "string" && raw ? raw.split(",").map((item) => item.trim()) : []);
   if (!codes.includes(code)) codes.push(code);
   payload.reason_codes = codes.filter(Boolean);
+}
+
+function applyAntiSignalFallback(row) {
+  const next = { ...(row || {}) };
+  const payload = next.payload && typeof next.payload === "object" ? { ...next.payload } : {};
+  const operatorState = String(payload.operator_state || "").toUpperCase();
+  const operatorPressure = String(payload.operator_pressure || "").toUpperCase();
+  const nextDay = String(payload.next_day_bias || "").toUpperCase();
+  const extensionState = String(payload.extension_state || "").toUpperCase();
+  const quality = String(payload.signal_quality || "").toUpperCase();
+  const bullTrapScore = Number(payload.bull_trap_score || 0);
+  const distributionScore = Number(payload.distribution_score || 0);
+  const triggers = [];
+  let computedScore = 0;
+
+  if (payload.freshness_block === "YES" || quality === "STALE DATA") {
+    computedScore += 45;
+    triggers.push("stale data");
+  }
+  if (operatorState === "BULL_TRAP" || bullTrapScore >= 58) {
+    computedScore += 38;
+    triggers.push("bull trap");
+  }
+  if (operatorState === "DISTRIBUTION" || operatorPressure.includes("DISTRIBUTION") || distributionScore >= 55) {
+    computedScore += 34;
+    triggers.push("distribution");
+  }
+  if (extensionState === "EXTENDED" || nextDay === "AVOID CHASE" || quality === "EXTENDED") {
+    computedScore += 28;
+    triggers.push("extended chase");
+  }
+  if (nextDay === "EXECUTION BLOCKED") {
+    computedScore += 35;
+    triggers.push("execution blocked");
+  } else if (nextDay === "DEFENSIVE / EXIT RISK") {
+    computedScore += 24;
+    triggers.push("defensive tape");
+  }
+
+  const existingScore = Number(payload.anti_signal_score || 0);
+  const score = Math.min(100, Math.max(computedScore, Number.isFinite(existingScore) ? existingScore : 0));
+  const uniqueTriggers = [...new Set(triggers)];
+  let level = payload.anti_signal_level || "NONE";
+  if (score >= 45) level = "BLOCK";
+  else if (score >= 25) level = "CAUTION";
+
+  payload.anti_signal_score = Number.isFinite(score) ? score : 0;
+  payload.anti_signal_level = level;
+  payload.anti_signal_plan = payload.anti_signal_plan || (
+    level === "BLOCK"
+      ? `Anti-signal block: ${uniqueTriggers.join(", ")}; downgrade execution even if trend score is high.`
+      : level === "CAUTION"
+        ? `Anti-signal caution: ${uniqueTriggers.join(", ")}; keep on watch, but do not upgrade without a clean reset.`
+        : "No major anti-signal penalty."
+  );
+
+  if (level !== "NONE" && ["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(next.action)) {
+    payload.buy_tier = "SETUP ONLY";
+    payload.execution_priority = level === "BLOCK" ? 4 : Math.max(Number(payload.execution_priority || 3), 3);
+    payload.execution_plan = payload.anti_signal_plan;
+    appendReasonCode(payload, level === "BLOCK" ? "anti_signal_block" : "anti_signal_caution");
+    appendReasonCode(payload, "setup_only_tier");
+    if (level === "BLOCK") {
+      if (next.action === "BUY CANDIDATE" || next.action === "STRONG CONTINUATION") {
+        next.action = "SETUP FORMING";
+        payload.signal_stage = "SETUP";
+      }
+      payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
+      next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
+      next.score = capScore(next.score);
+    } else {
+      payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score, 76);
+      next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score, 76);
+    }
+  }
+
+  next.payload = payload;
+  return next;
 }
 
 function hasKnownAuditGate(value) {
@@ -56,7 +135,7 @@ function conservativeFallbackRow(row) {
     }
   }
   next.payload = payload;
-  return next;
+  return applyAntiSignalFallback(next);
 }
 
 function staticLatestPayload() {
