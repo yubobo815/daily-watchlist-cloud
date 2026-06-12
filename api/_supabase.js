@@ -64,6 +64,9 @@ const RUN_FIELDS = [
 
 const PAYLOAD_FIELDS = [
   "adjusted_score",
+  "anti_signal_level",
+  "anti_signal_plan",
+  "anti_signal_score",
   "atr_pct",
   "benchmark_return_20d_pct",
   "buy_quality_minimum",
@@ -325,10 +328,108 @@ function applyFreshnessFallback(output) {
   return output;
 }
 
+function antiSignalFallback(output) {
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  const operatorState = String(payload.operator_state || "").toUpperCase();
+  const operatorPressure = String(payload.operator_pressure || "").toUpperCase();
+  const nextDay = String(payload.next_day_bias || "").toUpperCase();
+  const extensionState = String(payload.extension_state || "").toUpperCase();
+  const quality = String(payload.signal_quality || "").toUpperCase();
+  const bullTrapScore = Number(payload.bull_trap_score || 0);
+  const distributionScore = Number(payload.distribution_score || 0);
+  const triggers = [];
+  let computedScore = 0;
+
+  if (payload.freshness_block === "YES" || quality === "STALE DATA") {
+    computedScore += 45;
+    triggers.push("stale data");
+  }
+  if (operatorState === "BULL_TRAP" || bullTrapScore >= 58) {
+    computedScore += 38;
+    triggers.push("bull trap");
+  }
+  if (operatorState === "DISTRIBUTION" || operatorPressure.includes("DISTRIBUTION") || distributionScore >= 55) {
+    computedScore += 34;
+    triggers.push("distribution");
+  }
+  if (extensionState === "EXTENDED" || nextDay === "AVOID CHASE" || quality === "EXTENDED") {
+    computedScore += 28;
+    triggers.push("extended chase");
+  }
+  if (nextDay === "EXECUTION BLOCKED") {
+    computedScore += 35;
+    triggers.push("execution blocked");
+  } else if (nextDay === "DEFENSIVE / EXIT RISK") {
+    computedScore += 24;
+    triggers.push("defensive tape");
+  }
+
+  const existingScore = Number(payload.anti_signal_score || 0);
+  const score = Math.min(100, Math.max(computedScore, Number.isFinite(existingScore) ? existingScore : 0));
+  const uniqueTriggers = [...new Set(triggers)];
+  let level = payload.anti_signal_level || "NONE";
+  if (score >= 45) level = "BLOCK";
+  else if (score >= 25) level = "CAUTION";
+
+  payload.anti_signal_score = Number.isFinite(score) ? score : 0;
+  payload.anti_signal_level = level;
+  payload.anti_signal_plan = payload.anti_signal_plan || (
+    level === "BLOCK"
+      ? `Anti-signal block: ${uniqueTriggers.join(", ")}; downgrade execution even if trend score is high.`
+      : level === "CAUTION"
+        ? `Anti-signal caution: ${uniqueTriggers.join(", ")}; keep on watch, but do not upgrade without a clean reset.`
+        : "No major anti-signal penalty."
+  );
+
+  if (level === "NONE") {
+    output.payload = payload;
+    return output;
+  }
+
+  appendReasonCode(payload, level === "BLOCK" ? "anti_signal_block" : "anti_signal_caution");
+  const reasonByTrigger = {
+    "stale data": "anti_stale_data",
+    "bull trap": "anti_bull_trap",
+    distribution: "anti_distribution",
+    "extended chase": "anti_extended_chase",
+    "execution blocked": "anti_execution_blocked",
+    "defensive tape": "anti_defensive_tape",
+  };
+  uniqueTriggers.forEach((trigger) => appendReasonCode(payload, reasonByTrigger[trigger]));
+
+  if (["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(output.action)) {
+    payload.buy_tier = "SETUP ONLY";
+    payload.execution_priority = level === "BLOCK" ? 4 : Math.max(Number(payload.execution_priority || 3), 3);
+    payload.execution_plan = payload.anti_signal_plan;
+    appendReasonCode(payload, "setup_only_tier");
+    if (level === "BLOCK") {
+      if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
+        output.action = "SETUP FORMING";
+        payload.signal_stage = "SETUP";
+      }
+      payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
+      output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
+      output.score = capScore(output.score);
+    } else {
+      const cap = 76;
+      payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score, cap);
+      output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score, cap);
+    }
+  }
+
+  output.payload = payload;
+  return output;
+}
+
 function applyBuyTierFallback(output) {
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
   if (!payload.buy_tier) {
-    if (payload.freshness_block === "YES" && ["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(output.action)) {
+    if (["BLOCK", "CAUTION"].includes(payload.anti_signal_level) && ["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(output.action)) {
+      payload.buy_tier = "SETUP ONLY";
+      payload.execution_priority = payload.anti_signal_level === "BLOCK" ? 4 : 3;
+      payload.execution_plan = payload.anti_signal_plan || "Anti-signal penalty active; do not execute directly.";
+      appendReasonCode(payload, "setup_only_tier");
+    } else if (payload.freshness_block === "YES" && ["BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"].includes(output.action)) {
       payload.buy_tier = "SETUP ONLY";
       payload.execution_priority = 4;
       payload.execution_plan = "Do not execute directly; treat as a setup until the blocker clears.";
@@ -378,7 +479,7 @@ function rowDto(row) {
     if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
   });
   output.payload = cleanPayload(row);
-  return applyBuyTierFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output))));
+  return applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output)))));
 }
 
 function runDto(row) {

@@ -161,6 +161,38 @@ function auditSupabaseFallback() {
   assert(gated.payload.freshness_block === "NO", "execution-gated BUY row must keep freshness gate state");
   assert(gated.payload.feedback_quality === "WORKING", "execution-gated BUY row must keep feedback state");
 
+  const antiBullTrap = rowDto({
+    ticker: "TRAP",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    setup: "BREAKOUT BUY",
+    score: 112,
+    payload: {
+      adjusted_score: 118,
+      market_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      next_day_bias: "BULLISH CONFIRM",
+      next_day_bias_score: 84,
+      operator_pressure: "DISTRIBUTION",
+      operator_pressure_score: 70,
+      operator_state: "BULL_TRAP",
+      operator_state_score: 76,
+      bull_trap_score: 76,
+      distribution_score: 62,
+      absorption_score: 12,
+      freshness_status: "LIVE_OR_CURRENT",
+      freshness_block: "NO",
+      data_age_days: 0,
+      buy_tier: "A+ BUY",
+      execution_priority: 1,
+    },
+  });
+  assert(antiBullTrap.action === "SETUP FORMING", "anti-signal bull-trap BUY row must be downgraded");
+  assert(antiBullTrap.payload.anti_signal_level === "BLOCK", "anti-signal bull-trap row must carry BLOCK level");
+  assert(antiBullTrap.payload.buy_tier === "SETUP ONLY", "anti-signal bull-trap row must not keep A+ BUY tier");
+  assert(Number(antiBullTrap.payload.execution_priority) >= 4, "anti-signal bull-trap row must drop execution priority");
+  assert(adjustedScore(antiBullTrap) <= 49, "anti-signal bull-trap row must be capped below actionable rank");
+
   return {
     legacyAction: legacy.action,
     legacyGates: gateValues(legacy),
@@ -171,6 +203,9 @@ function auditSupabaseFallback() {
     unknownGatedQuality: unknownGated.payload.signal_quality,
     gatedAction: gated.action,
     gatedGates: gateValues(gated),
+    antiBullTrapAction: antiBullTrap.action,
+    antiBullTrapLevel: antiBullTrap.payload.anti_signal_level,
+    antiBullTrapTier: antiBullTrap.payload.buy_tier,
   };
 }
 

@@ -572,6 +572,9 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "absorption_score",
     "short_pressure_proxy",
     "squeeze_watch",
+    "anti_signal_score",
+    "anti_signal_level",
+    "anti_signal_plan",
     "data_age_days",
     "freshness_status",
     "freshness_block",
@@ -947,9 +950,98 @@ def apply_data_freshness_gate(row: dict, run_date: str, cached_tickers: set[str]
     return row
 
 
+def compute_anti_signal(row: dict) -> tuple[float, str, str, list[str]]:
+    operator_state = str(row.get("operator_state") or "").upper()
+    operator_pressure = str(row.get("operator_pressure") or "").upper()
+    next_day = str(row.get("next_day_bias") or "").upper()
+    extension_state = str(row.get("extension_state") or "").upper()
+    quality = str(row.get("signal_quality") or "").upper()
+    freshness_block = str(row.get("freshness_block") or "").upper() == "YES"
+    bull_trap_score = float(numeric_or_none(row.get("bull_trap_score")) or 0)
+    distribution_score = float(numeric_or_none(row.get("distribution_score")) or 0)
+
+    score = 0.0
+    triggers: list[str] = []
+    if freshness_block or quality == "STALE DATA":
+        score += 45.0
+        triggers.append("stale data")
+    if operator_state == "BULL_TRAP" or bull_trap_score >= 58.0:
+        score += 38.0
+        triggers.append("bull trap")
+    if operator_state == "DISTRIBUTION" or "DISTRIBUTION" in operator_pressure or distribution_score >= 55.0:
+        score += 34.0
+        triggers.append("distribution")
+    if extension_state == "EXTENDED" or next_day == "AVOID CHASE" or quality == "EXTENDED":
+        score += 28.0
+        triggers.append("extended chase")
+    if next_day == "EXECUTION BLOCKED":
+        score += 35.0
+        triggers.append("execution blocked")
+    elif next_day == "DEFENSIVE / EXIT RISK":
+        score += 24.0
+        triggers.append("defensive tape")
+
+    score = min(100.0, score)
+    if score >= 45.0:
+        level = "BLOCK"
+        plan = f"Anti-signal block: {', '.join(dict.fromkeys(triggers))}; downgrade execution even if trend score is high."
+    elif score >= 25.0:
+        level = "CAUTION"
+        plan = f"Anti-signal caution: {', '.join(dict.fromkeys(triggers))}; keep on watch, but do not upgrade without a clean reset."
+    else:
+        level = "NONE"
+        plan = "No major anti-signal penalty."
+    return score, level, plan, list(dict.fromkeys(triggers))
+
+
+def apply_anti_signal_penalty(row: dict) -> dict:
+    score, level, plan, triggers = compute_anti_signal(row)
+    row["anti_signal_score"] = round(float(score), 1)
+    row["anti_signal_level"] = level
+    row["anti_signal_plan"] = plan
+
+    if level == "NONE":
+        return row
+
+    append_unique_reason(row, "anti_signal_block" if level == "BLOCK" else "anti_signal_caution")
+    reason_by_trigger = {
+        "stale data": "anti_stale_data",
+        "bull trap": "anti_bull_trap",
+        "distribution": "anti_distribution",
+        "extended chase": "anti_extended_chase",
+        "execution blocked": "anti_execution_blocked",
+        "defensive tape": "anti_defensive_tape",
+    }
+    for trigger in triggers:
+        code = reason_by_trigger.get(trigger)
+        if code:
+            append_unique_reason(row, code)
+
+    actionable = row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
+    raw_score = float(numeric_or_none(row.get("score")) or 0)
+    if level == "BLOCK":
+        if row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            row["action"] = "SETUP FORMING"
+            row["signal_stage"] = "SETUP"
+        if actionable:
+            row["adjusted_score"] = min(adjusted_score, 49.0)
+            row["score"] = min(raw_score, 49.0)
+        if row.get("next_day_bias") not in {"AVOID CHASE", "DEFENSIVE / EXIT RISK", "EXECUTION BLOCKED"}:
+            row["next_day_bias"] = "EXECUTION BLOCKED"
+            row["next_day_plan"] = plan
+    elif level == "CAUTION" and actionable:
+        row["adjusted_score"] = min(adjusted_score, 76.0)
+
+    row["notes"] = "; ".join([item for item in [row.get("notes"), plan] if item])
+    return row
+
+
 def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
     action = row.get("action", "")
     quality = str(row.get("signal_quality") or "").upper()
+    anti_level = str(row.get("anti_signal_level") or "NONE").upper()
+    anti_plan = str(row.get("anti_signal_plan") or "").strip()
     next_day = str(row.get("next_day_bias") or "").upper()
     operator_pressure = str(row.get("operator_pressure") or "").upper()
     operator_state = str(row.get("operator_state") or "").upper()
@@ -963,6 +1055,10 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
         or operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
     )
 
+    if anti_level == "BLOCK" and action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
+        return "SETUP ONLY", 4, anti_plan or "Anti-signal block; do not execute directly."
+    if anti_level == "CAUTION" and action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
+        return "SETUP ONLY", 3, anti_plan or "Anti-signal caution; wait for a cleaner reset."
     if action == "BUY CANDIDATE" and fresh and risk_ok and market_ok and next_day == "BULLISH CONFIRM" and absorption_or_neutral and adjusted_score >= 92 and rank_index < TOP_BUY_TIER_LIMIT:
         return "A+ BUY", 1, "Highest execution tier; still confirm on Pine before acting."
     if action == "BUY CANDIDATE" and fresh and next_day == "BULLISH CONFIRM" and adjusted_score >= 78 and rank_index < BUY_WATCH_TIER_LIMIT:
@@ -2392,7 +2488,7 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
             continue
         snapshot["history_day"] = len(d) - end
         history_rows.append(snapshot)
-    return enrich_signal_transitions(history_rows)
+    return [apply_anti_signal_penalty(row) for row in enrich_signal_transitions(history_rows)]
 
 
 LATEST_SIGNAL_FIELDS = [
@@ -2424,6 +2520,9 @@ LATEST_SIGNAL_FIELDS = [
     "absorption_score",
     "short_pressure_proxy",
     "squeeze_watch",
+    "anti_signal_score",
+    "anti_signal_level",
+    "anti_signal_plan",
     "reason_codes",
 ]
 
@@ -3462,7 +3561,7 @@ def main() -> None:
     latest_data_date = data_dates[-1]
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
-    rows = [apply_data_freshness_gate(row, today, cached_tickers) for row in rows]
+    rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
     rows = sorted(
         rows,
         key=lambda item: (

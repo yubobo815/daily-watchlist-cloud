@@ -42,6 +42,9 @@ create table if not exists public.watchlist_snapshots (
   absorption_score numeric,
   short_pressure_proxy numeric,
   squeeze_watch text,
+  anti_signal_score numeric,
+  anti_signal_level text,
+  anti_signal_plan text,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -105,6 +108,9 @@ create table if not exists public.watchlist_behavior_history (
   absorption_score numeric,
   short_pressure_proxy numeric,
   squeeze_watch text,
+  anti_signal_score numeric,
+  anti_signal_level text,
+  anti_signal_plan text,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -196,6 +202,9 @@ alter table public.watchlist_snapshots add column if not exists distribution_sco
 alter table public.watchlist_snapshots add column if not exists absorption_score numeric;
 alter table public.watchlist_snapshots add column if not exists short_pressure_proxy numeric;
 alter table public.watchlist_snapshots add column if not exists squeeze_watch text;
+alter table public.watchlist_snapshots add column if not exists anti_signal_score numeric;
+alter table public.watchlist_snapshots add column if not exists anti_signal_level text;
+alter table public.watchlist_snapshots add column if not exists anti_signal_plan text;
 alter table public.watchlist_snapshots add column if not exists data_age_days integer;
 alter table public.watchlist_snapshots add column if not exists freshness_status text;
 alter table public.watchlist_snapshots add column if not exists freshness_block text;
@@ -239,6 +248,9 @@ alter table public.watchlist_behavior_history add column if not exists distribut
 alter table public.watchlist_behavior_history add column if not exists absorption_score numeric;
 alter table public.watchlist_behavior_history add column if not exists short_pressure_proxy numeric;
 alter table public.watchlist_behavior_history add column if not exists squeeze_watch text;
+alter table public.watchlist_behavior_history add column if not exists anti_signal_score numeric;
+alter table public.watchlist_behavior_history add column if not exists anti_signal_level text;
+alter table public.watchlist_behavior_history add column if not exists anti_signal_plan text;
 alter table public.watchlist_behavior_history add column if not exists data_age_days integer;
 alter table public.watchlist_behavior_history add column if not exists freshness_status text;
 alter table public.watchlist_behavior_history add column if not exists freshness_block text;

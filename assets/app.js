@@ -102,6 +102,14 @@ const REASON_LABELS = {
   operator_bull_trap: "Bull trap",
   operator_bear_trap: "Bear trap / squeeze watch",
   operator_markup_demand: "Markup demand control",
+  anti_signal_block: "Anti-signal block",
+  anti_signal_caution: "Anti-signal caution",
+  anti_stale_data: "Anti-signal: stale data",
+  anti_bull_trap: "Anti-signal: bull trap",
+  anti_distribution: "Anti-signal: distribution",
+  anti_extended_chase: "Anti-signal: extended chase",
+  anti_execution_blocked: "Anti-signal: execution blocked",
+  anti_defensive_tape: "Anti-signal: defensive tape",
   data_stale_block: "Stale data blocked execution",
   cached_data_ok: "Cached data recent enough",
   top_buy_tier: "A+ buy tier",
@@ -765,6 +773,8 @@ function behaviorDetail(row) {
   const tape = row.psychology || "Mixed tape";
   const mode = row.adaptive_mode || "Mixed mode";
   const note = String(row.notes || "").trim();
+  const antiPlan = String(payloadValue(row, "anti_signal_plan") || "").trim();
+  const antiLevel = String(payloadValue(row, "anti_signal_level") || "NONE").toUpperCase();
   const nextDayPlan = String(payloadValue(row, "next_day_plan") || "").trim();
   const operatorStatePlan = String(payloadValue(row, "operator_state_plan") || "").trim();
   const operatorPlan = String(payloadValue(row, "operator_plan") || "").trim();
@@ -776,6 +786,7 @@ function behaviorDetail(row) {
   const marketContext = payloadValue(row, "market_context");
   const daysToReport = payloadValue(row, "days_to_report");
 
+  if (antiLevel === "BLOCK" || antiLevel === "CAUTION") return antiPlan || "Anti-signal penalty active; downgrade execution.";
   if (payloadValue(row, "extension_state") === "EXTENDED") {
     const distance = distanceFromZone ? `${fmtNumber(distanceFromZone, 1)}% above ` : "above ";
     return `Extended: price is ${distance}the reference zone; wait for a cleaner base or pullback.`;
@@ -1203,8 +1214,11 @@ function renderScoreBreakdown(row) {
   const feedbackQuality = payloadValue(row, "feedback_quality") || "NO HISTORY";
   const feedbackReturn = Number(payloadValue(row, "feedback_return_pct"));
   const feedbackDrawdown = Number(payloadValue(row, "feedback_max_drawdown_pct"));
+  const antiLevel = payloadValue(row, "anti_signal_level") || "NONE";
+  const antiScore = Number(payloadValue(row, "anti_signal_score"));
   const items = [
     ["Execution Tier", buyTier],
+    ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
     ["Operator", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
@@ -1522,6 +1536,8 @@ function searchableRowText(row) {
     strengthLabel(row),
     entryQualityLabel(row),
     payloadValue(row, "buy_tier"),
+    payloadValue(row, "anti_signal_level"),
+    payloadValue(row, "anti_signal_plan"),
     payloadValue(row, "execution_plan"),
     payloadValue(row, "freshness_status"),
     payloadValue(row, "freshness_plan"),
