@@ -127,11 +127,20 @@ function auditSupabaseFallback() {
       next_day_bias: "BULLISH CONFIRM",
       next_day_bias_score: 82,
       next_day_plan: "Confirm on Pine chart; prefer entry near the reference zone with the listed stop.",
+      operator_pressure: "ACCUMULATION / ABSORPTION",
+      operator_pressure_score: 18,
+      operator_plan: "Buyers are absorbing supply; watch pullback or reclaim entries near the reference zone.",
+      distribution_score: 6,
+      absorption_score: 72,
+      short_pressure_proxy: 0,
+      squeeze_watch: "NO",
     },
   });
   assert(gated.action === "BUY CANDIDATE", "execution-gated BUY row must be preserved");
   assert(allGatesAllow(gated), "execution-gated BUY row must carry ALLOW gates");
   assert(gated.payload.next_day_bias === "BULLISH CONFIRM", "execution-gated BUY row must keep next-day bias");
+  assert(gated.payload.operator_pressure === "ACCUMULATION / ABSORPTION", "execution-gated BUY row must keep operator-pressure read");
+  assert(gated.payload.absorption_score === 72, "execution-gated BUY row must keep absorption score");
 
   return {
     legacyAction: legacy.action,

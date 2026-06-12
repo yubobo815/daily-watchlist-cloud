@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.12-next-day-personality"
+SCANNER_VERSION = "2026.06.12-next-day-operator-pressure"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -556,6 +556,13 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "emotion_score",
     "trend_location_score",
     "setup_context_score",
+    "operator_pressure",
+    "operator_pressure_score",
+    "operator_plan",
+    "distribution_score",
+    "absorption_score",
+    "short_pressure_proxy",
+    "squeeze_watch",
     "reason_codes",
 }
 
@@ -1599,11 +1606,88 @@ def classify_and_score(
         100.0,
     )
 
+    distribution_score = 0.0
+    distribution_score += 22.0 if dist_vol else 0.0
+    distribution_score += 26.0 if breakdown_vol else 0.0
+    distribution_score += 18.0 if seller_control else 0.0
+    distribution_score += 14.0 if greed_rejected else 0.0
+    distribution_score += 10.0 if fomo and row.close_loc < 0.55 else 0.0
+    distribution_score += 14.0 if confirmed_break else 0.0
+    distribution_score += 10.0 if trend_damage and close < row.ema_fast else 0.0
+    distribution_score += 8.0 if upper_wick > body_for_ratio * 1.5 and row.close_loc <= 0.50 else 0.0
+    distribution_score += 8.0 if vol_ready and row.volume > row.vol_ma * 1.4 and close < prev.close else 0.0
+    distribution_score = clamp_float(distribution_score, 0.0, 100.0)
+
+    absorption_score = 0.0
+    absorption_score += 24.0 if fear_rejected else 0.0
+    absorption_score += 20.0 if quiet_absorption else 0.0
+    absorption_score += 16.0 if accum_vol else 0.0
+    absorption_score += 12.0 if buyer_control else 0.0
+    absorption_score += 10.0 if lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.55 else 0.0
+    absorption_score += 8.0 if vol_ready and row.volume >= row.vol_ma and low <= row.ema_fast * 1.02 and close >= row.ema_slow else 0.0
+    absorption_score -= 18.0 if breakdown_vol else 0.0
+    absorption_score -= 12.0 if seller_control else 0.0
+    absorption_score = clamp_float(absorption_score, 0.0, 100.0)
+
+    short_pressure_proxy = 0.0
+    short_pressure_proxy += 18.0 if breakdown_vol and close < prev.low else 0.0
+    short_pressure_proxy += 16.0 if confirmed_break else 0.0
+    short_pressure_proxy += 12.0 if vol_ready and close < row.ema_fast and row.volume > row.vol_ma * 1.2 else 0.0
+    short_pressure_proxy += 10.0 if close < open_ and row.close_loc <= 0.35 else 0.0
+    short_pressure_proxy += 8.0 if trend_damage and row.macd_hist < prev.macd_hist else 0.0
+    short_pressure_proxy -= 16.0 if absorption_score >= 55.0 and close >= row.ema_slow else 0.0
+    short_pressure_proxy = clamp_float(short_pressure_proxy, 0.0, 100.0)
+
+    squeeze_watch = (
+        short_pressure_proxy >= 30.0
+        and absorption_score >= 52.0
+        and close >= row.ema_slow
+        and row.close_loc >= 0.52
+        and not confirmed_break
+    )
+    operator_pressure_risk_score = clamp_float(
+        distribution_score * 0.48
+        + short_pressure_proxy * 0.32
+        - absorption_score * 0.25
+        + (12.0 if market_permission_value == "BLOCK" else 0.0),
+        0.0,
+        100.0,
+    )
+
+    if squeeze_watch:
+        operator_pressure = "SQUEEZE WATCH"
+        operator_plan = "Short-pressure proxy is present, but buyers are absorbing supply; confirm reclaim before chasing."
+    elif distribution_score >= 65.0 and short_pressure_proxy >= 38.0:
+        operator_pressure = "SHORT / DISTRIBUTION PRESSURE"
+        operator_plan = "Supply is pressing price; avoid fresh BUY until reclaim and seller pressure cool."
+    elif distribution_score >= 55.0:
+        operator_pressure = "DISTRIBUTION"
+        operator_plan = "Supply is in control; treat rallies as suspect until close and volume improve."
+    elif absorption_score >= 60.0:
+        operator_pressure = "ACCUMULATION / ABSORPTION"
+        operator_plan = "Buyers are absorbing supply; watch pullback or reclaim entries near the reference zone."
+    elif short_pressure_proxy >= 38.0:
+        operator_pressure = "SHORT PRESSURE"
+        operator_plan = "Short-pressure proxy is elevated; require a stronger reclaim before treating it as buyable."
+    else:
+        operator_pressure = "NEUTRAL"
+        operator_plan = "No clear big-money pressure edge from the current candle and volume evidence."
+    if operator_pressure == "SQUEEZE WATCH":
+        operator_pressure_score = max(absorption_score, short_pressure_proxy)
+    elif operator_pressure == "ACCUMULATION / ABSORPTION":
+        operator_pressure_score = absorption_score
+    elif operator_pressure in {"SHORT / DISTRIBUTION PRESSURE", "DISTRIBUTION", "SHORT PRESSURE"}:
+        operator_pressure_score = max(operator_pressure_risk_score, distribution_score, short_pressure_proxy)
+    else:
+        operator_pressure_score = operator_pressure_risk_score
+    operator_blocks_buy = operator_pressure in {"SHORT / DISTRIBUTION PRESSURE", "DISTRIBUTION"}
+
     execution_safety_ok = market_permission_value != "BLOCK" and risk_permission == "ALLOW"
     next_day_constructive = next_day_bias_score >= 62.0 and not exit_pressure and not avoid
     next_day_buyable = (
         next_day_bias_score >= 70.0
         and execution_safety_ok
+        and not operator_blocks_buy
         and not profile_extended_from_zone
         and not extended_from_zone
         and not fomo
@@ -1633,10 +1717,17 @@ def classify_and_score(
         next_day_bias = "NEUTRAL"
         next_day_plan = "No clean next-day edge; wait for stronger buyer tape or cleaner structure."
 
+    if operator_blocks_buy and next_day_bias in {"BULLISH CONFIRM", "CONSTRUCTIVE PULLBACK"}:
+        next_day_bias = "CONSTRUCTIVE PULLBACK" if setup_forming and not exit_pressure else "WATCH TREND"
+        next_day_plan = operator_plan
+    elif squeeze_watch and next_day_bias in {"NEUTRAL", "WATCH TREND"}:
+        next_day_bias = "WATCH TREND"
+        next_day_plan = operator_plan
+
     if setup_forming and include_audit_gates:
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
         filters_ok = filters_ok and next_day_buyable
-        continuation_ok = continuation_ok and not profile_extended_from_zone and execution_safety_ok and next_day_constructive
+        continuation_ok = continuation_ok and not profile_extended_from_zone and execution_safety_ok and next_day_constructive and not operator_blocks_buy
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     if filters_ok:
@@ -1667,6 +1758,10 @@ def classify_and_score(
     score += min(max(trend_efficiency * 20, 0), 10)
     score -= min(max(row.atr_pct - setup_max_atr, 0), 15)
     score -= max(0.0, (float(personality_profile["min_buy_quality"]) - buy_quality_score) * 0.25) if setup_forming else 0.0
+    score += 4 if operator_pressure == "ACCUMULATION / ABSORPTION" else 0
+    score += 3 if squeeze_watch else 0
+    score -= 12 if operator_pressure == "SHORT / DISTRIBUTION PRESSURE" else 8 if operator_pressure == "DISTRIBUTION" else 0
+    score -= 4 if operator_pressure == "SHORT PRESSURE" else 0
     if setup_forming and market_permission_value == "BLOCK":
         score -= 12
     legacy_history_caution = ticker_permission in {"BLOCK", "CAUTION"} or walk_forward_permission == "BLOCK"
@@ -1698,6 +1793,8 @@ def classify_and_score(
         notes.append("Risk governor blocked")
     if next_day_plan:
         notes.append(next_day_plan)
+    if operator_plan and operator_pressure != "NEUTRAL" and operator_plan != next_day_plan:
+        notes.append(operator_plan)
     if exit_pressure:
         notes.append("Exit pressure")
     if avoid:
@@ -1732,6 +1829,14 @@ def classify_and_score(
         reason_codes.append("avoid_chase")
     elif next_day_bias in {"DEFENSIVE / EXIT RISK", "EXECUTION BLOCKED"}:
         reason_codes.append("execution_risk")
+    if operator_pressure == "ACCUMULATION / ABSORPTION":
+        reason_codes.append("operator_accumulation")
+    elif operator_pressure in {"DISTRIBUTION", "SHORT / DISTRIBUTION PRESSURE"}:
+        reason_codes.append("operator_distribution")
+    if operator_pressure in {"SHORT PRESSURE", "SHORT / DISTRIBUTION PRESSURE"}:
+        reason_codes.append("operator_short_pressure")
+    if squeeze_watch:
+        reason_codes.append("operator_squeeze_watch")
     if extended_from_zone:
         reason_codes.append("extended_from_zone")
     if profile_extended_from_zone:
@@ -1785,6 +1890,13 @@ def classify_and_score(
         "emotion_score": round(float(emotion_score), 1),
         "trend_location_score": round(float(trend_location_score), 1),
         "setup_context_score": round(float(setup_context_score), 1),
+        "operator_pressure": operator_pressure,
+        "operator_pressure_score": round(float(operator_pressure_score), 1),
+        "operator_plan": operator_plan,
+        "distribution_score": round(float(distribution_score), 1),
+        "absorption_score": round(float(absorption_score), 1),
+        "short_pressure_proxy": round(float(short_pressure_proxy), 1),
+        "squeeze_watch": bool_text(squeeze_watch),
         "profile_zone_limit_pct": round(float(personality_profile["max_zone_distance_pct"]), 2),
         "buyer_score": round(float(buyer_score), 0),
         "seller_score": round(float(seller_score), 0),
@@ -1947,6 +2059,13 @@ LATEST_SIGNAL_FIELDS = [
     "emotion_score",
     "trend_location_score",
     "setup_context_score",
+    "operator_pressure",
+    "operator_pressure_score",
+    "operator_plan",
+    "distribution_score",
+    "absorption_score",
+    "short_pressure_proxy",
+    "squeeze_watch",
     "reason_codes",
 ]
 
@@ -2376,6 +2495,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     display_columns = [
         "ticker", "name", "action", "score", "close", "day_change_pct",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
+        "operator_pressure", "operator_pressure_score", "operator_plan",
         "setup", "adaptive_mode", "psychology", "reward_risk",
         "risk_pct_to_stop", "position_value_1k_risk",
         "market_permission", "risk_permission",
@@ -2407,6 +2527,9 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "next_day_bias": "Next Day",
         "next_day_bias_score": "Bias",
         "next_day_plan": "Plan",
+        "operator_pressure": "Big Money",
+        "operator_pressure_score": "Pressure",
+        "operator_plan": "Operator Read",
         "setup": "Setup",
         "adaptive_mode": "Mode",
         "psychology": "Tape",
@@ -2477,7 +2600,12 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
             return f"<span class='mode'>{short}</span>"
         if col == "next_day_bias":
             return f"<span class='badge setup'>{escaped}</span>" if text else "<span class='dash'>-</span>"
-        if col in {"score", "next_day_bias_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
+        if col == "operator_pressure":
+            if not text:
+                return "<span class='dash'>-</span>"
+            klass = "exit" if "DISTRIBUTION" in text or "SHORT PRESSURE" in text else "setup" if "SQUEEZE" in text or "ABSORPTION" in text else "watch"
+            return f"<span class='badge action {klass}'>{escaped}</span>"
+        if col in {"score", "next_day_bias_score", "operator_pressure_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
             try:
                 return f"{float(value):.1f}"
             except (TypeError, ValueError):
@@ -2494,7 +2622,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return escaped
         return escaped
 
-    numeric_columns = {"score", "next_day_bias_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
+    numeric_columns = {"score", "next_day_bias_score", "operator_pressure_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
 
     rows = []
     for _, row in visible_df.iterrows():
