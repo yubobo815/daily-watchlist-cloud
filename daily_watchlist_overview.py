@@ -62,6 +62,7 @@ POLYGON_BASE_URL = (
     os.getenv("POLYGON_BASE_URL")
     or ("https://api.massive.com" if os.getenv("MASSIVE_API_KEY") and not os.getenv("POLYGON_API_KEY") else "https://api.polygon.io")
 ).rstrip("/")
+POLYGON_PROVIDER_LABEL = "massive" if os.getenv("MASSIVE_API_KEY") and not os.getenv("POLYGON_API_KEY") else "polygon"
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "")
 
 STOCK_NAMES = {
@@ -394,7 +395,7 @@ def fetch_polygon_chart(ticker: str, years: int = 3) -> pd.DataFrame:
     df = df.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
     if df.empty:
         raise RuntimeError(f"Polygon/Massive returned only incomplete bars for {display_ticker(ticker)}.")
-    return attach_data_provider(df, "polygon", "LIVE_OK", latency_ms=latency_ms)
+    return attach_data_provider(df, POLYGON_PROVIDER_LABEL, "LIVE_OK", latency_ms=latency_ms)
 
 
 def fetch_twelvedata_chart(ticker: str, years: int = 3) -> pd.DataFrame:
