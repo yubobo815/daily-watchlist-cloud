@@ -876,6 +876,7 @@ OPTIONAL_SIGNAL_COLUMNS = {
 }
 
 SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "180"))
+SUPABASE_UPSERT_BATCH_SIZE = int(os.getenv("SUPABASE_UPSERT_BATCH_SIZE", "100"))
 ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().lower() in {"1", "true", "yes"}
 
 
@@ -905,9 +906,19 @@ def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[
     return True, f"Latest market data is fresh enough for Supabase sync ({latest_data_date}, age {data_age_days} day(s))."
 
 
+def batched_records(records: list[dict], batch_size: int = SUPABASE_UPSERT_BATCH_SIZE) -> list[list[dict]]:
+    size = max(1, int(batch_size or 100))
+    return [records[index : index + size] for index in range(0, len(records), size)]
+
+
+def supabase_upsert_batches(table: str, records: list[dict], conflict_columns: list[str]) -> None:
+    for batch in batched_records(records):
+        supabase_upsert(table, batch, conflict_columns)
+
+
 def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict], conflict_columns: list[str]) -> None:
     try:
-        supabase_upsert(table, records, conflict_columns)
+        supabase_upsert_batches(table, records, conflict_columns)
         return
     except RuntimeError as exc:
         message = str(exc).lower()
@@ -921,7 +932,7 @@ def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict]
             for record in records
         ]
         print(f"Supabase {table} optional signal columns unavailable; storing transition fields in payload only.")
-        supabase_upsert(table, stripped_records, conflict_columns)
+        supabase_upsert_batches(table, stripped_records, conflict_columns)
 
 
 def supabase_delete_older_than(table: str, date_column: str, cutoff_date: str) -> None:
@@ -1125,13 +1136,29 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
         except RuntimeError as exc:
             print(f"Supabase run-health sync skipped: {exc}")
 
-    supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
-    supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
+    snapshot_synced = 0
+    history_synced = 0
+    outcome_synced = 0
+    try:
+        supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
+        snapshot_synced = len(report_records)
+    except RuntimeError as exc:
+        print(f"Supabase snapshot sync skipped: {exc}")
+    try:
+        supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
+        history_synced = len(history_records)
+    except RuntimeError as exc:
+        print(f"Supabase behavior-history sync skipped: {exc}")
     try:
         supabase_upsert("watchlist_signal_outcomes", outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
+        outcome_synced = len(outcome_records)
     except RuntimeError as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
-    print(f"Synced {len(report_records)} snapshot rows, {len(history_records)} history rows, and {len(outcome_records)} signal-outcome rows to Supabase.")
+    print(
+        f"Synced {snapshot_synced}/{len(report_records)} snapshot rows, "
+        f"{history_synced}/{len(history_records)} history rows, and "
+        f"{outcome_synced}/{len(outcome_records)} signal-outcome rows to Supabase."
+    )
     try:
         cleanup_supabase_retention(run_date)
     except RuntimeError as exc:
