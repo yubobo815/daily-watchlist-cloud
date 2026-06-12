@@ -955,6 +955,85 @@ def supabase_delete_older_than(table: str, date_column: str, cutoff_date: str) -
         raise RuntimeError(f"Supabase retention cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
 
 
+def supabase_delete_run_ticker(table: str, run_date: str, ticker: str) -> None:
+    url, key = supabase_credentials()
+    if not url or not key or not ticker:
+        return
+
+    endpoint = (
+        f"{url}/rest/v1/{table}"
+        f"?run_date=eq.{urllib.parse.quote(str(run_date))}"
+        f"&ticker=eq.{urllib.parse.quote(str(ticker))}"
+    )
+    req = urllib.request.Request(
+        endpoint,
+        method="DELETE",
+        headers=supabase_headers(key),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in {200, 202, 204}:
+                raise RuntimeError(f"Supabase failed-ticker cleanup for {table} returned HTTP {resp.status}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase failed-ticker cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
+
+
+def supabase_delete_run_history_before(run_date: str, min_history_date: str) -> None:
+    url, key = supabase_credentials()
+    if not url or not key or not min_history_date:
+        return
+
+    endpoint = (
+        f"{url}/rest/v1/watchlist_behavior_history"
+        f"?run_date=eq.{urllib.parse.quote(str(run_date))}"
+        f"&history_date=lt.{urllib.parse.quote(str(min_history_date))}"
+    )
+    req = urllib.request.Request(
+        endpoint,
+        method="DELETE",
+        headers=supabase_headers(key),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in {200, 202, 204}:
+                raise RuntimeError(f"Supabase obsolete-history cleanup returned HTTP {resp.status}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase obsolete-history cleanup failed with HTTP {exc.code}: {body}") from exc
+
+
+def cleanup_supabase_obsolete_history(run_date: str, history_records: list[dict]) -> None:
+    history_dates = sorted({
+        str(record.get("history_date") or "")
+        for record in history_records
+        if record.get("history_date")
+    })
+    if not history_dates:
+        return
+
+    supabase_delete_run_history_before(run_date, history_dates[0])
+    print(f"Supabase obsolete-history cleanup complete: removed same-day history before {history_dates[0]}.")
+
+
+def cleanup_supabase_failed_tickers(run_date: str, run_metadata: Optional[dict]) -> None:
+    failures = ((run_metadata or {}).get("payload") or {}).get("failures") or []
+    tickers = sorted({
+        str(item.get("ticker") or "").strip().upper()
+        for item in failures
+        if isinstance(item, dict) and item.get("ticker")
+    })
+    if not tickers:
+        return
+
+    deleted = 0
+    for ticker in tickers:
+        for table in ("watchlist_snapshots", "watchlist_behavior_history"):
+            supabase_delete_run_ticker(table, run_date, ticker)
+        deleted += 1
+    print(f"Supabase failed-ticker cleanup complete: removed same-day rows for {deleted} failed ticker(s).")
+
+
 def cleanup_supabase_retention(run_date: str) -> None:
     if SUPABASE_RETENTION_DAYS <= 0:
         return
@@ -1154,6 +1233,14 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
         outcome_synced = len(outcome_records)
     except RuntimeError as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
+    try:
+        cleanup_supabase_obsolete_history(run_date, history_records)
+    except RuntimeError as exc:
+        print(f"Supabase obsolete-history cleanup skipped: {exc}")
+    try:
+        cleanup_supabase_failed_tickers(run_date, run_metadata)
+    except RuntimeError as exc:
+        print(f"Supabase failed-ticker cleanup skipped: {exc}")
     print(
         f"Synced {snapshot_synced}/{len(report_records)} snapshot rows, "
         f"{history_synced}/{len(history_records)} history rows, and "
