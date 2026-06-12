@@ -23,7 +23,7 @@ const WATCHLIST_COLUMNS = [
   ["action", "Signal"],
   ["buy_tier", "Tier"],
   ["next_day_bias", "Next Day"],
-  ["operator_pressure", "Big Money"],
+  ["operator_state", "Operator"],
   ["next_day_plan", "Plan"],
   ["score", "Trend Quality"],
   ["close", "Close"],
@@ -99,6 +99,8 @@ const REASON_LABELS = {
   operator_distribution: "Operator distribution",
   operator_short_pressure: "Short-pressure proxy",
   operator_squeeze_watch: "Squeeze watch",
+  operator_bull_trap: "Bull trap",
+  operator_bear_trap: "Bear trap / squeeze watch",
   data_stale_block: "Stale data blocked execution",
   cached_data_ok: "Cached data recent enough",
   top_buy_tier: "A+ buy tier",
@@ -623,13 +625,17 @@ function renderNextDayBias(row) {
 
 function operatorPressureTone(value) {
   const text = String(value || "").toUpperCase();
-  if (text.includes("DISTRIBUTION") || text === "SHORT PRESSURE") return "risk";
-  if (text.includes("SQUEEZE") || text.includes("ABSORPTION")) return "constructive";
+  if (text.includes("BULL_TRAP") || text.includes("DISTRIBUTION") || text === "SHORT PRESSURE") return "risk";
+  if (text.includes("BEAR_TRAP") || text.includes("SQUEEZE") || text.includes("ACCUMULATION") || text.includes("ABSORPTION")) return "constructive";
   return "watch";
 }
 
 function shortOperatorPressure(value) {
   const text = String(value || "NEUTRAL").toUpperCase();
+  if (text === "ACCUMULATION") return "ACCUM";
+  if (text === "BULL_TRAP") return "BULL TRAP";
+  if (text === "DISTRIBUTION") return "DIST";
+  if (text === "BEAR_TRAP / SQUEEZE WATCH") return "BEAR TRAP";
   if (text === "SHORT / DISTRIBUTION PRESSURE") return "SHORT/DIST";
   if (text === "ACCUMULATION / ABSORPTION") return "ABSORB";
   if (text === "SQUEEZE WATCH") return "SQUEEZE";
@@ -639,8 +645,8 @@ function shortOperatorPressure(value) {
 }
 
 function renderOperatorPressure(row) {
-  const pressure = payloadValue(row, "operator_pressure") || "NEUTRAL";
-  const score = Number(payloadValue(row, "operator_pressure_score"));
+  const pressure = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL";
+  const score = Number(payloadValue(row, "operator_state_score") ?? payloadValue(row, "operator_pressure_score"));
   const suffix = Number.isFinite(score) ? ` ${fmtNumber(score, 0)}` : "";
   return `<span class="badge entry-pill entry-${operatorPressureTone(pressure)}" title="${escapeHtml(String(pressure))}">${escapeHtml(`${shortOperatorPressure(pressure)}${suffix}`)}</span>`;
 }
@@ -758,10 +764,11 @@ function behaviorDetail(row) {
   const mode = row.adaptive_mode || "Mixed mode";
   const note = String(row.notes || "").trim();
   const nextDayPlan = String(payloadValue(row, "next_day_plan") || "").trim();
+  const operatorStatePlan = String(payloadValue(row, "operator_state_plan") || "").trim();
   const operatorPlan = String(payloadValue(row, "operator_plan") || "").trim();
   const freshnessPlan = String(payloadValue(row, "freshness_plan") || "").trim();
   const feedbackPlan = String(payloadValue(row, "feedback_plan") || "").trim();
-  const operatorPressure = String(payloadValue(row, "operator_pressure") || "").toUpperCase();
+  const operatorPressure = String(payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "").toUpperCase();
   const transition = transitionLabel(row);
   const distanceFromZone = payloadNumeric(row, "distance_from_ref_zone_pct");
   const marketContext = payloadValue(row, "market_context");
@@ -782,6 +789,7 @@ function behaviorDetail(row) {
   if (payloadValue(row, "feedback_quality") === "FAILED") return feedbackPlan;
   if (payloadValue(row, "feedback_quality") === "STALE") return feedbackPlan;
   if (nextDayPlan) return nextDayPlan;
+  if (operatorStatePlan && operatorPressure !== "NEUTRAL") return operatorStatePlan;
   if (operatorPlan && operatorPressure !== "NEUTRAL") return operatorPlan;
   if (note) return note;
   if (kind === "buy") return `${pattern} behavior with strong trend quality and ${tape.toLowerCase()} tape.`;
@@ -1179,8 +1187,10 @@ function renderScoreBreakdown(row) {
   const emotion = Number(payloadValue(row, "emotion_score"));
   const location = Number(payloadValue(row, "trend_location_score"));
   const setupContext = Number(payloadValue(row, "setup_context_score"));
-  const operatorPressure = payloadValue(row, "operator_pressure") || "NEUTRAL";
-  const operatorScore = Number(payloadValue(row, "operator_pressure_score"));
+  const operatorPressure = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL";
+  const operatorScore = Number(payloadValue(row, "operator_state_score") ?? payloadValue(row, "operator_pressure_score"));
+  const bullTrap = Number(payloadValue(row, "bull_trap_score"));
+  const bearTrap = Number(payloadValue(row, "bear_trap_score"));
   const distribution = Number(payloadValue(row, "distribution_score"));
   const absorption = Number(payloadValue(row, "absorption_score"));
   const shortProxy = Number(payloadValue(row, "short_pressure_proxy"));
@@ -1194,7 +1204,7 @@ function renderScoreBreakdown(row) {
     ["Execution Tier", buyTier],
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
-    ["Big Money", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
+    ["Operator", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
     ["Feedback", `${feedbackQuality}${Number.isFinite(feedbackReturn) ? ` ${fmtSignedNumber(feedbackReturn, 1)}%` : ""}${Number.isFinite(feedbackDrawdown) ? ` / DD ${fmtNumber(feedbackDrawdown, 1)}%` : ""}`],
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
@@ -1210,6 +1220,8 @@ function renderScoreBreakdown(row) {
     ["Setup Context", Number.isFinite(setupContext) ? `${fmtNumber(setupContext, 0)}/100` : "n/a"],
     ["Distribution", Number.isFinite(distribution) ? `${fmtNumber(distribution, 0)}/100` : "n/a"],
     ["Absorption", Number.isFinite(absorption) ? `${fmtNumber(absorption, 0)}/100` : "n/a"],
+    ["Bull Trap", Number.isFinite(bullTrap) ? `${fmtNumber(bullTrap, 0)}/100` : "n/a"],
+    ["Bear Trap", Number.isFinite(bearTrap) ? `${fmtNumber(bearTrap, 0)}/100` : "n/a"],
     ["Short Proxy", Number.isFinite(shortProxy) ? `${fmtNumber(shortProxy, 0)}/100` : "n/a"],
     ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"]
   ];
@@ -1485,7 +1497,7 @@ function renderWatchlistCell(row, key) {
   }
   if (key === "buy_tier") return renderBuyTier(row);
   if (key === "next_day_bias") return renderNextDayBias(row);
-  if (key === "operator_pressure") return renderOperatorPressure(row);
+  if (key === "operator_state") return renderOperatorPressure(row);
   if (key === "next_day_plan") return `<span class="behavior-detail">${escapeHtml(payloadValue(row, "next_day_plan") || "")}</span>`;
   if (key === "notes") {
     return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
@@ -1513,6 +1525,8 @@ function searchableRowText(row) {
     payloadValue(row, "feedback_plan"),
     payloadValue(row, "next_day_bias"),
     payloadValue(row, "next_day_plan"),
+    payloadValue(row, "operator_state"),
+    payloadValue(row, "operator_state_plan"),
     payloadValue(row, "operator_pressure"),
     payloadValue(row, "operator_plan"),
     payloadValue(row, "signal_quality"),
@@ -1916,7 +1930,7 @@ function renderWatchlist() {
   document.querySelector("#watchlist-head").innerHTML = `<tr>${WATCHLIST_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("")}</tr>`;
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
     <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
-      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
+      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");

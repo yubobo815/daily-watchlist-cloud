@@ -99,6 +99,11 @@ const PAYLOAD_FIELDS = [
   "operator_pressure",
   "operator_pressure_score",
   "operator_plan",
+  "operator_state",
+  "operator_state_score",
+  "operator_state_plan",
+  "bull_trap_score",
+  "bear_trap_score",
   "distribution_score",
   "absorption_score",
   "short_pressure_proxy",
@@ -346,13 +351,33 @@ function applyBuyTierFallback(output) {
   return output;
 }
 
+function applyOperatorStateFallback(output) {
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  if (!payload.operator_state) {
+    const pressure = String(payload.operator_pressure || "NEUTRAL").toUpperCase();
+    if (pressure.includes("DISTRIBUTION") || pressure === "SHORT PRESSURE") {
+      payload.operator_state = "DISTRIBUTION";
+    } else if (pressure.includes("SQUEEZE")) {
+      payload.operator_state = "BEAR_TRAP / SQUEEZE WATCH";
+    } else if (pressure.includes("ACCUMULATION") || pressure.includes("ABSORPTION")) {
+      payload.operator_state = "ACCUMULATION";
+    } else {
+      payload.operator_state = "NEUTRAL";
+    }
+    payload.operator_state_score = payload.operator_pressure_score ?? 0;
+    payload.operator_state_plan = payload.operator_plan || "No clear trap or accumulation/distribution edge from the current candle sequence.";
+  }
+  output.payload = payload;
+  return output;
+}
+
 function rowDto(row) {
   const output = {};
   [...new Set([...SNAPSHOT_FIELDS, ...HISTORY_FIELDS])].forEach((field) => {
     if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
   });
   output.payload = cleanPayload(row);
-  return applyBuyTierFallback(applyFreshnessFallback(applyAuditGateFallback(output)));
+  return applyBuyTierFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output))));
 }
 
 function runDto(row) {

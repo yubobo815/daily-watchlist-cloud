@@ -131,6 +131,11 @@ function auditSupabaseFallback() {
       operator_pressure: "ACCUMULATION / ABSORPTION",
       operator_pressure_score: 18,
       operator_plan: "Buyers are absorbing supply; watch pullback or reclaim entries near the reference zone.",
+      operator_state: "ACCUMULATION",
+      operator_state_score: 72,
+      operator_state_plan: "Buyers are absorbing supply; prefer controlled pullback or reclaim entries.",
+      bull_trap_score: 0,
+      bear_trap_score: 32,
       distribution_score: 6,
       absorption_score: 72,
       short_pressure_proxy: 0,
@@ -150,6 +155,7 @@ function auditSupabaseFallback() {
   assert(allGatesAllow(gated), "execution-gated BUY row must carry ALLOW gates");
   assert(gated.payload.next_day_bias === "BULLISH CONFIRM", "execution-gated BUY row must keep next-day bias");
   assert(gated.payload.operator_pressure === "ACCUMULATION / ABSORPTION", "execution-gated BUY row must keep operator-pressure read");
+  assert(gated.payload.operator_state === "ACCUMULATION", "execution-gated BUY row must keep operator-state read");
   assert(gated.payload.absorption_score === 72, "execution-gated BUY row must keep absorption score");
   assert(gated.payload.buy_tier === "A+ BUY", "execution-gated BUY row must keep execution tier");
   assert(gated.payload.freshness_block === "NO", "execution-gated BUY row must keep freshness gate state");

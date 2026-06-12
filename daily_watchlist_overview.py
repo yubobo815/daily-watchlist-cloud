@@ -25,7 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
-SCANNER_VERSION = "2026.06.12-freshness-tier-feedback"
+SCANNER_VERSION = "2026.06.12-candle-operator-state"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -562,6 +562,11 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "operator_pressure",
     "operator_pressure_score",
     "operator_plan",
+    "operator_state",
+    "operator_state_score",
+    "operator_state_plan",
+    "bull_trap_score",
+    "bear_trap_score",
     "distribution_score",
     "absorption_score",
     "short_pressure_proxy",
@@ -882,12 +887,16 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
     quality = str(row.get("signal_quality") or "").upper()
     next_day = str(row.get("next_day_bias") or "").upper()
     operator_pressure = str(row.get("operator_pressure") or "").upper()
+    operator_state = str(row.get("operator_state") or "").upper()
     adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
     score = float(numeric_or_none(row.get("score")) or 0)
     fresh = row.get("freshness_block") != "YES"
     risk_ok = row.get("risk_permission") == "ALLOW"
     market_ok = row.get("market_permission") != "BLOCK"
-    absorption_or_neutral = operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
+    absorption_or_neutral = (
+        operator_state in {"", "NEUTRAL", "ACCUMULATION", "BEAR_TRAP / SQUEEZE WATCH"}
+        or operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
+    )
 
     if action == "BUY CANDIDATE" and fresh and risk_ok and market_ok and next_day == "BULLISH CONFIRM" and absorption_or_neutral and adjusted_score >= 92 and rank_index < TOP_BUY_TIER_LIMIT:
         return "A+ BUY", 1, "Highest execution tier; still confirm on Pine before acting."
@@ -1824,9 +1833,31 @@ def classify_and_score(
     short_pressure_proxy -= 16.0 if absorption_score >= 55.0 and close >= row.ema_slow else 0.0
     short_pressure_proxy = clamp_float(short_pressure_proxy, 0.0, 100.0)
 
+    prior_high_retest = high >= prior_high or high >= breakout_level
+    failed_reclaim = prior_high_retest and close < max(prior_high, row.ema_fast) and row.close_loc <= 0.50
+    failed_breakout = setup in {"BREAKOUT BUY", "MOMENTUM BUY"} and prior_high_retest and close <= prior_high and row.close_loc <= 0.55
+    bull_trap_score = 0.0
+    bull_trap_score += 28.0 if failed_breakout else 0.0
+    bull_trap_score += 24.0 if greed_rejected else 0.0
+    bull_trap_score += 18.0 if fomo and row.close_loc < 0.60 else 0.0
+    bull_trap_score += 14.0 if upper_wick > body_for_ratio * 1.5 and row.close_loc <= 0.50 else 0.0
+    bull_trap_score += 10.0 if vol_ready and row.volume > row.vol_ma * 1.3 and failed_reclaim else 0.0
+    bull_trap_score += 8.0 if close < open_ and high > prev.high and close <= prev.close else 0.0
+    bull_trap_score = clamp_float(bull_trap_score, 0.0, 100.0)
+
+    support_flush = low < prev.low or low <= row.ema_fast or low <= row.lower_bb
+    false_breakdown = support_flush and close >= min(prev.close, row.ema_slow) and row.close_loc >= 0.55 and not confirmed_break
+    bear_trap_score = 0.0
+    bear_trap_score += 28.0 if false_breakdown else 0.0
+    bear_trap_score += 24.0 if fear_rejected else 0.0
+    bear_trap_score += 14.0 if lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.55 else 0.0
+    bear_trap_score += 10.0 if vol_ready and row.volume >= row.vol_ma and close > open_ and support_flush else 0.0
+    bear_trap_score += 8.0 if row.rsi > prev.rsi and close >= prev.close else 0.0
+    bear_trap_score = clamp_float(bear_trap_score, 0.0, 100.0)
+
     squeeze_watch = (
         short_pressure_proxy >= 30.0
-        and absorption_score >= 52.0
+        and max(absorption_score, bear_trap_score) >= 52.0
         and close >= row.ema_slow
         and row.close_loc >= 0.52
         and not confirmed_break
@@ -1867,6 +1898,43 @@ def classify_and_score(
     else:
         operator_pressure_score = operator_pressure_risk_score
     operator_blocks_buy = operator_pressure in {"SHORT / DISTRIBUTION PRESSURE", "DISTRIBUTION"}
+
+    if bull_trap_score >= 58.0 and bull_trap_score >= bear_trap_score and distribution_score >= 35.0:
+        operator_state = "BULL_TRAP"
+        operator_state_score = max(bull_trap_score, distribution_score)
+        operator_state_plan = "Breakout strength was rejected; avoid chasing until price reclaims the failed breakout area."
+    elif bear_trap_score >= 58.0 and bear_trap_score >= bull_trap_score and not confirmed_break:
+        operator_state = "BEAR_TRAP / SQUEEZE WATCH"
+        operator_state_score = max(bear_trap_score, absorption_score, short_pressure_proxy)
+        operator_state_plan = "Support break was rejected; wait for reclaim confirmation before treating it as a squeeze setup."
+    elif distribution_score >= 55.0 or operator_pressure in {"SHORT / DISTRIBUTION PRESSURE", "DISTRIBUTION", "SHORT PRESSURE"}:
+        operator_state = "DISTRIBUTION"
+        operator_state_score = max(distribution_score, short_pressure_proxy, operator_pressure_score)
+        operator_state_plan = "Supply is in control; avoid fresh BUY until seller pressure cools and price reclaims."
+    elif absorption_score >= 55.0:
+        operator_state = "ACCUMULATION"
+        operator_state_score = absorption_score
+        operator_state_plan = "Buyers are absorbing supply; prefer controlled pullback or reclaim entries."
+    else:
+        operator_state = "NEUTRAL"
+        operator_state_score = max(operator_pressure_score, bull_trap_score, bear_trap_score)
+        operator_state_plan = "No clear trap or accumulation/distribution edge from the current candle sequence."
+
+    if operator_state == "BULL_TRAP":
+        operator_blocks_buy = True
+        if operator_pressure == "NEUTRAL":
+            operator_pressure = "DISTRIBUTION"
+        operator_pressure_score = max(operator_pressure_score, operator_state_score)
+        operator_plan = operator_state_plan
+    elif operator_state == "BEAR_TRAP / SQUEEZE WATCH":
+        squeeze_watch = True
+        operator_pressure = "SQUEEZE WATCH"
+        operator_pressure_score = max(operator_pressure_score, operator_state_score)
+        operator_plan = operator_state_plan
+    elif operator_state == "ACCUMULATION" and operator_pressure == "NEUTRAL":
+        operator_pressure = "ACCUMULATION / ABSORPTION"
+        operator_pressure_score = operator_state_score
+        operator_plan = operator_state_plan
 
     execution_safety_ok = market_permission_value != "BLOCK" and risk_permission == "ALLOW"
     next_day_constructive = next_day_bias_score >= 62.0 and not exit_pressure and not avoid
@@ -2023,6 +2091,10 @@ def classify_and_score(
         reason_codes.append("operator_short_pressure")
     if squeeze_watch:
         reason_codes.append("operator_squeeze_watch")
+    if operator_state == "BULL_TRAP":
+        reason_codes.append("operator_bull_trap")
+    elif operator_state == "BEAR_TRAP / SQUEEZE WATCH":
+        reason_codes.append("operator_bear_trap")
     if extended_from_zone:
         reason_codes.append("extended_from_zone")
     if profile_extended_from_zone:
@@ -2079,6 +2151,11 @@ def classify_and_score(
         "operator_pressure": operator_pressure,
         "operator_pressure_score": round(float(operator_pressure_score), 1),
         "operator_plan": operator_plan,
+        "operator_state": operator_state,
+        "operator_state_score": round(float(operator_state_score), 1),
+        "operator_state_plan": operator_state_plan,
+        "bull_trap_score": round(float(bull_trap_score), 1),
+        "bear_trap_score": round(float(bear_trap_score), 1),
         "distribution_score": round(float(distribution_score), 1),
         "absorption_score": round(float(absorption_score), 1),
         "short_pressure_proxy": round(float(short_pressure_proxy), 1),
@@ -2248,6 +2325,11 @@ LATEST_SIGNAL_FIELDS = [
     "operator_pressure",
     "operator_pressure_score",
     "operator_plan",
+    "operator_state",
+    "operator_state_score",
+    "operator_state_plan",
+    "bull_trap_score",
+    "bear_trap_score",
     "distribution_score",
     "absorption_score",
     "short_pressure_proxy",
@@ -2695,7 +2777,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "ticker", "name", "action", "score", "close", "day_change_pct",
         "buy_tier",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
-        "operator_pressure", "operator_pressure_score", "operator_plan",
+        "operator_state", "operator_state_score", "operator_state_plan",
         "setup", "adaptive_mode", "psychology", "reward_risk",
         "risk_pct_to_stop", "position_value_1k_risk",
         "market_permission", "risk_permission",
@@ -2728,9 +2810,9 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "next_day_bias": "Next Day",
         "next_day_bias_score": "Bias",
         "next_day_plan": "Plan",
-        "operator_pressure": "Big Money",
-        "operator_pressure_score": "Pressure",
-        "operator_plan": "Operator Read",
+        "operator_state": "Operator",
+        "operator_state_score": "Op Score",
+        "operator_state_plan": "Operator Read",
         "setup": "Setup",
         "adaptive_mode": "Mode",
         "psychology": "Tape",
@@ -2804,12 +2886,12 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         if col == "buy_tier":
             klass = "buy" if text == "A+ BUY" else "setup" if text in {"BUY WATCH", "SETUP ONLY"} else "exit" if text == "EXIT RISK" else "watch"
             return f"<span class='badge action {klass}'>{escaped}</span>" if text else "<span class='dash'>-</span>"
-        if col == "operator_pressure":
+        if col == "operator_state":
             if not text:
                 return "<span class='dash'>-</span>"
-            klass = "exit" if "DISTRIBUTION" in text or "SHORT PRESSURE" in text else "setup" if "SQUEEZE" in text or "ABSORPTION" in text else "watch"
+            klass = "exit" if "DISTRIBUTION" in text or "BULL_TRAP" in text else "setup" if "BEAR_TRAP" in text or "ACCUMULATION" in text else "watch"
             return f"<span class='badge action {klass}'>{escaped}</span>"
-        if col in {"score", "next_day_bias_score", "operator_pressure_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
+        if col in {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop"}:
             try:
                 return f"{float(value):.1f}"
             except (TypeError, ValueError):
@@ -2826,7 +2908,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return escaped
         return escaped
 
-    numeric_columns = {"score", "next_day_bias_score", "operator_pressure_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
+    numeric_columns = {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
 
     rows = []
     for _, row in visible_df.iterrows():
