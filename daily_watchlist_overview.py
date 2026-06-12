@@ -52,6 +52,17 @@ SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
 LEARNING_MIN_SAMPLES = int(os.getenv("LEARNING_MIN_SAMPLES", "3"))
 LEARNING_ADJUSTMENT_CAP = float(os.getenv("LEARNING_ADJUSTMENT_CAP", "10"))
+DATA_PROVIDER_PRIORITY = [
+    provider.strip().lower()
+    for provider in os.getenv("DATA_PROVIDER_PRIORITY", "polygon,twelvedata,stooq,yahoo").split(",")
+    if provider.strip()
+]
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or os.getenv("MASSIVE_API_KEY") or ""
+POLYGON_BASE_URL = (
+    os.getenv("POLYGON_BASE_URL")
+    or ("https://api.massive.com" if os.getenv("MASSIVE_API_KEY") and not os.getenv("POLYGON_API_KEY") else "https://api.polygon.io")
+).rstrip("/")
+TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "")
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -278,21 +289,207 @@ def local_run_date() -> str:
     return datetime.now(RUN_TIMEZONE).strftime("%Y-%m-%d")
 
 
-def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFrame:
-    cache_path = Path(f"watchlist_{ticker.replace('^', '_')}_{years}y.csv")
-    if cache_path.exists() and not refresh:
-        return pd.read_csv(cache_path, parse_dates=["date"])
+def cache_path_for(ticker: str, years: int) -> Path:
+    safe_ticker = ticker.replace("^", "_").replace("/", "_").replace(".", "_")
+    return Path(f"watchlist_{safe_ticker}_{years}y.csv")
 
+
+def attach_data_provider(
+    df: pd.DataFrame,
+    provider: str,
+    status: str,
+    error: str = "",
+    latency_ms: Optional[float] = None,
+) -> pd.DataFrame:
+    df.attrs["data_provider"] = provider
+    df.attrs["data_provider_status"] = status
+    df.attrs["data_provider_error"] = error
+    df.attrs["data_provider_latency_ms"] = latency_ms
+    return df
+
+
+def data_provider_context(df: pd.DataFrame) -> dict:
+    return {
+        "data_provider": df.attrs.get("data_provider", ""),
+        "data_provider_status": df.attrs.get("data_provider_status", ""),
+        "data_provider_error": df.attrs.get("data_provider_error", ""),
+        "data_provider_latency_ms": numeric_or_none(df.attrs.get("data_provider_latency_ms")),
+    }
+
+
+def apply_data_provider_context(row: dict, df: pd.DataFrame) -> dict:
+    row.update(data_provider_context(df))
+    return row
+
+
+def apply_data_provider_context_to_rows(rows: list[dict], df: pd.DataFrame) -> list[dict]:
+    context = data_provider_context(df)
+    for row in rows:
+        row.update(context)
+    return rows
+
+
+def record_stale_cache_fallback(fallbacks: list[dict], ticker: str, df: pd.DataFrame, fallback_reason: str = "") -> None:
+    if df.attrs.get("data_provider") != "cache":
+        return
+    display = display_ticker(ticker)
+    if any(str(item.get("ticker", "")).upper() == display.upper() for item in fallbacks):
+        return
+    reason = fallback_reason or df.attrs.get("data_provider_error") or df.attrs.get("data_provider_status") or "used cached data"
+    fallbacks.append({"ticker": display, "error": reason})
+
+
+def normalize_provider_ticker(ticker: str, provider: str) -> str:
+    symbol = display_ticker(ticker)
+    if provider == "polygon":
+        return symbol.replace("BRK.B", "BRK.B")
+    if provider == "twelvedata":
+        return symbol
+    return ticker
+
+
+def request_json(url: str, provider: str, timeout: int = 30) -> tuple[dict, float]:
+    started = time.perf_counter()
+    req = urllib.request.Request(url, headers={"User-Agent": "DailyTradeCopilot/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"{provider} HTTP {exc.code}: {body}") from exc
+    return payload, round((time.perf_counter() - started) * 1000, 1)
+
+
+def fetch_polygon_chart(ticker: str, years: int = 3) -> pd.DataFrame:
+    if not POLYGON_API_KEY:
+        raise RuntimeError("Polygon/Massive API key is not configured.")
+    symbol = urllib.parse.quote(normalize_provider_ticker(ticker, "polygon"), safe="")
+    to_date = datetime.utcnow().date()
+    from_date = (datetime.utcnow() - timedelta(days=int(years * 365.25) + 10)).date()
+    params = urllib.parse.urlencode(
+        {
+            "adjusted": "true",
+            "sort": "asc",
+            "limit": 50000,
+            "apiKey": POLYGON_API_KEY,
+        }
+    )
+    url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/range/1/day/{from_date}/{to_date}?{params}"
+    payload, latency_ms = request_json(url, "polygon")
+    results = payload.get("results") or []
+    if not results:
+        message = payload.get("error") or payload.get("message") or "no aggregate bars returned"
+        raise RuntimeError(f"Polygon/Massive returned no bars for {display_ticker(ticker)}: {message}")
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime([item.get("t") for item in results], unit="ms", utc=True).tz_convert(None).date,
+            "open": [item.get("o") for item in results],
+            "high": [item.get("h") for item in results],
+            "low": [item.get("l") for item in results],
+            "close": [item.get("c") for item in results],
+            "adjclose": [item.get("c") for item in results],
+            "volume": [item.get("v") for item in results],
+        }
+    )
+    df = df.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError(f"Polygon/Massive returned only incomplete bars for {display_ticker(ticker)}.")
+    return attach_data_provider(df, "polygon", "LIVE_OK", latency_ms=latency_ms)
+
+
+def fetch_twelvedata_chart(ticker: str, years: int = 3) -> pd.DataFrame:
+    if not TWELVE_DATA_API_KEY:
+        raise RuntimeError("Twelve Data API key is not configured.")
+    outputsize = min(max(int(years * 260) + 20, 30), 5000)
+    params = urllib.parse.urlencode(
+        {
+            "symbol": normalize_provider_ticker(ticker, "twelvedata"),
+            "interval": "1day",
+            "outputsize": outputsize,
+            "format": "JSON",
+            "apikey": TWELVE_DATA_API_KEY,
+        }
+    )
+    payload, latency_ms = request_json(f"https://api.twelvedata.com/time_series?{params}", "twelvedata")
+    if str(payload.get("status", "")).lower() == "error":
+        raise RuntimeError(payload.get("message") or "Twelve Data returned error status.")
+    values = payload.get("values") or []
+    if not values:
+        raise RuntimeError(f"Twelve Data returned no bars for {display_ticker(ticker)}.")
+    values = list(reversed(values))
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime([item.get("datetime") for item in values]).date,
+            "open": [item.get("open") for item in values],
+            "high": [item.get("high") for item in values],
+            "low": [item.get("low") for item in values],
+            "close": [item.get("close") for item in values],
+            "adjclose": [item.get("close") for item in values],
+            "volume": [item.get("volume") or 0 for item in values],
+        }
+    )
+    for col in ["open", "high", "low", "close", "adjclose", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError(f"Twelve Data returned only incomplete bars for {display_ticker(ticker)}.")
+    return attach_data_provider(df, "twelvedata", "LIVE_OK", latency_ms=latency_ms)
+
+
+def stooq_symbol(ticker: str) -> str:
+    symbol = display_ticker(ticker).lower()
+    if "." not in symbol:
+        return f"{symbol}.us"
+    if symbol.endswith(".ax"):
+        return symbol
+    return f"{symbol.replace('.', '-')}.us"
+
+
+def fetch_stooq_chart(ticker: str, years: int = 3) -> pd.DataFrame:
+    to_date = datetime.utcnow().date()
+    from_date = (datetime.utcnow() - timedelta(days=int(years * 365.25) + 10)).date()
+    params = urllib.parse.urlencode(
+        {
+            "s": stooq_symbol(ticker),
+            "d1": from_date.strftime("%Y%m%d"),
+            "d2": to_date.strftime("%Y%m%d"),
+            "i": "d",
+        }
+    )
+    started = time.perf_counter()
+    req = urllib.request.Request(f"https://stooq.com/q/d/l/?{params}", headers={"User-Agent": "DailyTradeCopilot/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"stooq HTTP {exc.code}: {body}") from exc
+    latency_ms = round((time.perf_counter() - started) * 1000, 1)
+    if "No data" in body or not body.strip():
+        raise RuntimeError(f"Stooq returned no bars for {display_ticker(ticker)}.")
+    rows = [line.split(",") for line in body.strip().splitlines()]
+    if len(rows) < 2 or rows[0][:6] != ["Date", "Open", "High", "Low", "Close", "Volume"]:
+        raise RuntimeError(f"Stooq returned an unexpected response for {display_ticker(ticker)}.")
+    df = pd.DataFrame(rows[1:], columns=rows[0])
+    df = df.rename(columns={"Date": "date", "Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
+    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["adjclose"] = df["close"]
+    df = df[["date", "open", "high", "low", "close", "adjclose", "volume"]].dropna(subset=["date", "open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError(f"Stooq returned only incomplete bars for {display_ticker(ticker)}.")
+    return attach_data_provider(df, "stooq", "LIVE_OK", latency_ms=latency_ms)
+
+
+def fetch_yahoo_chart(ticker: str, years: int = 3) -> pd.DataFrame:
     period2 = int(time.time())
     period1 = period2 - int(years * 365.25 * 24 * 60 * 60)
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
         f"?period1={period1}&period2={period2}&interval=1d&events=history"
     )
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-
+    payload, latency_ms = request_json(url, "yahoo")
     result = payload["chart"]["result"][0]
     q = result["indicators"]["quote"][0]
     adj = result["indicators"].get("adjclose", [{}])[0].get("adjclose", q["close"])
@@ -308,29 +505,77 @@ def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFr
         }
     )
     df = df.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
-    df.to_csv(cache_path, index=False)
-    return df
+    return attach_data_provider(df, "yahoo", "LIVE_OK", latency_ms=latency_ms)
+
+
+def configured_data_providers() -> list[str]:
+    providers: list[str] = []
+    for provider in DATA_PROVIDER_PRIORITY:
+        if provider in {"polygon", "massive"} and "polygon" not in providers:
+            providers.append("polygon")
+        elif provider in {"twelvedata", "twelve_data", "twelve-data"} and "twelvedata" not in providers:
+            providers.append("twelvedata")
+        elif provider == "stooq" and "stooq" not in providers:
+            providers.append("stooq")
+        elif provider == "yahoo" and "yahoo" not in providers:
+            providers.append("yahoo")
+    return providers or ["polygon", "twelvedata", "stooq", "yahoo"]
+
+
+def fetch_live_chart_from_provider(provider: str, ticker: str, years: int = 3) -> pd.DataFrame:
+    if provider == "polygon":
+        return fetch_polygon_chart(ticker, years)
+    if provider == "twelvedata":
+        return fetch_twelvedata_chart(ticker, years)
+    if provider == "stooq":
+        return fetch_stooq_chart(ticker, years)
+    if provider == "yahoo":
+        return fetch_yahoo_chart(ticker, years)
+    raise RuntimeError(f"Unsupported data provider: {provider}")
+
+
+def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFrame:
+    cache_path = cache_path_for(ticker, years)
+    if cache_path.exists() and not refresh:
+        return attach_data_provider(pd.read_csv(cache_path, parse_dates=["date"]), "cache", "CACHE_READ")
+
+    errors: list[str] = []
+    for provider in configured_data_providers():
+        try:
+            df = fetch_live_chart_from_provider(provider, ticker, years)
+            df.to_csv(cache_path, index=False)
+            return df
+        except Exception as exc:
+            errors.append(f"{provider}: {exc}")
+
+    if cache_path.exists():
+        return attach_data_provider(
+            pd.read_csv(cache_path, parse_dates=["date"]),
+            "cache",
+            "CACHE_FALLBACK",
+            "; ".join(errors),
+        )
+
+    raise RuntimeError("; ".join(errors) or f"No data providers available for {display_ticker(ticker)}.")
 
 
 def cached_chart(ticker: str, years: int = 3) -> pd.DataFrame:
-    cache_path = Path(f"watchlist_{ticker.replace('^', '_')}_{years}y.csv")
+    cache_path = cache_path_for(ticker, years)
     if not cache_path.exists():
         raise FileNotFoundError(f"cache not found: {cache_path}")
-    return pd.read_csv(cache_path, parse_dates=["date"])
+    return attach_data_provider(pd.read_csv(cache_path, parse_dates=["date"]), "cache", "CACHE_READ")
 
 
 def check_live_data_access() -> tuple[bool, str]:
-    req = urllib.request.Request(
-        "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=5d&interval=1d",
-        headers={"User-Agent": "Mozilla/5.0"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status != 200:
-                return False, f"Yahoo preflight returned HTTP {resp.status}"
-        return True, "Live Yahoo access available."
-    except Exception as exc:
-        return False, f"Live Yahoo access unavailable: {exc}"
+    errors: list[str] = []
+    for provider in configured_data_providers():
+        try:
+            df = fetch_live_chart_from_provider(provider, "AAPL", years=1)
+            latest = str(pd.to_datetime(df["date"]).dt.date.max())
+            return True, f"Live {provider} access available; AAPL latest bar {latest}."
+        except Exception as exc:
+            errors.append(f"{provider}: {exc}")
+    return False, "Live market data unavailable from configured providers: " + " | ".join(errors)
 
 
 def yahoo_value(value, key: str = "fmt"):
@@ -609,6 +854,10 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "learning_avg_score",
     "learning_adjustment",
     "learning_plan",
+    "data_provider",
+    "data_provider_status",
+    "data_provider_latency_ms",
+    "data_provider_error",
     "data_age_days",
     "freshness_status",
     "freshness_block",
@@ -745,6 +994,10 @@ def optional_signal_values(row: dict) -> dict:
         "learning_avg_score": numeric_or_none(row.get("learning_avg_score")),
         "learning_adjustment": numeric_or_none(row.get("learning_adjustment")),
         "learning_plan": row.get("learning_plan"),
+        "data_provider": row.get("data_provider"),
+        "data_provider_status": row.get("data_provider_status"),
+        "data_provider_latency_ms": numeric_or_none(row.get("data_provider_latency_ms")),
+        "data_provider_error": row.get("data_provider_error"),
         "data_age_days": numeric_or_none(row.get("data_age_days")),
         "freshness_status": row.get("freshness_status"),
         "freshness_block": row.get("freshness_block"),
@@ -3359,6 +3612,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "last_outcome_label", "last_outcome_return_pct",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
         "operator_state", "operator_state_score", "operator_state_plan",
+        "data_provider", "data_provider_status",
         "setup", "adaptive_mode", "psychology", "reward_risk",
         "risk_pct_to_stop", "position_value_1k_risk",
         "market_permission", "risk_permission",
@@ -3396,6 +3650,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "operator_state": "Operator",
         "operator_state_score": "Op Score",
         "operator_state_plan": "Operator Read",
+        "data_provider": "Data Src",
+        "data_provider_status": "Src Status",
         "setup": "Setup",
         "adaptive_mode": "Mode",
         "psychology": "Tape",
@@ -3866,7 +4122,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a daily stock/ETF watchlist overview.")
     parser.add_argument("--watchlist", default="daily_watchlist.txt")
-    parser.add_argument("--refresh", action="store_true", help="Fetch fresh Yahoo data instead of using cached CSV files.")
+    parser.add_argument("--refresh", action="store_true", help="Fetch fresh data from configured market data providers instead of using cached CSV files.")
     parser.add_argument("--years", type=int, default=3)
     parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
     parser.add_argument("--no-supabase", action="store_true", help="Skip Supabase sync even if credentials are configured.")
@@ -3880,7 +4136,7 @@ def main() -> None:
 
     tickers = read_watchlist(Path(args.watchlist))
     live_access_ok = True
-    live_access_message = "Live Yahoo access available."
+    live_access_message = "Live market data access available."
     if args.refresh:
         live_access_ok, live_access_message = check_live_data_access()
 
@@ -3910,7 +4166,9 @@ def main() -> None:
             else:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
             row = classify_and_score(ticker, df, market_permission=market_permission)
+            row = apply_data_provider_context(row, df)
             ticker_history = build_behavior_history(ticker, df, days=args.history_days)
+            ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
             row = apply_latest_signal_context(row, ticker_history)
             row.update(signal_outcome_from_history(row, ticker_history))
             if not args.skip_profiles:
@@ -3918,6 +4176,8 @@ def main() -> None:
             row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
             rows.append(row)
             history_rows.extend(ticker_history)
+            if args.refresh:
+                record_stale_cache_fallback(stale_cache_fallbacks, ticker, df, live_access_message)
         except URLError as exc:
             if not args.refresh or args.cache_only:
                 failures.append({"ticker": display_ticker(ticker), "error": str(exc)})
@@ -3925,7 +4185,9 @@ def main() -> None:
             try:
                 df = cached_chart(ticker, years=args.years)
                 row = classify_and_score(ticker, df, market_permission=market_permission)
+                row = apply_data_provider_context(row, df)
                 ticker_history = build_behavior_history(ticker, df, days=args.history_days)
+                ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
                 row = apply_latest_signal_context(row, ticker_history)
                 row.update(signal_outcome_from_history(row, ticker_history))
                 if not args.skip_profiles:
@@ -3980,6 +4242,10 @@ def main() -> None:
         status_parts.append(f"mixed source dates {earliest_data_date} to {latest_data_date}")
     if stale_cache_fallbacks:
         status_parts.append(f"{len(stale_cache_fallbacks)} symbols used cached data")
+    if "data_provider" in report.columns:
+        provider_counts = report["data_provider"].fillna("").replace("", "unknown").value_counts().to_dict()
+        provider_summary = ", ".join(f"{provider} {count}" for provider, count in provider_counts.items())
+        status_parts.append(f"providers {provider_summary}")
     stale_blocks = int((report.get("freshness_block", pd.Series(dtype=str)) == "YES").sum())
     outcome_summary = summarize_signal_outcomes(outcomes)
     if stale_blocks:
@@ -4012,6 +4278,8 @@ def main() -> None:
         "scanner_version": SCANNER_VERSION,
         "notes": status_text,
         "payload": {
+            "data_provider_priority": configured_data_providers(),
+            "data_provider_counts": provider_counts if "data_provider" in report.columns else {},
             "failures": failures[:25],
             "stale_cache_fallbacks": stale_cache_fallbacks[:25],
             "stale_execution_blocks": stale_blocks,
@@ -4060,6 +4328,7 @@ def main() -> None:
 
     columns = [
         "ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct",
+        "data_provider", "data_provider_status",
         "market_permission", "ticker_permission", "walk_forward_permission", "risk_permission",
         "risk_pct_to_stop", "position_value_1k_risk", "notes",
     ]

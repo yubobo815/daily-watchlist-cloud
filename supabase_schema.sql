@@ -56,6 +56,10 @@ create table if not exists public.watchlist_snapshots (
   learning_avg_score numeric,
   learning_adjustment numeric,
   learning_plan text,
+  data_provider text,
+  data_provider_status text,
+  data_provider_latency_ms numeric,
+  data_provider_error text,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -133,6 +137,10 @@ create table if not exists public.watchlist_behavior_history (
   learning_avg_score numeric,
   learning_adjustment numeric,
   learning_plan text,
+  data_provider text,
+  data_provider_status text,
+  data_provider_latency_ms numeric,
+  data_provider_error text,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -268,6 +276,10 @@ alter table public.watchlist_snapshots add column if not exists learning_trap_av
 alter table public.watchlist_snapshots add column if not exists learning_avg_score numeric;
 alter table public.watchlist_snapshots add column if not exists learning_adjustment numeric;
 alter table public.watchlist_snapshots add column if not exists learning_plan text;
+alter table public.watchlist_snapshots add column if not exists data_provider text;
+alter table public.watchlist_snapshots add column if not exists data_provider_status text;
+alter table public.watchlist_snapshots add column if not exists data_provider_latency_ms numeric;
+alter table public.watchlist_snapshots add column if not exists data_provider_error text;
 alter table public.watchlist_snapshots add column if not exists data_age_days integer;
 alter table public.watchlist_snapshots add column if not exists freshness_status text;
 alter table public.watchlist_snapshots add column if not exists freshness_block text;
@@ -325,6 +337,10 @@ alter table public.watchlist_behavior_history add column if not exists learning_
 alter table public.watchlist_behavior_history add column if not exists learning_avg_score numeric;
 alter table public.watchlist_behavior_history add column if not exists learning_adjustment numeric;
 alter table public.watchlist_behavior_history add column if not exists learning_plan text;
+alter table public.watchlist_behavior_history add column if not exists data_provider text;
+alter table public.watchlist_behavior_history add column if not exists data_provider_status text;
+alter table public.watchlist_behavior_history add column if not exists data_provider_latency_ms numeric;
+alter table public.watchlist_behavior_history add column if not exists data_provider_error text;
 alter table public.watchlist_behavior_history add column if not exists data_age_days integer;
 alter table public.watchlist_behavior_history add column if not exists freshness_status text;
 alter table public.watchlist_behavior_history add column if not exists freshness_block text;

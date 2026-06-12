@@ -1,5 +1,5 @@
 const { staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
-const { rowDto } = require("../api/_supabase");
+const { rowDto, runDto } = require("../api/_supabase");
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 
 const REQUIRED_GATES = [
@@ -149,6 +149,9 @@ function auditSupabaseFallback() {
       feedback_return_pct: 4.2,
       feedback_max_drawdown_pct: -1.1,
       feedback_stop_hit: "NO",
+      data_provider: "polygon",
+      data_provider_status: "LIVE_OK",
+      data_provider_latency_ms: 180,
     },
   });
   assert(gated.action === "BUY CANDIDATE", "execution-gated BUY row must be preserved");
@@ -160,6 +163,8 @@ function auditSupabaseFallback() {
   assert(gated.payload.buy_tier === "A+ BUY", "execution-gated BUY row must keep execution tier");
   assert(gated.payload.freshness_block === "NO", "execution-gated BUY row must keep freshness gate state");
   assert(gated.payload.feedback_quality === "WORKING", "execution-gated BUY row must keep feedback state");
+  assert(gated.payload.data_provider === "polygon", "execution-gated BUY row must keep data provider");
+  assert(gated.payload.data_provider_status === "LIVE_OK", "execution-gated BUY row must keep data provider status");
 
   const antiBullTrap = rowDto({
     ticker: "TRAP",
@@ -203,6 +208,7 @@ function auditSupabaseFallback() {
     unknownGatedQuality: unknownGated.payload.signal_quality,
     gatedAction: gated.action,
     gatedGates: gateValues(gated),
+    gatedProvider: gated.payload.data_provider,
     antiBullTrapAction: antiBullTrap.action,
     antiBullTrapLevel: antiBullTrap.payload.anti_signal_level,
     antiBullTrapTier: antiBullTrap.payload.buy_tier,
@@ -253,10 +259,28 @@ function auditTickerDetailMerge() {
   };
 }
 
+function auditRunHealthProviderPayload() {
+  const run = {
+    run_date: "2026-06-12",
+    status: "ok",
+    live_access_ok: true,
+    payload: {
+      data_provider_counts: { polygon: 185, twelvedata: 3 },
+      data_provider_priority: ["polygon", "twelvedata", "stooq", "yahoo"],
+      stale_execution_blocks: 0,
+    },
+  };
+  const dto = runDto(run);
+  assert(dto.payload.data_provider_counts.polygon === 185, "run health must expose provider counts");
+  assert(dto.payload.data_provider_priority.includes("stooq"), "run health must expose provider priority");
+  return dto.payload;
+}
+
 const result = {
   staticFallback: auditStaticFallback(),
   staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
   supabaseFallback: auditSupabaseFallback(),
+  runHealthProviders: auditRunHealthProviderPayload(),
   tickerDetailMerge: auditTickerDetailMerge(),
 };
 

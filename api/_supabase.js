@@ -104,6 +104,10 @@ const PAYLOAD_FIELDS = [
   "learning_sample_count",
   "learning_trap_avoided_rate",
   "learning_working_rate",
+  "data_provider",
+  "data_provider_error",
+  "data_provider_latency_ms",
+  "data_provider_status",
   "market_context",
   "market_permission",
   "market_regime_summary",
@@ -501,6 +505,8 @@ function runDto(row) {
   });
   const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
   output.payload = {
+    data_provider_counts: payload.data_provider_counts && typeof payload.data_provider_counts === "object" ? payload.data_provider_counts : {},
+    data_provider_priority: Array.isArray(payload.data_provider_priority) ? payload.data_provider_priority : [],
     failed_symbols: Array.isArray(payload.failed_symbols) ? payload.failed_symbols.slice(0, 25) : [],
     stale_cache_fallbacks: Array.isArray(payload.stale_cache_fallbacks) ? payload.stale_cache_fallbacks.slice(0, 25) : [],
     stale_execution_blocks: Number(payload.stale_execution_blocks || 0),
@@ -562,6 +568,7 @@ module.exports = {
   recentRunDates,
   rowDto,
   RUN_FIELDS,
+  runDto,
   runInfo,
   selectList,
   SNAPSHOT_FIELDS,

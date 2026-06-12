@@ -28,6 +28,7 @@ const WATCHLIST_COLUMNS = [
   ["score", "Trend Quality"],
   ["close", "Close"],
   ["day_change_pct", "Chg%"],
+  ["data_provider", "Data"],
   ["setup", "Pattern"],
   ["adaptive_mode", "Market Behavior"],
   ["psychology", "Tape"],
@@ -675,6 +676,15 @@ function renderBuyTier(row) {
   return `<span class="badge entry-pill entry-${buyTierTone(tier)}">${escapeHtml(String(tier))}</span>`;
 }
 
+function renderDataProvider(row) {
+  const provider = String(payloadValue(row, "data_provider") || "unknown").toUpperCase();
+  const status = String(payloadValue(row, "data_provider_status") || "");
+  const error = String(payloadValue(row, "data_provider_error") || "");
+  const tone = provider === "CACHE" || status.includes("FALLBACK") ? "risk" : "constructive";
+  const title = [status, error].filter(Boolean).join(" · ") || provider;
+  return `<span class="badge entry-pill entry-${tone}" title="${escapeHtml(title)}">${escapeHtml(provider)}</span>`;
+}
+
 function permissionShort(value) {
   const text = String(value || "").toUpperCase();
   if (text === "ALLOW") return "A";
@@ -1220,11 +1230,14 @@ function renderScoreBreakdown(row) {
   const lastOutcomeReturn = Number(payloadValue(row, "last_outcome_return_pct"));
   const learningSamples = Number(payloadValue(row, "learning_sample_count"));
   const learningAdjustment = Number(payloadValue(row, "learning_adjustment"));
+  const dataProvider = payloadValue(row, "data_provider") || "unknown";
+  const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
   const items = [
     ["Execution Tier", buyTier],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
     ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}`],
+    ["Data Source", `${dataProvider} / ${dataProviderStatus}`],
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
     ["Operator", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
@@ -1298,6 +1311,9 @@ function runHealthSummary(runInfo) {
   const stale = Number(runInfo.symbols_stale_cache || 0);
   const liveOk = runInfo.live_access_ok;
   if (liveOk === false) parts.push("source degraded");
+  const providerCounts = runInfo.payload?.data_provider_counts || {};
+  const providerSummary = Object.entries(providerCounts).map(([provider, count]) => `${provider} ${count}`).join(", ");
+  if (providerSummary) parts.push(`data ${providerSummary}`);
   if (stale) parts.push(`${stale} cached`);
   if (failed) parts.push(`${failed} failed`);
   if (runInfo.scanner_version) parts.push(`scanner ${runInfo.scanner_version}`);
@@ -1520,6 +1536,7 @@ function renderWatchlistCell(row, key) {
     return `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
   if (key === "buy_tier") return renderBuyTier(row);
+  if (key === "data_provider") return renderDataProvider(row);
   if (key === "next_day_bias") return renderNextDayBias(row);
   if (key === "operator_state") return renderOperatorPressure(row);
   if (key === "next_day_plan") return `<span class="behavior-detail">${escapeHtml(payloadValue(row, "next_day_plan") || "")}</span>`;
@@ -1549,6 +1566,9 @@ function searchableRowText(row) {
     payloadValue(row, "learning_plan"),
     payloadValue(row, "learning_adjustment"),
     payloadValue(row, "execution_plan"),
+    payloadValue(row, "data_provider"),
+    payloadValue(row, "data_provider_status"),
+    payloadValue(row, "data_provider_error"),
     payloadValue(row, "freshness_status"),
     payloadValue(row, "freshness_plan"),
     payloadValue(row, "feedback_quality"),
