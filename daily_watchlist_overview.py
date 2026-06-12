@@ -50,6 +50,8 @@ SELF_SCORE_ACTIONS = {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING", "
 SELF_SCORE_WORKING_RETURN_PCT = 2.0
 SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
+LEARNING_MIN_SAMPLES = int(os.getenv("LEARNING_MIN_SAMPLES", "3"))
+LEARNING_ADJUSTMENT_CAP = float(os.getenv("LEARNING_ADJUSTMENT_CAP", "10"))
 
 STOCK_NAMES = {
     "AAPL": "Apple",
@@ -600,6 +602,13 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "last_outcome_score",
     "last_outcome_reason",
     "last_outcome_return_pct",
+    "learning_sample_count",
+    "learning_working_rate",
+    "learning_failed_rate",
+    "learning_trap_avoided_rate",
+    "learning_avg_score",
+    "learning_adjustment",
+    "learning_plan",
     "data_age_days",
     "freshness_status",
     "freshness_block",
@@ -729,6 +738,13 @@ def optional_signal_values(row: dict) -> dict:
         "last_outcome_score": numeric_or_none(row.get("last_outcome_score")),
         "last_outcome_reason": row.get("last_outcome_reason"),
         "last_outcome_return_pct": numeric_or_none(row.get("last_outcome_return_pct")),
+        "learning_sample_count": numeric_or_none(row.get("learning_sample_count")),
+        "learning_working_rate": numeric_or_none(row.get("learning_working_rate")),
+        "learning_failed_rate": numeric_or_none(row.get("learning_failed_rate")),
+        "learning_trap_avoided_rate": numeric_or_none(row.get("learning_trap_avoided_rate")),
+        "learning_avg_score": numeric_or_none(row.get("learning_avg_score")),
+        "learning_adjustment": numeric_or_none(row.get("learning_adjustment")),
+        "learning_plan": row.get("learning_plan"),
         "data_age_days": numeric_or_none(row.get("data_age_days")),
         "freshness_status": row.get("freshness_status"),
         "freshness_block": row.get("freshness_block"),
@@ -1415,6 +1431,124 @@ def summarize_signal_outcomes(outcomes: pd.DataFrame) -> dict:
         "counts": {key: int(value) for key, value in counts.items()},
         "avg_score": round(float(outcomes["outcome_score"].mean()), 3),
     }
+
+
+def learning_key_for(row: dict) -> str:
+    return "|".join(
+        [
+            str(row.get("action") or "UNKNOWN"),
+            str(row.get("setup") or "NONE"),
+            str(row.get("operator_state") or "NEUTRAL"),
+            str(row.get("anti_signal_level") or "NONE"),
+        ]
+    )
+
+
+def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
+    frames = []
+    for path in sorted(Path(".").glob("daily_signal_outcomes_*.csv")):
+        stem_date = path.stem.replace("daily_signal_outcomes_", "")
+        if stem_date == "latest" or stem_date >= run_date or len(stem_date) != 10:
+            continue
+        try:
+            frames.append(pd.read_csv(path))
+        except Exception as exc:
+            print(f"Local signal-outcome history load skipped ({path}): {exc}")
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
+    try:
+        rows = supabase_select(
+            "watchlist_signal_outcomes?"
+            "select=*&"
+            f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
+            "outcome_label=neq.PENDING&"
+            "order=evaluation_run_date.desc&limit=5000"
+        )
+        if rows:
+            return pd.DataFrame([merge_payload_row(row) for row in rows])
+    except RuntimeError as exc:
+        print(f"Signal-outcome history fetch skipped: {exc}")
+    return load_local_signal_outcomes(run_date)
+
+
+def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
+    if outcome_history.empty or "learning_key" not in outcome_history.columns:
+        return {}
+    usable = outcome_history[outcome_history["outcome_label"].astype(str).str.upper() != "PENDING"].copy()
+    if usable.empty:
+        return {}
+
+    stats: dict[str, dict] = {}
+    for key, group in usable.groupby("learning_key"):
+        labels = group["outcome_label"].astype(str).str.upper()
+        scores = pd.to_numeric(group.get("outcome_score"), errors="coerce").dropna()
+        returns = pd.to_numeric(group.get("close_return_pct"), errors="coerce").dropna()
+        total = int(len(group))
+        working = int((labels == "WORKING").sum())
+        failed = int((labels == "FAILED").sum())
+        trap_avoided = int((labels == "TRAP_AVOIDED").sum())
+        stats[str(key)] = {
+            "sample_count": total,
+            "working_rate": working / total if total else 0.0,
+            "failed_rate": failed / total if total else 0.0,
+            "trap_avoided_rate": trap_avoided / total if total else 0.0,
+            "avg_score": float(scores.mean()) if not scores.empty else 0.0,
+            "avg_return_pct": float(returns.mean()) if not returns.empty else None,
+        }
+    return stats
+
+
+def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]) -> None:
+    for row in rows:
+        key = learning_key_for(row)
+        stats = learning_stats.get(key)
+        if not stats or int(stats.get("sample_count", 0)) < LEARNING_MIN_SAMPLES:
+            row["learning_sample_count"] = int(stats.get("sample_count", 0)) if stats else 0
+            row["learning_working_rate"] = round(float(stats.get("working_rate", 0.0)), 3) if stats else ""
+            row["learning_failed_rate"] = round(float(stats.get("failed_rate", 0.0)), 3) if stats else ""
+            row["learning_trap_avoided_rate"] = round(float(stats.get("trap_avoided_rate", 0.0)), 3) if stats else ""
+            row["learning_avg_score"] = round(float(stats.get("avg_score", 0.0)), 3) if stats else ""
+            row["learning_adjustment"] = 0.0
+            row["learning_plan"] = f"Learning pending: needs at least {LEARNING_MIN_SAMPLES} settled samples for this signal personality."
+            continue
+
+        avg_score = float(stats.get("avg_score", 0.0))
+        working_rate = float(stats.get("working_rate", 0.0))
+        failed_rate = float(stats.get("failed_rate", 0.0))
+        trap_rate = float(stats.get("trap_avoided_rate", 0.0))
+        adjustment = avg_score * 8.0 + (working_rate - failed_rate) * 4.0 + trap_rate * 2.0
+        adjustment = max(-LEARNING_ADJUSTMENT_CAP, min(LEARNING_ADJUSTMENT_CAP, adjustment))
+
+        anti_level = str(row.get("anti_signal_level") or "NONE").upper()
+        stale = str(row.get("freshness_block") or "").upper() == "YES"
+        if stale:
+            effective_adjustment = 0.0
+            plan = "Learning observed, but data is stale; no score adjustment applied."
+        elif anti_level == "BLOCK":
+            effective_adjustment = min(0.0, adjustment)
+            plan = "Learning observed, but anti-signal BLOCK prevents positive promotion."
+        elif anti_level == "CAUTION":
+            effective_adjustment = min(4.0, adjustment)
+            plan = "Learning adjustment capped by anti-signal caution."
+        else:
+            effective_adjustment = adjustment
+            plan = "Learning adjustment applied from settled prior outcomes."
+
+        base_adjusted = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
+        row["adjusted_score"] = round(max(0.0, min(128.0, base_adjusted + effective_adjustment)), 1)
+        if "adjusted_score" not in row and effective_adjustment:
+            row["score"] = round(max(0.0, min(128.0, float(numeric_or_none(row.get("score")) or 0) + effective_adjustment)), 1)
+        row["learning_sample_count"] = int(stats.get("sample_count", 0))
+        row["learning_working_rate"] = round(working_rate, 3)
+        row["learning_failed_rate"] = round(failed_rate, 3)
+        row["learning_trap_avoided_rate"] = round(trap_rate, 3)
+        row["learning_avg_score"] = round(avg_score, 3)
+        row["learning_adjustment"] = round(float(effective_adjustment), 2)
+        row["learning_plan"] = plan
 
 
 def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_pullback_pct: float) -> tuple[float, str]:
@@ -3822,6 +3956,9 @@ def main() -> None:
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
+    learning_history = fetch_signal_outcome_history(today)
+    learning_stats = build_learning_stats(learning_history)
+    apply_learning_adjustments(rows, learning_stats)
     rows = sorted(
         rows,
         key=lambda item: (

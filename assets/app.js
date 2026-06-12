@@ -1218,10 +1218,13 @@ function renderScoreBreakdown(row) {
   const antiScore = Number(payloadValue(row, "anti_signal_score"));
   const lastOutcome = payloadValue(row, "last_outcome_label") || "n/a";
   const lastOutcomeReturn = Number(payloadValue(row, "last_outcome_return_pct"));
+  const learningSamples = Number(payloadValue(row, "learning_sample_count"));
+  const learningAdjustment = Number(payloadValue(row, "learning_adjustment"));
   const items = [
     ["Execution Tier", buyTier],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
+    ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}`],
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
     ["Operator", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
@@ -1543,6 +1546,8 @@ function searchableRowText(row) {
     payloadValue(row, "anti_signal_plan"),
     payloadValue(row, "last_outcome_label"),
     payloadValue(row, "last_outcome_reason"),
+    payloadValue(row, "learning_plan"),
+    payloadValue(row, "learning_adjustment"),
     payloadValue(row, "execution_plan"),
     payloadValue(row, "freshness_status"),
     payloadValue(row, "freshness_plan"),

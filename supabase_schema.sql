@@ -49,6 +49,13 @@ create table if not exists public.watchlist_snapshots (
   last_outcome_score numeric,
   last_outcome_reason text,
   last_outcome_return_pct numeric,
+  learning_sample_count integer,
+  learning_working_rate numeric,
+  learning_failed_rate numeric,
+  learning_trap_avoided_rate numeric,
+  learning_avg_score numeric,
+  learning_adjustment numeric,
+  learning_plan text,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -119,6 +126,13 @@ create table if not exists public.watchlist_behavior_history (
   last_outcome_score numeric,
   last_outcome_reason text,
   last_outcome_return_pct numeric,
+  learning_sample_count integer,
+  learning_working_rate numeric,
+  learning_failed_rate numeric,
+  learning_trap_avoided_rate numeric,
+  learning_avg_score numeric,
+  learning_adjustment numeric,
+  learning_plan text,
   data_age_days integer,
   freshness_status text,
   freshness_block text,
@@ -247,6 +261,13 @@ alter table public.watchlist_snapshots add column if not exists last_outcome_lab
 alter table public.watchlist_snapshots add column if not exists last_outcome_score numeric;
 alter table public.watchlist_snapshots add column if not exists last_outcome_reason text;
 alter table public.watchlist_snapshots add column if not exists last_outcome_return_pct numeric;
+alter table public.watchlist_snapshots add column if not exists learning_sample_count integer;
+alter table public.watchlist_snapshots add column if not exists learning_working_rate numeric;
+alter table public.watchlist_snapshots add column if not exists learning_failed_rate numeric;
+alter table public.watchlist_snapshots add column if not exists learning_trap_avoided_rate numeric;
+alter table public.watchlist_snapshots add column if not exists learning_avg_score numeric;
+alter table public.watchlist_snapshots add column if not exists learning_adjustment numeric;
+alter table public.watchlist_snapshots add column if not exists learning_plan text;
 alter table public.watchlist_snapshots add column if not exists data_age_days integer;
 alter table public.watchlist_snapshots add column if not exists freshness_status text;
 alter table public.watchlist_snapshots add column if not exists freshness_block text;
@@ -297,6 +318,13 @@ alter table public.watchlist_behavior_history add column if not exists last_outc
 alter table public.watchlist_behavior_history add column if not exists last_outcome_score numeric;
 alter table public.watchlist_behavior_history add column if not exists last_outcome_reason text;
 alter table public.watchlist_behavior_history add column if not exists last_outcome_return_pct numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_sample_count integer;
+alter table public.watchlist_behavior_history add column if not exists learning_working_rate numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_failed_rate numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_trap_avoided_rate numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_avg_score numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_adjustment numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_plan text;
 alter table public.watchlist_behavior_history add column if not exists data_age_days integer;
 alter table public.watchlist_behavior_history add column if not exists freshness_status text;
 alter table public.watchlist_behavior_history add column if not exists freshness_block text;
