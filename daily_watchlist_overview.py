@@ -588,6 +588,33 @@ OPTIONAL_SIGNAL_COLUMNS = {
 }
 
 SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "180"))
+ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().lower() in {"1", "true", "yes"}
+
+
+def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[bool, str]:
+    if ALLOW_STALE_SUPABASE_SYNC:
+        return True, "ALLOW_STALE_SUPABASE_SYNC override enabled."
+    if report.empty:
+        return False, "No snapshot rows were produced."
+
+    date_values = report["date"] if "date" in report.columns else pd.Series(dtype=str)
+    latest_dates = pd.to_datetime(date_values, errors="coerce").dropna()
+    if latest_dates.empty:
+        return False, "No valid data_date values were produced."
+
+    latest_data_date = str(latest_dates.dt.date.max())
+    data_age_days = days_between_dates(run_date, latest_data_date)
+    if data_age_days is None or data_age_days > MAX_EXECUTION_DATA_AGE_DAYS:
+        return False, (
+            f"Latest market data is {data_age_days if data_age_days is not None else 'unknown'} day(s) old "
+            f"({latest_data_date}); not overwriting Supabase snapshots."
+        )
+
+    stale_count = int((report.get("freshness_block", pd.Series(dtype=str)) == "YES").sum())
+    if stale_count >= len(report):
+        return False, "Every row is execution-blocked for stale data; not overwriting Supabase snapshots."
+
+    return True, f"Latest market data is fresh enough for Supabase sync ({latest_data_date}, age {data_age_days} day(s))."
 
 
 def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict], conflict_columns: list[str]) -> None:
@@ -644,6 +671,42 @@ def cleanup_supabase_retention(run_date: str) -> None:
     print(f"Supabase retention cleanup complete: kept rows from {cutoff} onward ({SUPABASE_RETENTION_DAYS} days).")
 
 
+def optional_signal_values(row: dict) -> dict:
+    return {
+        "next_day_bias": row.get("next_day_bias"),
+        "next_day_bias_score": numeric_or_none(row.get("next_day_bias_score")),
+        "next_day_plan": row.get("next_day_plan"),
+        "emotion_score": numeric_or_none(row.get("emotion_score")),
+        "trend_location_score": numeric_or_none(row.get("trend_location_score")),
+        "setup_context_score": numeric_or_none(row.get("setup_context_score")),
+        "operator_pressure": row.get("operator_pressure"),
+        "operator_pressure_score": numeric_or_none(row.get("operator_pressure_score")),
+        "operator_plan": row.get("operator_plan"),
+        "operator_state": row.get("operator_state"),
+        "operator_state_score": numeric_or_none(row.get("operator_state_score")),
+        "operator_state_plan": row.get("operator_state_plan"),
+        "bull_trap_score": numeric_or_none(row.get("bull_trap_score")),
+        "bear_trap_score": numeric_or_none(row.get("bear_trap_score")),
+        "distribution_score": numeric_or_none(row.get("distribution_score")),
+        "absorption_score": numeric_or_none(row.get("absorption_score")),
+        "short_pressure_proxy": numeric_or_none(row.get("short_pressure_proxy")),
+        "squeeze_watch": row.get("squeeze_watch"),
+        "data_age_days": numeric_or_none(row.get("data_age_days")),
+        "freshness_status": row.get("freshness_status"),
+        "freshness_block": row.get("freshness_block"),
+        "freshness_plan": row.get("freshness_plan"),
+        "buy_tier": row.get("buy_tier"),
+        "execution_priority": numeric_or_none(row.get("execution_priority")),
+        "execution_plan": row.get("execution_plan"),
+        "feedback_window_days": numeric_or_none(row.get("feedback_window_days")),
+        "feedback_return_pct": numeric_or_none(row.get("feedback_return_pct")),
+        "feedback_max_drawdown_pct": numeric_or_none(row.get("feedback_max_drawdown_pct")),
+        "feedback_stop_hit": row.get("feedback_stop_hit"),
+        "feedback_quality": row.get("feedback_quality"),
+        "feedback_plan": row.get("feedback_plan"),
+    }
+
+
 def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
     url, key = supabase_credentials()
     if not url or not key:
@@ -656,12 +719,45 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
     report_records = []
     for record in report.to_dict(orient="records"):
         row = clean_record(record)
-        report_records.append(
-            {
+        report_record = {
+            "run_date": run_date,
+            "ticker": row.get("ticker"),
+            "name": row.get("name"),
+            "data_date": row.get("date"),
+            "action": row.get("action"),
+            "setup": row.get("setup"),
+            "adaptive_mode": row.get("adaptive_mode"),
+            "psychology": row.get("psychology"),
+            "score": numeric_or_none(row.get("score")),
+            "close": numeric_or_none(row.get("close")),
+            "day_change_pct": numeric_or_none(row.get("day_change_pct")),
+            "entry_est": numeric_or_none(row.get("entry_est")),
+            "stop_est": numeric_or_none(row.get("stop_est")),
+            "target_est": numeric_or_none(row.get("target_est")),
+            "notes": row.get("notes"),
+            "signal_stage": row.get("signal_stage"),
+            "transition_label": row.get("transition_label"),
+            "transition_score": numeric_or_none(row.get("transition_score")),
+            "signal_age_days": numeric_or_none(row.get("signal_age_days")),
+            "price_progress_since_signal_pct": numeric_or_none(row.get("price_progress_since_signal_pct")),
+            "freshness_penalty": numeric_or_none(row.get("freshness_penalty")),
+            "adjusted_score": numeric_or_none(row.get("adjusted_score")),
+            "distance_from_ref_zone_pct": numeric_or_none(row.get("distance_from_ref_zone_pct")),
+            "extension_state": row.get("extension_state"),
+            "reason_codes": row.get("reason_codes") or [],
+            "payload": row,
+        }
+        report_record.update(optional_signal_values(row))
+        report_records.append(report_record)
+
+    history_records = []
+    if not history.empty:
+        for record in history.to_dict(orient="records"):
+            row = clean_record(record)
+            history_record = {
                 "run_date": run_date,
                 "ticker": row.get("ticker"),
-                "name": row.get("name"),
-                "data_date": row.get("date"),
+                "history_date": row.get("date"),
                 "action": row.get("action"),
                 "setup": row.get("setup"),
                 "adaptive_mode": row.get("adaptive_mode"),
@@ -685,41 +781,8 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, run_date: str, ru
                 "reason_codes": row.get("reason_codes") or [],
                 "payload": row,
             }
-        )
-
-    history_records = []
-    if not history.empty:
-        for record in history.to_dict(orient="records"):
-            row = clean_record(record)
-            history_records.append(
-                {
-                    "run_date": run_date,
-                    "ticker": row.get("ticker"),
-                    "history_date": row.get("date"),
-                    "action": row.get("action"),
-                    "setup": row.get("setup"),
-                    "adaptive_mode": row.get("adaptive_mode"),
-                    "psychology": row.get("psychology"),
-                    "score": numeric_or_none(row.get("score")),
-                    "close": numeric_or_none(row.get("close")),
-                    "day_change_pct": numeric_or_none(row.get("day_change_pct")),
-                    "entry_est": numeric_or_none(row.get("entry_est")),
-                    "stop_est": numeric_or_none(row.get("stop_est")),
-                    "target_est": numeric_or_none(row.get("target_est")),
-                    "notes": row.get("notes"),
-                    "signal_stage": row.get("signal_stage"),
-                    "transition_label": row.get("transition_label"),
-                    "transition_score": numeric_or_none(row.get("transition_score")),
-                    "signal_age_days": numeric_or_none(row.get("signal_age_days")),
-                    "price_progress_since_signal_pct": numeric_or_none(row.get("price_progress_since_signal_pct")),
-                    "freshness_penalty": numeric_or_none(row.get("freshness_penalty")),
-                    "adjusted_score": numeric_or_none(row.get("adjusted_score")),
-                    "distance_from_ref_zone_pct": numeric_or_none(row.get("distance_from_ref_zone_pct")),
-                    "extension_state": row.get("extension_state"),
-                    "reason_codes": row.get("reason_codes") or [],
-                    "payload": row,
-                }
-            )
+            history_record.update(optional_signal_values(row))
+            history_records.append(history_record)
 
     if run_metadata:
         try:
@@ -3453,7 +3516,11 @@ def main() -> None:
         Path("daily_watchlist_overview_stale_cache.csv").unlink()
 
     if not args.no_supabase:
-        sync_supabase(report, history, today, run_metadata)
+        sync_ok, sync_reason = should_sync_supabase_snapshot(report, today)
+        if sync_ok:
+            sync_supabase(report, history, today, run_metadata)
+        else:
+            print(f"Supabase sync skipped: {sync_reason}")
 
     columns = [
         "ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct",

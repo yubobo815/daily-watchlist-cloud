@@ -410,20 +410,23 @@ function sortRows(rows) {
 
 async function recentRunDates(limit = 2) {
   const dates = [];
+  const addDate = (row) => {
+    if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
+  };
+
+  // Snapshot rows are the source of truth for a usable app state. A degraded
+  // refresh may write run health without snapshot rows, and that must not make
+  // the app select an empty latest date.
+  const snapshotRows = await supabaseSelect("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
+  snapshotRows.forEach(addDate);
+  if (dates.length >= limit) return dates.slice(0, limit);
+
   try {
     const runRows = await supabaseSelect(`watchlist_refresh_runs?select=run_date&order=run_date.desc&limit=${limit}`);
-    runRows.forEach((row) => {
-      if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
-    });
+    runRows.forEach(addDate);
   } catch {
     // Older deployments may not have refresh run rows yet.
   }
-  if (dates.length >= limit) return dates.slice(0, limit);
-
-  const snapshotRows = await supabaseSelect("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
-  snapshotRows.forEach((row) => {
-    if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
-  });
   return dates.slice(0, limit);
 }
 

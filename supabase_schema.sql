@@ -23,6 +23,37 @@ create table if not exists public.watchlist_snapshots (
   adjusted_score numeric,
   distance_from_ref_zone_pct numeric,
   extension_state text,
+  next_day_bias text,
+  next_day_bias_score numeric,
+  next_day_plan text,
+  emotion_score numeric,
+  trend_location_score numeric,
+  setup_context_score numeric,
+  operator_pressure text,
+  operator_pressure_score numeric,
+  operator_plan text,
+  operator_state text,
+  operator_state_score numeric,
+  operator_state_plan text,
+  bull_trap_score numeric,
+  bear_trap_score numeric,
+  distribution_score numeric,
+  absorption_score numeric,
+  short_pressure_proxy numeric,
+  squeeze_watch text,
+  data_age_days integer,
+  freshness_status text,
+  freshness_block text,
+  freshness_plan text,
+  buy_tier text,
+  execution_priority integer,
+  execution_plan text,
+  feedback_window_days integer,
+  feedback_return_pct numeric,
+  feedback_max_drawdown_pct numeric,
+  feedback_stop_hit text,
+  feedback_quality text,
+  feedback_plan text,
   reason_codes jsonb not null default '[]'::jsonb,
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
@@ -54,6 +85,37 @@ create table if not exists public.watchlist_behavior_history (
   adjusted_score numeric,
   distance_from_ref_zone_pct numeric,
   extension_state text,
+  next_day_bias text,
+  next_day_bias_score numeric,
+  next_day_plan text,
+  emotion_score numeric,
+  trend_location_score numeric,
+  setup_context_score numeric,
+  operator_pressure text,
+  operator_pressure_score numeric,
+  operator_plan text,
+  operator_state text,
+  operator_state_score numeric,
+  operator_state_plan text,
+  bull_trap_score numeric,
+  bear_trap_score numeric,
+  distribution_score numeric,
+  absorption_score numeric,
+  short_pressure_proxy numeric,
+  squeeze_watch text,
+  data_age_days integer,
+  freshness_status text,
+  freshness_block text,
+  freshness_plan text,
+  buy_tier text,
+  execution_priority integer,
+  execution_plan text,
+  feedback_window_days integer,
+  feedback_return_pct numeric,
+  feedback_max_drawdown_pct numeric,
+  feedback_stop_hit text,
+  feedback_quality text,
+  feedback_plan text,
   reason_codes jsonb not null default '[]'::jsonb,
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
@@ -113,6 +175,37 @@ alter table public.watchlist_snapshots add column if not exists freshness_penalt
 alter table public.watchlist_snapshots add column if not exists adjusted_score numeric;
 alter table public.watchlist_snapshots add column if not exists distance_from_ref_zone_pct numeric;
 alter table public.watchlist_snapshots add column if not exists extension_state text;
+alter table public.watchlist_snapshots add column if not exists next_day_bias text;
+alter table public.watchlist_snapshots add column if not exists next_day_bias_score numeric;
+alter table public.watchlist_snapshots add column if not exists next_day_plan text;
+alter table public.watchlist_snapshots add column if not exists emotion_score numeric;
+alter table public.watchlist_snapshots add column if not exists trend_location_score numeric;
+alter table public.watchlist_snapshots add column if not exists setup_context_score numeric;
+alter table public.watchlist_snapshots add column if not exists operator_pressure text;
+alter table public.watchlist_snapshots add column if not exists operator_pressure_score numeric;
+alter table public.watchlist_snapshots add column if not exists operator_plan text;
+alter table public.watchlist_snapshots add column if not exists operator_state text;
+alter table public.watchlist_snapshots add column if not exists operator_state_score numeric;
+alter table public.watchlist_snapshots add column if not exists operator_state_plan text;
+alter table public.watchlist_snapshots add column if not exists bull_trap_score numeric;
+alter table public.watchlist_snapshots add column if not exists bear_trap_score numeric;
+alter table public.watchlist_snapshots add column if not exists distribution_score numeric;
+alter table public.watchlist_snapshots add column if not exists absorption_score numeric;
+alter table public.watchlist_snapshots add column if not exists short_pressure_proxy numeric;
+alter table public.watchlist_snapshots add column if not exists squeeze_watch text;
+alter table public.watchlist_snapshots add column if not exists data_age_days integer;
+alter table public.watchlist_snapshots add column if not exists freshness_status text;
+alter table public.watchlist_snapshots add column if not exists freshness_block text;
+alter table public.watchlist_snapshots add column if not exists freshness_plan text;
+alter table public.watchlist_snapshots add column if not exists buy_tier text;
+alter table public.watchlist_snapshots add column if not exists execution_priority integer;
+alter table public.watchlist_snapshots add column if not exists execution_plan text;
+alter table public.watchlist_snapshots add column if not exists feedback_window_days integer;
+alter table public.watchlist_snapshots add column if not exists feedback_return_pct numeric;
+alter table public.watchlist_snapshots add column if not exists feedback_max_drawdown_pct numeric;
+alter table public.watchlist_snapshots add column if not exists feedback_stop_hit text;
+alter table public.watchlist_snapshots add column if not exists feedback_quality text;
+alter table public.watchlist_snapshots add column if not exists feedback_plan text;
 alter table public.watchlist_snapshots add column if not exists reason_codes jsonb not null default '[]'::jsonb;
 
 alter table public.watchlist_behavior_history add column if not exists signal_stage text;
@@ -124,6 +217,37 @@ alter table public.watchlist_behavior_history add column if not exists freshness
 alter table public.watchlist_behavior_history add column if not exists adjusted_score numeric;
 alter table public.watchlist_behavior_history add column if not exists distance_from_ref_zone_pct numeric;
 alter table public.watchlist_behavior_history add column if not exists extension_state text;
+alter table public.watchlist_behavior_history add column if not exists next_day_bias text;
+alter table public.watchlist_behavior_history add column if not exists next_day_bias_score numeric;
+alter table public.watchlist_behavior_history add column if not exists next_day_plan text;
+alter table public.watchlist_behavior_history add column if not exists emotion_score numeric;
+alter table public.watchlist_behavior_history add column if not exists trend_location_score numeric;
+alter table public.watchlist_behavior_history add column if not exists setup_context_score numeric;
+alter table public.watchlist_behavior_history add column if not exists operator_pressure text;
+alter table public.watchlist_behavior_history add column if not exists operator_pressure_score numeric;
+alter table public.watchlist_behavior_history add column if not exists operator_plan text;
+alter table public.watchlist_behavior_history add column if not exists operator_state text;
+alter table public.watchlist_behavior_history add column if not exists operator_state_score numeric;
+alter table public.watchlist_behavior_history add column if not exists operator_state_plan text;
+alter table public.watchlist_behavior_history add column if not exists bull_trap_score numeric;
+alter table public.watchlist_behavior_history add column if not exists bear_trap_score numeric;
+alter table public.watchlist_behavior_history add column if not exists distribution_score numeric;
+alter table public.watchlist_behavior_history add column if not exists absorption_score numeric;
+alter table public.watchlist_behavior_history add column if not exists short_pressure_proxy numeric;
+alter table public.watchlist_behavior_history add column if not exists squeeze_watch text;
+alter table public.watchlist_behavior_history add column if not exists data_age_days integer;
+alter table public.watchlist_behavior_history add column if not exists freshness_status text;
+alter table public.watchlist_behavior_history add column if not exists freshness_block text;
+alter table public.watchlist_behavior_history add column if not exists freshness_plan text;
+alter table public.watchlist_behavior_history add column if not exists buy_tier text;
+alter table public.watchlist_behavior_history add column if not exists execution_priority integer;
+alter table public.watchlist_behavior_history add column if not exists execution_plan text;
+alter table public.watchlist_behavior_history add column if not exists feedback_window_days integer;
+alter table public.watchlist_behavior_history add column if not exists feedback_return_pct numeric;
+alter table public.watchlist_behavior_history add column if not exists feedback_max_drawdown_pct numeric;
+alter table public.watchlist_behavior_history add column if not exists feedback_stop_hit text;
+alter table public.watchlist_behavior_history add column if not exists feedback_quality text;
+alter table public.watchlist_behavior_history add column if not exists feedback_plan text;
 alter table public.watchlist_behavior_history add column if not exists reason_codes jsonb not null default '[]'::jsonb;
 
 alter table public.watchlist_snapshots enable row level security;
