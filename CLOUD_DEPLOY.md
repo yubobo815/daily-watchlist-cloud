@@ -26,7 +26,8 @@ This project is ready to publish the daily watchlist report with GitHub Actions 
 3. In GitHub, open `Settings -> Secrets and variables -> Actions`.
 4. Add `SUPABASE_URL`.
 5. Add `SUPABASE_SECRET_KEY` with a Supabase `sb_secret_...` key.
-6. In Vercel, add `FOCUS_LIST_PIN` to protect the personal cloud Focus List.
+6. Add `SUPABASE_DB_URL` if you want GitHub Actions to apply `supabase_schema.sql` automatically before each refresh. Use the percent-encoded Postgres connection string expected by Supabase CLI v2 `db query --db-url`.
+7. In Vercel, add `FOCUS_LIST_PIN` to protect the personal cloud Focus List.
 
 After that, every cloud refresh writes:
 
@@ -35,6 +36,8 @@ After that, every cloud refresh writes:
 - `focus_tickers`: your private PIN-protected Focus List, read and written only through Vercel API routes.
 
 Scanner tables keep the most recent 180 days by default. Set `SUPABASE_RETENTION_DAYS` in GitHub Actions if you want a different retention window.
+
+If `SUPABASE_DB_URL` is not set, the workflow skips automatic schema application. Refreshes can still write payload-backed rows, but new top-level columns should be applied manually through Supabase SQL Editor.
 
 The secret key is only for GitHub Actions and server-side Vercel API routes. Do not put it into browser JavaScript.
 The published app should use Vercel API routes or static fallback JSON rather than exposing Supabase query config in browser JavaScript.
