@@ -1,38 +1,188 @@
-const ACTION_LABELS = {
-  "BUY CANDIDATE": "BUY",
-  "STRONG CONTINUATION": "TRENDING",
-  "SETUP FORMING": "BUILDING",
-  "WATCH TREND": "WATCH",
-  "EXIT PRESSURE": "EXIT",
-  "WAIT": "WAIT",
-  "WAIT / AVOID": "AVOID"
+const LANGUAGE_KEY = "daily-trade-copilot:language:v1";
+
+const UI_COPY = {
+  en: {
+    toggle: "中文",
+    actions: {
+      "BUY CANDIDATE": "BUY",
+      "STRONG CONTINUATION": "TRENDING",
+      "SETUP FORMING": "BUILDING",
+      "WATCH TREND": "WATCH",
+      "EXIT PRESSURE": "EXIT",
+      "WAIT": "WAIT",
+      "WAIT / AVOID": "AVOID"
+    },
+    setup: {
+      "BREAKOUT BUY": "Breakout",
+      "MOMENTUM BUY": "Momentum",
+      "PULLBACK BUY": "Pullback",
+      "EARLY PULLBACK BUY": "Early Pullback",
+      "REVERSAL BUY": "Reversal",
+      "NONE": "None"
+    },
+    kinds: {
+      buy: "BUY",
+      continue: "TRENDING",
+      setup: "BUILDING",
+      watch: "WATCH",
+      exit: "EXIT",
+      avoid: "AVOID"
+    },
+    columns: {
+      ticker: "Stock",
+      action: "Action",
+      trade_context: "Read",
+      risk_summary: "Risk",
+      price_summary: "Price"
+    },
+    text: {
+      watchlistSubtitle: "Watchlist",
+      loadingWatchlist: "Loading Supabase watchlist...",
+      waitingDatabase: "Waiting for database config",
+      findTicker: "Find ticker",
+      searchMobile: "Search ticker, company, signal...",
+      searchDesktop: "Search ticker or behavior...",
+      clear: "Clear",
+      all: "All",
+      buy: "Buy",
+      building: "Building",
+      watch: "Watch",
+      risk: "Risk",
+      watchlist: "Watchlist",
+      searchResults: "Search Results",
+      noMatchingRows: "No matching rows yet.",
+      shown: "shown",
+      result: "result",
+      results: "results",
+      brief: "Brief",
+      focus: "Focus",
+      changes: "Changes",
+      dailyBrief: "Daily Brief",
+      actionableNames: "{total} actionable names: {buy} BUY, {building} BUILDING",
+      fresh: "Fresh",
+      upgraded: "Upgraded",
+      movers: "Movers",
+      reviewTicker: "Review {ticker}",
+      showBuy: "Show BUY",
+      todayFocus: "Today’s Focus",
+      buyFocus: "Buy",
+      buildingFocus: "Building",
+      exitFocus: "Exit",
+      moveFocus: "Move",
+      signalChanges: "Signal Changes",
+      priceMovers: "Price Movers",
+      focusList: "Focus List",
+      noScannerChanges: "No major scanner changes versus the previous run.",
+      noPriceMoves: "No large current-day price moves.",
+      sortExecution: "Execution tier first",
+      sortScore: "Trend quality high to low",
+      sortBestDay: "Best day change",
+      sortWorstDay: "Worst day change",
+      sortTicker: "Ticker A to Z"
+    }
+  },
+  zh: {
+    toggle: "EN",
+    actions: {
+      "BUY CANDIDATE": "买入",
+      "STRONG CONTINUATION": "趋势",
+      "SETUP FORMING": "形成中",
+      "WATCH TREND": "观察",
+      "EXIT PRESSURE": "退出",
+      "WAIT": "等待",
+      "WAIT / AVOID": "避开"
+    },
+    setup: {
+      "BREAKOUT BUY": "突破",
+      "MOMENTUM BUY": "动量",
+      "PULLBACK BUY": "回踩",
+      "EARLY PULLBACK BUY": "早期回踩",
+      "REVERSAL BUY": "反转",
+      "NONE": "无"
+    },
+    kinds: {
+      buy: "买入",
+      continue: "趋势",
+      setup: "形成中",
+      watch: "观察",
+      exit: "退出",
+      avoid: "避开"
+    },
+    columns: {
+      ticker: "股票",
+      action: "动作",
+      trade_context: "判断",
+      risk_summary: "风险",
+      price_summary: "价格"
+    },
+    text: {
+      watchlistSubtitle: "观察列表",
+      loadingWatchlist: "正在加载 Supabase 观察列表...",
+      waitingDatabase: "等待数据库配置",
+      findTicker: "查找股票",
+      searchMobile: "搜索股票、公司、信号...",
+      searchDesktop: "搜索股票或行为...",
+      clear: "清除",
+      all: "全部",
+      buy: "买入",
+      building: "形成中",
+      watch: "观察",
+      risk: "风险",
+      watchlist: "观察列表",
+      searchResults: "搜索结果",
+      noMatchingRows: "没有匹配结果。",
+      shown: "显示",
+      result: "个结果",
+      results: "个结果",
+      brief: "简报",
+      focus: "重点",
+      changes: "变化",
+      dailyBrief: "每日简报",
+      actionableNames: "{total} 个可跟踪标的：{buy} 个买入，{building} 个形成中",
+      fresh: "新信号",
+      upgraded: "升级",
+      movers: "异动",
+      reviewTicker: "查看 {ticker}",
+      showBuy: "只看买入",
+      todayFocus: "今日重点",
+      buyFocus: "买入",
+      buildingFocus: "形成中",
+      exitFocus: "退出",
+      moveFocus: "异动",
+      signalChanges: "信号变化",
+      priceMovers: "价格异动",
+      focusList: "关注列表",
+      noScannerChanges: "相比上次扫描，没有重大信号变化。",
+      noPriceMoves: "当前没有明显的大幅价格异动。",
+      sortExecution: "执行等级优先",
+      sortScore: "趋势质量从高到低",
+      sortBestDay: "当日涨幅最好",
+      sortWorstDay: "当日跌幅最大",
+      sortTicker: "股票 A 到 Z"
+    }
+  }
 };
 
-const SETUP_LABELS = {
-  "BREAKOUT BUY": "Breakout",
-  "MOMENTUM BUY": "Momentum",
-  "PULLBACK BUY": "Pullback",
-  "EARLY PULLBACK BUY": "Early Pullback",
-  "REVERSAL BUY": "Reversal",
-  "NONE": "None"
-};
+const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "trade_context", "risk_summary", "price_summary"];
+const SUMMARY_CARD_KEYS = ["buy", "continue", "setup", "watch", "exit", "avoid"];
 
-const WATCHLIST_COLUMNS = [
-  ["ticker", "Stock"],
-  ["action", "Action"],
-  ["trade_context", "Read"],
-  ["risk_summary", "Risk"],
-  ["price_summary", "Price"]
-];
+const ACTION_LABELS = new Proxy({}, {
+  get(_, key) {
+    return typeof key === "string" ? actionLabel(key) : undefined;
+  }
+});
 
-const SUMMARY_CARDS = [
-  ["buy", "BUY"],
-  ["continue", "TRENDING"],
-  ["setup", "BUILDING"],
-  ["watch", "WATCH"],
-  ["exit", "EXIT"],
-  ["avoid", "AVOID"]
-];
+const SETUP_LABELS = new Proxy({}, {
+  get(_, key) {
+    return typeof key === "string" ? setupLabelText(key) : undefined;
+  }
+});
+
+const KIND_LABELS = new Proxy({}, {
+  get(_, key) {
+    return typeof key === "string" ? kindLabel(key) : undefined;
+  }
+});
 
 const ACTION_TONE = {
   buy: "#0f8a5f",
@@ -41,15 +191,6 @@ const ACTION_TONE = {
   watch: "#2f5fb3",
   exit: "#b42318",
   avoid: "#667085"
-};
-
-const KIND_LABELS = {
-  buy: "BUY",
-  continue: "TRENDING",
-  setup: "BUILDING",
-  watch: "WATCH",
-  exit: "EXIT",
-  avoid: "AVOID"
 };
 
 const REASON_LABELS = {
@@ -123,6 +264,73 @@ const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const FOCUS_PIN_KEY = "daily-trade-copilot:focus-pin:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 10;
 const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
+
+function normalizeLanguage(value) {
+  return value === "zh" ? "zh" : "en";
+}
+
+function loadLanguage() {
+  try {
+    return normalizeLanguage(localStorage.getItem(LANGUAGE_KEY));
+  } catch {
+    return "en";
+  }
+}
+
+function saveLanguage(language) {
+  try {
+    localStorage.setItem(LANGUAGE_KEY, normalizeLanguage(language));
+  } catch {
+    // The app still works if the browser blocks local storage.
+  }
+}
+
+function currentCopy() {
+  return UI_COPY[normalizeLanguage(state.language)] || UI_COPY.en;
+}
+
+function copyText(key, replacements = {}) {
+  const text = currentCopy().text[key] || UI_COPY.en.text[key] || key;
+  return Object.entries(replacements).reduce(
+    (result, [name, value]) => result.replaceAll(`{${name}}`, String(value)),
+    text
+  );
+}
+
+function actionLabel(action) {
+  return currentCopy().actions[action] || UI_COPY.en.actions[action] || action;
+}
+
+function setupLabelText(setup) {
+  return currentCopy().setup[setup] || UI_COPY.en.setup[setup] || setup;
+}
+
+function kindLabel(kind) {
+  return currentCopy().kinds[kind] || UI_COPY.en.kinds[kind] || String(kind).toUpperCase();
+}
+
+function watchlistColumns() {
+  return WATCHLIST_COLUMN_KEYS.map((key) => [key, currentCopy().columns[key] || UI_COPY.en.columns[key] || key]);
+}
+
+function summaryCards() {
+  return SUMMARY_CARD_KEYS.map((key) => [key, kindLabel(key)]);
+}
+
+function applyStaticText() {
+  document.documentElement.lang = normalizeLanguage(state.language) === "zh" ? "zh-Hans" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    node.textContent = copyText(node.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => {
+    node.setAttribute("placeholder", copyText(node.dataset.i18nPlaceholder));
+  });
+  const toggle = document.querySelector("#language-toggle");
+  if (toggle) {
+    toggle.textContent = currentCopy().toggle;
+    toggle.setAttribute("aria-label", normalizeLanguage(state.language) === "zh" ? "Switch to English" : "切换到中文");
+  }
+}
 
 const COMPANY_PROFILE_FALLBACKS = {
   AAPL: ["Consumer Technology", "Apple designs iPhone, Mac, iPad, wearables, services, and related software ecosystems.", "apple.com"],
@@ -355,6 +563,7 @@ const state = {
   focusPin: "",
   focusMessage: "",
   focusSyncing: false,
+  language: "en",
   runInfo: null
 };
 
@@ -576,7 +785,7 @@ function linePath(points) {
 }
 
 function setupLabel(value) {
-  if (!value) return "None";
+  if (!value) return setupLabelText("NONE");
   return SETUP_LABELS[value] || value;
 }
 
@@ -1643,7 +1852,7 @@ function renderReasonSummary(row) {
 
 function searchableRowText(row) {
   return [
-    ...WATCHLIST_COLUMNS.map(([key]) => row[key]),
+    ...WATCHLIST_COLUMN_KEYS.map((key) => row[key]),
     ACTION_LABELS[row.action] || row.action,
     setupLabel(row.setup),
     strengthLabel(row),
@@ -1711,7 +1920,7 @@ function renderMobileWatchlistSummary(row) {
 
 function renderCards(counts) {
   const cards = document.querySelector("#cards");
-  cards.innerHTML = SUMMARY_CARDS.map(([kind, label]) => `
+  cards.innerHTML = summaryCards().map(([kind, label]) => `
     <button class="card tone-${kind} ${state.filter === kind ? "active" : ""}" type="button" data-filter="${kind}">
       <span>${label}</span>
       <strong>${counts[kind] || 0}</strong>
@@ -1758,7 +1967,7 @@ function renderDailyBrief(counts) {
     .sort((a, b) => convictionScore(b) - convictionScore(a))[0];
   const exitCount = counts.exit || 0;
   const actionTotal = (counts.buy || 0) + (counts.setup || 0);
-  const headline = `${actionTotal} actionable names: ${counts.buy || 0} BUY, ${counts.setup || 0} BUILDING`;
+  const headline = copyText("actionableNames", { total: actionTotal, buy: counts.buy || 0, building: counts.setup || 0 });
   const freshText = tickerList(fresh);
   const upgradesText = tickerList(upgrades);
   const moverText = tickerList(priceMovers, 2);
@@ -1767,19 +1976,19 @@ function renderDailyBrief(counts) {
   panel.innerHTML = `
     <div class="brief-card">
       <div class="brief-copy">
-        <span class="brief-kicker">Daily Brief</span>
+        <span class="brief-kicker">${escapeHtml(copyText("dailyBrief"))}</span>
         <h2>${escapeHtml(headline)}</h2>
         <div class="brief-points">
-          <span><b>Fresh</b> ${escapeHtml(freshText)}</span>
-          <span><b>Upgraded</b> ${escapeHtml(upgradesText)}</span>
-          <span><b>Movers</b> ${escapeHtml(moverText)}</span>
-          <span><b>Risk</b> ${escapeHtml(riskText)}</span>
+          <span><b>${escapeHtml(copyText("fresh"))}</b> ${escapeHtml(freshText)}</span>
+          <span><b>${escapeHtml(copyText("upgraded"))}</b> ${escapeHtml(upgradesText)}</span>
+          <span><b>${escapeHtml(copyText("movers"))}</b> ${escapeHtml(moverText)}</span>
+          <span><b>${escapeHtml(copyText("risk"))}</b> ${escapeHtml(riskText)}</span>
         </div>
         ${renderTrafficHealth(state.runInfo, state.rows)}
       </div>
       <div class="brief-actions">
-        ${topBuy ? `<a class="brief-primary" href="./history.html?ticker=${encodeURIComponent(topBuy.ticker)}">Review ${escapeHtml(topBuy.ticker)}</a>` : ""}
-        <button class="brief-secondary" type="button" data-filter-brief="buy">Show BUY</button>
+        ${topBuy ? `<a class="brief-primary" href="./history.html?ticker=${encodeURIComponent(topBuy.ticker)}">${escapeHtml(copyText("reviewTicker", { ticker: topBuy.ticker }))}</a>` : ""}
+        <button class="brief-secondary" type="button" data-filter-brief="buy">${escapeHtml(copyText("showBuy"))}</button>
       </div>
     </div>
   `;
@@ -1835,16 +2044,16 @@ function renderTodayFocus() {
     .sort((a, b) => Number(b.day_change_pct || 0) - Number(a.day_change_pct || 0))[0];
 
   const items = [
-    focusItem(strongest, "Buy"),
-    focusItem(building, "Building"),
-    focusItem(pressure, "Exit"),
-    focusItem(bestDay, "Move")
+    focusItem(strongest, copyText("buyFocus")),
+    focusItem(building, copyText("buildingFocus")),
+    focusItem(pressure, copyText("exitFocus")),
+    focusItem(bestDay, copyText("moveFocus"))
   ].filter(Boolean);
 
   panel.innerHTML = `
     <div class="section-heading">
       <div>
-        <span>Today’s Focus</span>
+        <span>${escapeHtml(copyText("todayFocus"))}</span>
       </div>
       ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
     </div>
@@ -1888,8 +2097,8 @@ function renderSignalChanges() {
   const changes = dailyChangeItems(state.rows, state.previousRows);
   if (!changes.length) {
     panel.innerHTML = `
-      ${moversSectionHeading("Signal Changes", runDate)}
-      <div class="empty compact-empty">No major scanner changes versus the previous run.</div>
+      ${moversSectionHeading(copyText("signalChanges"), runDate)}
+      <div class="empty compact-empty">${escapeHtml(copyText("noScannerChanges"))}</div>
     `;
     return;
   }
@@ -1898,7 +2107,7 @@ function renderSignalChanges() {
   const cards = changes.map((change) => changedTodayCard(change)).join("");
   const duplicateCards = rolling ? changes.map((change) => changedTodayCard(change, true)).join("") : "";
   panel.innerHTML = `
-    ${moversSectionHeading("Signal Changes", runDate)}
+    ${moversSectionHeading(copyText("signalChanges"), runDate)}
     <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Today’s movers">
       <div class="change-track">
         ${cards}
@@ -1915,8 +2124,8 @@ function renderPriceMovers() {
   const movers = currentDayMoverItems(state.rows);
   if (!movers.length) {
     panel.innerHTML = `
-      ${moversSectionHeading("Price Movers", runDate)}
-      <div class="empty compact-empty">No large current-day price moves.</div>
+      ${moversSectionHeading(copyText("priceMovers"), runDate)}
+      <div class="empty compact-empty">${escapeHtml(copyText("noPriceMoves"))}</div>
     `;
     return;
   }
@@ -1925,7 +2134,7 @@ function renderPriceMovers() {
   const cards = movers.map((change) => changedTodayCard(change)).join("");
   const duplicateCards = rolling ? movers.map((change) => changedTodayCard(change, true)).join("") : "";
   panel.innerHTML = `
-    ${moversSectionHeading("Price Movers", runDate)}
+    ${moversSectionHeading(copyText("priceMovers"), runDate)}
     <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Price movers">
       <div class="change-track">
         ${cards}
@@ -1965,7 +2174,7 @@ function renderFocusList() {
 
   if (!focusRows.length) {
     panel.innerHTML = `
-      ${moversSectionHeading("Focus List", runDate)}
+      ${moversSectionHeading(copyText("focusList"), runDate)}
       ${focusControls}
       <div class="focus-empty">
         <span>${state.focusPin ? "Star tickers in the watchlist to keep your personal list here." : "Unlock first, then star tickers from the Watchlist."}</span>
@@ -1975,7 +2184,7 @@ function renderFocusList() {
   }
 
   panel.innerHTML = `
-    ${moversSectionHeading("Focus List", runDate)}
+    ${moversSectionHeading(copyText("focusList"), runDate)}
     ${focusControls}
     <div class="focus-list-grid">
       ${focusRows.map((row) => {
@@ -2068,10 +2277,11 @@ function renderWatchlist() {
       return (Number(a[sortKey] || 0) - Number(b[sortKey] || 0)) * multiplier;
     });
 
-  document.querySelector("#watchlist-head").innerHTML = `<tr>${WATCHLIST_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("")}</tr>`;
+  const columns = watchlistColumns();
+  document.querySelector("#watchlist-head").innerHTML = `<tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>`;
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
     <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
-      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk", "price_summary"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
+      ${columns.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk", "price_summary"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");
@@ -2083,14 +2293,18 @@ function renderWatchlist() {
     });
   });
   attachFocusControls();
-  document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} shown`;
+  document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} ${copyText("shown")}`;
   const mobileCount = document.querySelector("#mobile-search-count");
-  if (mobileCount) mobileCount.textContent = searchActive ? `${state.visibleRows.length} result${state.visibleRows.length === 1 ? "" : "s"}` : `${state.visibleRows.length} shown`;
+  if (mobileCount) {
+    mobileCount.textContent = searchActive
+      ? `${state.visibleRows.length} ${copyText(state.visibleRows.length === 1 ? "result" : "results")}`
+      : `${state.visibleRows.length} ${copyText("shown")}`;
+  }
   document.querySelectorAll("[data-mobile-filter]").forEach((button) => {
     button.classList.toggle("active", button.dataset.mobileFilter === state.filter);
   });
   const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
-  if (watchlistTitle) watchlistTitle.textContent = searchActive ? "Search Results" : "Watchlist";
+  if (watchlistTitle) watchlistTitle.textContent = searchActive ? copyText("searchResults") : copyText("watchlist");
   document.querySelector("#empty").classList.toggle("hidden", state.visibleRows.length > 0);
 }
 
@@ -2127,12 +2341,20 @@ function initTabNavigation() {
 }
 
 async function initWatchlist() {
+  state.language = loadLanguage();
+  applyStaticText();
   state.focusTickers = loadFocusTickers();
   state.focusPin = loadFocusPin();
   const searchInput = document.querySelector("#search");
   const mobileSearchInput = document.querySelector("#mobile-search");
   const clearSearch = document.querySelector("#clear-search");
   const mobileClearSearch = document.querySelector("#mobile-clear-search");
+  document.querySelector("#language-toggle")?.addEventListener("click", () => {
+    state.language = normalizeLanguage(state.language) === "zh" ? "en" : "zh";
+    saveLanguage(state.language);
+    applyStaticText();
+    renderWatchlist();
+  });
   const syncSearchClear = () => {
     if (clearSearch) clearSearch.classList.toggle("hidden", !searchInput.value);
     if (mobileClearSearch) mobileClearSearch.classList.toggle("hidden", !state.query);
@@ -2455,6 +2677,7 @@ async function loadHistory(ticker) {
 }
 
 function initHistory() {
+  state.language = loadLanguage();
   const params = new URLSearchParams(window.location.search);
   const ticker = normaliseTicker(params.get("ticker"));
   document.querySelector("#ticker-form").addEventListener("submit", (event) => {
