@@ -61,23 +61,9 @@ const UI_LABELS = {
 const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "trade_context", "risk_summary", "price_summary"];
 const SUMMARY_CARD_KEYS = ["buy", "continue", "setup", "watch", "exit", "avoid"];
 
-const ACTION_LABELS = new Proxy({}, {
-  get(_, key) {
-    return typeof key === "string" ? actionLabel(key) : undefined;
-  }
-});
-
-const SETUP_LABELS = new Proxy({}, {
-  get(_, key) {
-    return typeof key === "string" ? setupLabelText(key) : undefined;
-  }
-});
-
-const KIND_LABELS = new Proxy({}, {
-  get(_, key) {
-    return typeof key === "string" ? kindLabel(key) : undefined;
-  }
-});
+const ACTION_LABELS = UI_LABELS.actions;
+const SETUP_LABELS = UI_LABELS.setup;
+const KIND_LABELS = UI_LABELS.kinds;
 
 const ACTION_TONE = {
   buy: "#0f8a5f",
@@ -168,24 +154,12 @@ function copyText(key, replacements = {}) {
   );
 }
 
-function actionLabel(action) {
-  return UI_LABELS.actions[action] || action;
-}
-
-function setupLabelText(setup) {
-  return UI_LABELS.setup[setup] || setup;
-}
-
-function kindLabel(kind) {
-  return UI_LABELS.kinds[kind] || String(kind).toUpperCase();
-}
-
 function watchlistColumns() {
   return WATCHLIST_COLUMN_KEYS.map((key) => [key, UI_LABELS.columns[key] || key]);
 }
 
 function summaryCards() {
-  return SUMMARY_CARD_KEYS.map((key) => [key, kindLabel(key)]);
+  return SUMMARY_CARD_KEYS.map((key) => [key, KIND_LABELS[key] || String(key).toUpperCase()]);
 }
 
 const COMPANY_PROFILE_FALLBACKS = {
@@ -640,7 +614,7 @@ function linePath(points) {
 }
 
 function setupLabel(value) {
-  if (!value) return setupLabelText("NONE");
+  if (!value) return SETUP_LABELS.NONE;
   return SETUP_LABELS[value] || value;
 }
 
