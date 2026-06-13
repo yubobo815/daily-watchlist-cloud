@@ -267,6 +267,56 @@ function auditSupabaseFallback() {
   };
 }
 
+function auditHistoricalReplayDto() {
+  const oldSetup = {
+    ticker: "ORCL",
+    run_date: "2026-06-13",
+    history_date: "2026-05-28",
+    action: "BUY CANDIDATE",
+    setup: "BREAKOUT BUY",
+    score: 96,
+    close: 203.7,
+    payload: {
+      adjusted_score: 96,
+      signal_quality: "FRESH",
+      transition_label: "Fresh Setup To Buy",
+      next_day_bias: "BULLISH CONFIRM",
+      next_day_plan: "Confirm on Pine chart before acting.",
+      reason_codes: ["next_day_bullish_confirm"],
+      buyer_score: 90,
+      seller_score: 5,
+      operator_state: "ACCUMULATION",
+      operator_pressure: "ACCUMULATION / ABSORPTION",
+      bull_trap_score: 0,
+      distribution_score: 6,
+    },
+  };
+
+  const historical = rowDto(oldSetup, { historical: true });
+  assert(historical.action === "BUY CANDIDATE", "historical replay BUY row must preserve its original action");
+  assert(historical.payload.signal_quality === "FRESH", "historical replay row must preserve original quality");
+  assert(historical.payload.transition_label === "Fresh Setup To Buy", "historical replay row must preserve transition label");
+  assert(historical.payload.next_day_bias === "BULLISH CONFIRM", "historical replay row must not be current-date execution-blocked");
+  assert(!historical.payload.reason_codes.includes("data_stale_block"), "historical replay row must not add stale-data reason");
+  assert(!historical.payload.reason_codes.includes("missing_execution_proof"), "historical replay row must not add execution-proof reason");
+
+  const current = rowDto(oldSetup);
+  assert(current.action === "SETUP FORMING", "current DTO must still downgrade stale/missing-proof BUY rows");
+  assert(current.payload.signal_quality === "STALE DATA", "current DTO must still mark old current rows stale");
+  assert(current.payload.next_day_bias === "EXECUTION BLOCKED", "current DTO must still block stale execution");
+  assert(current.payload.reason_codes.includes("data_stale_block"), "current DTO must still add stale-data reason");
+  assert(current.payload.reason_codes.includes("missing_execution_proof"), "current DTO must still add execution-proof reason");
+
+  return {
+    historicalAction: historical.action,
+    historicalQuality: historical.payload.signal_quality,
+    historicalBias: historical.payload.next_day_bias,
+    currentAction: current.action,
+    currentQuality: current.payload.signal_quality,
+    currentBias: current.payload.next_day_bias,
+  };
+}
+
 function auditTickerDetailMerge() {
   const merged = mergeSnapshotIntoLatestHistory(
     {
@@ -345,6 +395,7 @@ const result = {
   staticFallback: auditStaticFallback(),
   staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
   supabaseFallback: auditSupabaseFallback(),
+  historicalReplayDto: auditHistoricalReplayDto(),
   searchBehavior: auditSearchBehavior(),
   runHealthProviders: auditRunHealthProviderPayload(),
   tickerDetailMerge: auditTickerDetailMerge(),

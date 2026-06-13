@@ -506,12 +506,17 @@ function applyOperatorStateFallback(output) {
   return output;
 }
 
-function rowDto(row) {
+function rowDto(row, options = {}) {
   const output = {};
   [...new Set([...SNAPSHOT_FIELDS, ...HISTORY_FIELDS])].forEach((field) => {
     if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
   });
   output.payload = cleanPayload(row);
+  if (options.historical) {
+    return promotePayloadFields(
+      applyBuyTierFallback(antiSignalFallback(applyOperatorStateFallback(output)))
+    );
+  }
   return promotePayloadFields(
     applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output)))))
   );

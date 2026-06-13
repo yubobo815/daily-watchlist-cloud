@@ -58,7 +58,7 @@ async function handler(request, response) {
     ]);
 
     const snapshot = snapshotRows[0] ? rowDto(snapshotRows[0]) : null;
-    const rows = historyRows.map(rowDto);
+    const rows = historyRows.map((row) => rowDto(row, { historical: true }));
     if (snapshot && rows[0]) {
       rows[0] = mergeSnapshotIntoLatestHistory(snapshot, rows[0]);
     }
