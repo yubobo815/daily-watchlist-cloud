@@ -1206,7 +1206,8 @@ function renderScoreBreakdown(row) {
   const absorption = Number(payloadValue(row, "absorption_score"));
   const shortProxy = Number(payloadValue(row, "short_pressure_proxy"));
   const buyTier = payloadValue(row, "buy_tier") || "n/a";
-  const contextualOverlay = payloadValue(row, "contextual_overlay") || "n/a";
+  const contextualOverlayRaw = payloadValue(row, "contextual_overlay");
+  const contextualOverlay = contextualOverlayRaw ? String(contextualOverlayRaw) : "Base read";
   const contextualAdjustment = Number(payloadValue(row, "contextual_score_adjustment"));
   const freshnessStatus = payloadValue(row, "freshness_status") || "UNKNOWN";
   const dataAge = Number(payloadValue(row, "data_age_days"));
@@ -1223,7 +1224,7 @@ function renderScoreBreakdown(row) {
   const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
   const items = [
     ["Execution Tier", buyTier],
-    ["Context", `${contextualOverlay}${Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
+    ["Context", `${contextualOverlay}${contextualOverlayRaw && Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
     ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}`],
