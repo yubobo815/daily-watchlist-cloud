@@ -1434,10 +1434,15 @@ SIGNAL_STAGE_LABELS = {
     "WAIT": "WAIT",
     "WAIT / AVOID": "WAIT",
     "WATCH TREND": "WATCH",
-    "SETUP FORMING": "SETUP",
+    "SETUP FORMING": "BUILDING",
     "BUY CANDIDATE": "BUY",
     "STRONG CONTINUATION": "TRENDING",
     "EXIT PRESSURE": "EXIT",
+}
+
+ACTION_DISPLAY_LABELS = {
+    **SIGNAL_STAGE_LABELS,
+    "WAIT / AVOID": "AVOID",
 }
 
 
@@ -1701,7 +1706,7 @@ def post_exit_cooldown_candidate(row: dict, prior_rows: list[dict]) -> Optional[
         "force_action": "SETUP FORMING",
         "execution_block": "YES",
         "reason_code": "post_exit_cooldown",
-        "plan": "EXIT pressure was too recent; downgrade any ordinary rebound to SETUP until buyers prove control.",
+        "plan": "EXIT pressure was too recent; downgrade any ordinary rebound to BUILDING until buyers prove control.",
     }
 
 
@@ -4093,14 +4098,8 @@ def write_history_html(path: Path) -> None:
     }
 
     function shortAction(action) {
-      return {
-        "BUY CANDIDATE": "BUY",
-        "STRONG CONTINUATION": "TRENDING",
-        "SETUP FORMING": "SETUP",
-        "WATCH TREND": "WATCH",
-        "EXIT PRESSURE": "EXIT",
-        "WAIT / AVOID": "AVOID",
-      }[action] || action || "WAIT";
+      const actionLabels = {json.dumps(ACTION_DISPLAY_LABELS, sort_keys=True)};
+      return actionLabels[action] || action || "WAIT";
     }
 
     function supabaseHeaders(config) {
@@ -4242,12 +4241,12 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
     visible_df = df[display_columns].copy()
 
     summary_items = [
-        ("BUY", int((df["action"] == "BUY CANDIDATE").sum()), "buy"),
-        ("TRENDING", int((df["action"] == "STRONG CONTINUATION").sum()), "continue"),
-        ("SETUP", int((df["action"] == "SETUP FORMING").sum()), "setup"),
-        ("WATCH", int((df["action"] == "WATCH TREND").sum()), "watch"),
-        ("EXIT", int((df["action"] == "EXIT PRESSURE").sum()), "exit"),
-        ("AVOID", int(df["action"].isin(["WAIT", "WAIT / AVOID"]).sum()), "avoid"),
+        (ACTION_DISPLAY_LABELS["BUY CANDIDATE"], int((df["action"] == "BUY CANDIDATE").sum()), "buy"),
+        (ACTION_DISPLAY_LABELS["STRONG CONTINUATION"], int((df["action"] == "STRONG CONTINUATION").sum()), "continue"),
+        (ACTION_DISPLAY_LABELS["SETUP FORMING"], int((df["action"] == "SETUP FORMING").sum()), "setup"),
+        (ACTION_DISPLAY_LABELS["WATCH TREND"], int((df["action"] == "WATCH TREND").sum()), "watch"),
+        (ACTION_DISPLAY_LABELS["EXIT PRESSURE"], int((df["action"] == "EXIT PRESSURE").sum()), "exit"),
+        (ACTION_DISPLAY_LABELS["WAIT / AVOID"], int(df["action"].isin(["WAIT", "WAIT / AVOID"]).sum()), "avoid"),
     ]
     cards = "".join(
         f"<button class='card {kind}' type='button' data-filter='{kind}'><span>{label}</span><strong>{value}</strong></button>"
@@ -4286,15 +4285,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "target_est": "Target",
         "notes": "Read",
     }
-    action_labels = {
-        "BUY CANDIDATE": "BUY",
-        "STRONG CONTINUATION": "TRENDING",
-        "SETUP FORMING": "SETUP",
-        "EXIT PRESSURE": "EXIT",
-        "WATCH TREND": "WATCH",
-        "WAIT": "WAIT",
-        "WAIT / AVOID": "AVOID",
-    }
+    action_labels = ACTION_DISPLAY_LABELS
     setup_labels = {
         "BREAKOUT BUY": "BO",
         "MOMENTUM BUY": "MOM",

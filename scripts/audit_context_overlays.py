@@ -76,7 +76,7 @@ def audit_post_exit_cooldown_sees_short_pressure():
         ),
     ])
     assert_true(result["contextual_overlay"] == "POST-EXIT COOLDOWN", "short pressure must not bypass post-exit cooldown")
-    assert_true(result["action"] == "SETUP FORMING", "cooldown must downgrade rebound BUY to SETUP")
+    assert_true(result["action"] == "SETUP FORMING", "cooldown must downgrade rebound BUY to BUILDING")
     assert_true(result["next_day_bias"] == "EXECUTION BLOCKED", "cooldown must block next-day execution")
 
 
@@ -141,6 +141,15 @@ def audit_learning_lookback_stays_on_30_day_window():
     assert_true(len(learning_outcomes) == 29, "30 stored days should create 29 adjacent learning samples")
 
 
+def audit_action_display_labels_match_product_ui():
+    assert_true(dwo.ACTION_DISPLAY_LABELS["BUY CANDIDATE"] == "BUY", "BUY label must match product UI")
+    assert_true(dwo.ACTION_DISPLAY_LABELS["STRONG CONTINUATION"] == "TRENDING", "continuation label must match product UI")
+    assert_true(dwo.ACTION_DISPLAY_LABELS["SETUP FORMING"] == "BUILDING", "setup-forming label must match product UI")
+    assert_true(dwo.ACTION_DISPLAY_LABELS["WATCH TREND"] == "WATCH", "watch label must match product UI")
+    assert_true(dwo.ACTION_DISPLAY_LABELS["EXIT PRESSURE"] == "EXIT", "exit label must match product UI")
+    assert_true(dwo.ACTION_DISPLAY_LABELS["WAIT / AVOID"] == "AVOID", "avoid label must match product UI")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
@@ -149,9 +158,10 @@ def main():
     audit_behavior_history_seeds_learning()
     audit_defensive_learning_shows_samples_without_promotion()
     audit_learning_lookback_stays_on_30_day_window()
+    audit_action_display_labels_match_product_ui()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 7,
+        "cases": 8,
     })
 
 
