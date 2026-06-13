@@ -80,6 +80,38 @@ def audit_post_exit_cooldown_sees_short_pressure():
     assert_true(result["next_day_bias"] == "EXECUTION BLOCKED", "cooldown must block next-day execution")
 
 
+def audit_post_exit_risk_persistence_keeps_exit_pressure():
+    result = latest([
+        row("D1", "EXIT PRESSURE", 213.68, score=20, next_day_bias="DEFENSIVE / EXIT RISK", seller_score=86, buyer_score=9, distribution_score=40),
+        row("D2", "WAIT", 211.82, score=34, next_day_bias="NEUTRAL", seller_score=53, buyer_score=12, distribution_score=0),
+        row("D3", "WAIT", 205.81, score=34, next_day_bias="NEUTRAL", seller_score=49, buyer_score=16, distribution_score=24),
+    ])
+    assert_true(result["contextual_overlay"] == "POST-EXIT RISK PERSISTENCE", "post-exit weakness must stay in risk mode")
+    assert_true(result["action"] == "EXIT PRESSURE", "post-exit weakness must not collapse to WAIT")
+    assert_true(result["next_day_bias"] == "DEFENSIVE / EXIT RISK", "post-exit weakness must keep defensive next-day bias")
+
+
+def audit_post_exit_risk_persistence_allows_strong_reclaim():
+    result = latest([
+        row("D1", "EXIT PRESSURE", 100, score=20, next_day_bias="DEFENSIVE / EXIT RISK", seller_score=80, distribution_score=50),
+        row(
+            "D2",
+            "SETUP FORMING",
+            108,
+            setup="MOMENTUM BUY",
+            score=78,
+            next_day_bias="BULLISH CONFIRM",
+            operator_state="MARKUP / DEMAND CONTROL",
+            demand_control_score=88,
+            buyer_score=82,
+            seller_score=5,
+            distribution_score=0,
+        ),
+    ])
+    assert_true(result.get("contextual_overlay") != "POST-EXIT RISK PERSISTENCE", "strong reclaim should not be forced back to EXIT")
+    assert_true(result["action"] == "SETUP FORMING", "strong reclaim setup should remain BUILDING")
+
+
 def audit_volatile_hold_has_consistent_score():
     result = latest([
         row(
@@ -202,6 +234,8 @@ def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
     audit_post_exit_cooldown_sees_short_pressure()
+    audit_post_exit_risk_persistence_keeps_exit_pressure()
+    audit_post_exit_risk_persistence_allows_strong_reclaim()
     audit_volatile_hold_has_consistent_score()
     audit_behavior_history_seeds_learning()
     audit_defensive_learning_shows_samples_without_promotion()
@@ -211,7 +245,7 @@ def main():
     audit_learning_upgrade_respects_anti_signals()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 10,
+        "cases": 12,
     })
 
 

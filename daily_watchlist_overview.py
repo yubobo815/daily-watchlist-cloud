@@ -68,6 +68,7 @@ LEARNING_CONFIRM_MIN_ADJUSTMENT = float(os.getenv("LEARNING_CONFIRM_MIN_ADJUSTME
 LEARNING_CONFIRM_MIN_SCORE = float(os.getenv("LEARNING_CONFIRM_MIN_SCORE", "78.0"))
 POST_EXIT_COOLDOWN_BARS = int(os.getenv("POST_EXIT_COOLDOWN_BARS", "2"))
 POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
+POST_EXIT_RISK_PERSISTENCE_BARS = int(os.getenv("POST_EXIT_RISK_PERSISTENCE_BARS", "3"))
 PROFIT_PROTECT_LOOKBACK_BARS = int(os.getenv("PROFIT_PROTECT_LOOKBACK_BARS", "5"))
 PROFIT_PROTECT_TRIGGER_GAIN_PCT = float(os.getenv("PROFIT_PROTECT_TRIGGER_GAIN_PCT", "7"))
 PROFIT_PROTECT_GIVEBACK_PCT = float(os.getenv("PROFIT_PROTECT_GIVEBACK_PCT", "4"))
@@ -1754,6 +1755,46 @@ def post_exit_cooldown_candidate(row: dict, prior_rows: list[dict]) -> Optional[
     }
 
 
+def post_exit_risk_persistence_candidate(row: dict, prior_rows: list[dict]) -> Optional[dict]:
+    if row.get("action") == "EXIT PRESSURE":
+        return None
+    recent = prior_rows[-POST_EXIT_RISK_PERSISTENCE_BARS:] if POST_EXIT_RISK_PERSISTENCE_BARS > 0 else []
+    prior_exit = next((item for item in reversed(recent) if item.get("action") == "EXIT PRESSURE"), None)
+    if not prior_exit or post_exit_reclaim_is_strong(row, prior_exit):
+        return None
+
+    close = row_float(row, "close")
+    prior_close = row_float(prior_exit, "close")
+    day_change = row_float(row, "day_change_pct")
+    seller_score = row_float(row, "seller_score")
+    buyer_score = row_float(row, "buyer_score")
+    distribution_score = row_float(row, "distribution_score")
+    short_pressure = row_float(row, "short_pressure_proxy")
+    next_day = str(row.get("next_day_bias") or "").upper()
+    still_below_exit_zone = close > 0 and prior_close > 0 and close <= prior_close * 1.01
+    pressure_persists = (
+        day_change <= -0.75
+        or seller_score >= 40.0
+        or distribution_score >= 24.0
+        or short_pressure >= 24.0
+        or (next_day == "NEUTRAL" and buyer_score < 45.0)
+    )
+    if not (still_below_exit_zone and pressure_persists):
+        return None
+
+    return {
+        "priority": 70,
+        "label": "POST-EXIT RISK PERSISTENCE",
+        "adjustment": -22.0,
+        "transition_label": "Exit Risk Persists",
+        "next_day_bias": "DEFENSIVE / EXIT RISK",
+        "next_day_plan": "Post-exit risk persists: wait for a stronger reclaim before treating the weakness as neutral.",
+        "force_action": "EXIT PRESSURE",
+        "reason_code": "post_exit_risk_persistence",
+        "plan": "Recent EXIT pressure has not been reclaimed; seller pressure or continued downside keeps this in risk-control mode.",
+    }
+
+
 def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[dict]:
     start = max(0, index - PROFIT_PROTECT_LOOKBACK_BARS)
     current_close = row_float(history_rows[index], "close")
@@ -1874,6 +1915,7 @@ def volatile_trend_hold_candidate(row: dict) -> Optional[dict]:
 def resolve_context_overlay(row: dict, history_rows: list[dict], index: int, prior_rows: list[dict]) -> tuple[Optional[dict], float, Optional[str]]:
     candidates = [
         post_exit_cooldown_candidate(row, prior_rows),
+        post_exit_risk_persistence_candidate(row, prior_rows),
         profit_context_candidate(row, history_rows, index),
         volatile_trend_hold_candidate(row),
     ]
@@ -3927,6 +3969,8 @@ def apply_quality_overlays(row: dict, market_context: dict) -> dict:
     overlay = str(row.get("contextual_overlay") or "").upper()
     if overlay == "POST-EXIT COOLDOWN":
         signal_quality = "COOLDOWN"
+    elif overlay == "POST-EXIT RISK PERSISTENCE":
+        signal_quality = "EXIT RISK"
     elif overlay == "PROFIT PROTECT":
         signal_quality = "PROFIT PROTECT"
     elif overlay == "PROFIT ACTIVE":

@@ -120,6 +120,7 @@ const REASON_LABELS = {
   anti_defensive_tape: "Anti-signal: defensive tape",
   data_stale_block: "Stale data blocked execution",
   cached_data_ok: "Cached data recent enough",
+  post_exit_risk_persistence: "Post-exit risk persists",
   top_buy_tier: "A+ buy tier",
   buy_watch_tier: "Buy watch tier",
   learning_confirmed_setup: "Learning-confirmed building",
