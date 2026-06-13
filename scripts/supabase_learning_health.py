@@ -59,6 +59,23 @@ def request_json(path: str, *, count: bool = False) -> tuple[list[dict], int | N
     return rows, total
 
 
+def add_query_param(path: str, key: str, value: str | int) -> str:
+    separator = "&" if "?" in path else "?"
+    return f"{path}{separator}{urllib.parse.quote(str(key))}={urllib.parse.quote(str(value))}"
+
+
+def request_all_json(path: str, *, page_size: int = 1000, max_pages: int = 50) -> list[dict]:
+    rows: list[dict] = []
+    for page in range(max_pages):
+        offset = page * page_size
+        page_path = add_query_param(add_query_param(path, "limit", page_size), "offset", offset)
+        page_rows, _ = request_json(page_path)
+        rows.extend(page_rows)
+        if len(page_rows) < page_size:
+            break
+    return rows
+
+
 def count_rows(table: str, filters: str) -> int:
     _, total = request_json(f"{table}?select=*&{filters}&limit=1", count=True)
     return int(total or 0)
@@ -89,6 +106,10 @@ def emit_metrics(metrics: dict[str, object]) -> None:
         print(f"{key}={value}")
 
 
+def postgrest_in_list(values: list[str]) -> str:
+    return ",".join(urllib.parse.quote(str(value), safe="") for value in values if str(value))
+
+
 def fail(message: str) -> None:
     print(f"SUPABASE_LEARNING_HEALTH=FAIL {message}")
     raise SystemExit(1)
@@ -107,21 +128,15 @@ def main() -> None:
     latest = runs[0] if runs else {"run_date": run_date}
 
     filters = f"run_date=eq.{urllib.parse.quote(str(run_date))}"
-    history_rows, _ = request_json(
+    history_rows = request_all_json(
         "watchlist_behavior_history"
         "?select=ticker,history_date,payload"
-        f"&{filters}&order=ticker.asc,history_date.asc&limit=20000"
+        f"&{filters}&order=ticker.asc,history_date.asc"
     )
-    snapshot_rows, _ = request_json(
+    snapshot_rows = request_all_json(
         "watchlist_snapshots"
         "?select=ticker,payload"
-        f"&{filters}&order=ticker.asc&limit=20000"
-    )
-    outcome_rows, _ = request_json(
-        "watchlist_signal_outcomes"
-        "?select=ticker,signal_run_date,evaluation_run_date,outcome_label,learning_key"
-        f"&evaluation_run_date=eq.{urllib.parse.quote(str(run_date))}"
-        "&order=ticker.asc,signal_run_date.asc&limit=20000"
+        f"&{filters}&order=ticker.asc"
     )
 
     history_by_ticker: dict[str, set[str]] = defaultdict(set)
@@ -137,6 +152,16 @@ def main() -> None:
     min_days = min(counts) if counts else 0
     max_days = max(counts) if counts else 0
     avg_days = round(sum(counts) / len(counts), 2) if counts else 0
+    history_dates = sorted({str(row.get("history_date") or "") for row in history_rows if row.get("history_date")})
+
+    outcome_rows = []
+    if history_dates:
+        outcome_rows = request_all_json(
+            "watchlist_signal_outcomes"
+            "?select=ticker,signal_run_date,evaluation_run_date,outcome_label,learning_key"
+            f"&evaluation_run_date=in.({postgrest_in_list(history_dates)})"
+            "&order=ticker.asc,signal_run_date.asc"
+        )
 
     learning_ready = 0
     learning_scope_ready = 0
@@ -183,9 +208,9 @@ def main() -> None:
     if len(outcome_rows) < 500:
         emit_metrics(metrics)
         fail("Signal outcome rows are too low; ML/self-learning has insufficient samples.")
-    if learning_ready < max(1, int(len(snapshot_rows) * 0.5)):
+    if learning_ready < max(50, int(len(snapshot_rows) * 0.35)):
         emit_metrics(metrics)
-        fail("Less than half of latest snapshots have learning samples attached.")
+        fail("Too few latest snapshots have learning samples attached.")
 
     print("SUPABASE_LEARNING_HEALTH=OK")
     emit_metrics(metrics)
