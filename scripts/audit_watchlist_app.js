@@ -174,6 +174,9 @@ function auditSupabaseFallback() {
   assert(gated.payload.feedback_quality === "WORKING", "execution-gated BUY row must keep feedback state");
   assert(gated.payload.learning_scope === "action/setup family", "execution-gated row must keep learning scope");
   assert(gated.payload.learning_key_used === "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY", "execution-gated row must keep learning key");
+  assert(gated.learning_sample_count === 12, "execution-gated row must promote learning sample count to top level");
+  assert(gated.learning_scope === "action/setup family", "execution-gated row must promote learning scope to top level");
+  assert(gated.learning_key_used === "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY", "execution-gated row must promote learning key to top level");
   assert(gated.payload.data_provider === "polygon", "execution-gated BUY row must keep data provider");
   assert(gated.payload.data_provider_status === "LIVE_OK", "execution-gated BUY row must keep data provider status");
 
@@ -275,6 +278,7 @@ function auditRunHealthProviderPayload() {
     run_date: "2026-06-12",
     status: "ok",
     live_access_ok: true,
+    learning_history_rows: 5640,
     payload: {
       data_provider_counts: { polygon: 185, twelvedata: 3 },
       data_provider_priority: ["polygon", "twelvedata", "stooq", "yahoo"],
@@ -286,6 +290,16 @@ function auditRunHealthProviderPayload() {
   assert(dto.payload.data_provider_counts.polygon === 185, "run health must expose provider counts");
   assert(dto.payload.data_provider_priority.includes("stooq"), "run health must expose provider priority");
   assert(dto.payload.failed_symbols[0]?.ticker === "FAIL", "run health must expose Python failures as failed symbols");
+  assert(dto.learning_history_rows === 5640, "run health must expose learning history row count");
+
+  const payloadOnlyDto = runDto({
+    run_date: "2026-06-12",
+    status: "ok",
+    payload: {
+      learning_history_rows: 5640,
+    },
+  });
+  assert(payloadOnlyDto.learning_history_rows === 5640, "run health must recover optional learning rows from payload");
   return dto.payload;
 }
 

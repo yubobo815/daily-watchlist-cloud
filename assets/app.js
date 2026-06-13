@@ -815,6 +815,27 @@ function payloadValue(row, key) {
   return row?.payload?.[key] ?? row?.[key];
 }
 
+function learningReadout(row) {
+  const samples = Number(payloadValue(row, "learning_sample_count"));
+  const adjustment = Number(payloadValue(row, "learning_adjustment"));
+  const scope = payloadValue(row, "learning_scope");
+  const action = String(row?.action || "").toUpperCase();
+  const defensiveAction = action === "WAIT" || action === "WAIT / AVOID" || action === "EXIT PRESSURE";
+
+  if (!Number.isFinite(samples) || samples <= 0) {
+    return "pending: no settled peer signal samples yet";
+  }
+
+  const sampleText = `${fmtNumber(samples, 0)} peer signal samples`;
+  const scopeText = scope ? ` / ${scope}` : "";
+  if (defensiveAction) {
+    return `${sampleText} / defensive only; no bullish promotion${scopeText}`;
+  }
+
+  const adjustmentText = Number.isFinite(adjustment) ? ` / ${fmtSignedNumber(adjustment, 1)} pts` : "";
+  return `${sampleText}${adjustmentText}${scopeText}`;
+}
+
 function cacheKeyFor(path, prefix = JSON_CACHE_PREFIX) {
   return `${prefix}${path}`;
 }
@@ -1218,9 +1239,6 @@ function renderScoreBreakdown(row) {
   const antiScore = Number(payloadValue(row, "anti_signal_score"));
   const lastOutcome = payloadValue(row, "last_outcome_label") || "n/a";
   const lastOutcomeReturn = Number(payloadValue(row, "last_outcome_return_pct"));
-  const learningSamples = Number(payloadValue(row, "learning_sample_count"));
-  const learningAdjustment = Number(payloadValue(row, "learning_adjustment"));
-  const learningScope = payloadValue(row, "learning_scope");
   const dataProvider = payloadValue(row, "data_provider") || "unknown";
   const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
   const items = [
@@ -1228,7 +1246,7 @@ function renderScoreBreakdown(row) {
     ["Context", `${contextualOverlay}${contextualOverlayRaw && Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
-    ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}${learningScope ? ` / ${learningScope}` : ""}`],
+    ["Learning", learningReadout(row)],
     ["Data Source", `${dataProvider} / ${dataProviderStatus}`],
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],

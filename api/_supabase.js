@@ -62,6 +62,10 @@ const RUN_FIELDS = [
   "payload",
 ];
 
+const RUN_OPTIONAL_FIELDS = [
+  "learning_history_rows",
+];
+
 const PAYLOAD_FIELDS = [
   "adjusted_score",
   "anti_signal_level",
@@ -244,6 +248,14 @@ function cleanPayload(row) {
     if (value !== undefined && value !== null && value !== "") cleaned[field] = value;
     return cleaned;
   }, {});
+}
+
+function promotePayloadFields(row) {
+  const payload = row?.payload && typeof row.payload === "object" ? row.payload : {};
+  PAYLOAD_FIELDS.forEach((field) => {
+    if (row[field] === undefined && payload[field] !== undefined) row[field] = payload[field];
+  });
+  return row;
 }
 
 function numericOrNull(value) {
@@ -500,16 +512,21 @@ function rowDto(row) {
     if (field !== "payload" && row?.[field] !== undefined) output[field] = row[field];
   });
   output.payload = cleanPayload(row);
-  return applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output)))));
+  return promotePayloadFields(
+    applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output)))))
+  );
 }
 
 function runDto(row) {
   if (!row) return null;
   const output = {};
-  RUN_FIELDS.forEach((field) => {
+  [...RUN_FIELDS, ...RUN_OPTIONAL_FIELDS].forEach((field) => {
     if (field !== "payload" && row[field] !== undefined) output[field] = row[field];
   });
   const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+  RUN_OPTIONAL_FIELDS.forEach((field) => {
+    if (output[field] === undefined && payload[field] !== undefined) output[field] = payload[field];
+  });
   const failedSymbols = Array.isArray(payload.failed_symbols)
     ? payload.failed_symbols
     : (Array.isArray(payload.failures) ? payload.failures : []);
@@ -562,10 +579,15 @@ async function recentRunDates(limit = 2) {
 async function runInfo(runDate) {
   if (!runDate) return null;
   try {
-    const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList(RUN_FIELDS)}&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
+    const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList([...RUN_FIELDS, ...RUN_OPTIONAL_FIELDS])}&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
     return runDto(rows[0]);
   } catch {
-    return null;
+    try {
+      const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList(RUN_FIELDS)}&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
+      return runDto(rows[0]);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -577,6 +599,7 @@ module.exports = {
   recentRunDates,
   rowDto,
   RUN_FIELDS,
+  RUN_OPTIONAL_FIELDS,
   runDto,
   runInfo,
   selectList,

@@ -972,10 +972,17 @@ def supabase_upsert_refresh_run(records: list[dict]) -> None:
         if not schema_cache_error or not has_optional_columns:
             raise
 
-        stripped_records = [
-            {key: value for key, value in record.items() if key not in OPTIONAL_REFRESH_RUN_COLUMNS}
-            for record in records
-        ]
+        stripped_records = []
+        for record in records:
+            payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+            optional_payload = {
+                key: record[key]
+                for key in OPTIONAL_REFRESH_RUN_COLUMNS
+                if key in record and record[key] is not None
+            }
+            stripped = {key: value for key, value in record.items() if key not in OPTIONAL_REFRESH_RUN_COLUMNS}
+            stripped["payload"] = {**payload, **optional_payload}
+            stripped_records.append(stripped)
         print("Supabase watchlist_refresh_runs optional health columns unavailable; storing full health in payload only.")
         supabase_upsert("watchlist_refresh_runs", stripped_records, ["run_date"])
 
