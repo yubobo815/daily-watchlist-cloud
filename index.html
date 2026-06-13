@@ -25,32 +25,31 @@
             </span>
             <span class="brand-copy">
               <span class="brand-name">Daily Trade Copilot</span>
-              <span class="brand-subtitle" data-i18n="watchlistSubtitle">Watchlist</span>
+              <span class="brand-subtitle">Watchlist</span>
             </span>
           </a>
           <h1 class="sr-only">Daily Trade Copilot</h1>
-          <p id="status" class="subtle meta" data-i18n="loadingWatchlist">Loading Supabase watchlist...</p>
-          <div id="run-status" class="status bad" data-i18n="waitingDatabase">Waiting for database config</div>
+          <p id="status" class="subtle meta">Loading Supabase watchlist...</p>
+          <div id="run-status" class="status bad">Waiting for database config</div>
           <p id="app-disclaimer" class="app-disclaimer"></p>
         </div>
-        <button id="language-toggle" class="language-toggle" type="button" aria-label="Switch language">中文</button>
       </section>
 
       <section class="mobile-search-panel" aria-label="Mobile watchlist search">
         <div class="mobile-search-top">
-          <span data-i18n="findTicker">Find ticker</span>
+          <span>Find ticker</span>
           <strong id="mobile-search-count">0 shown</strong>
         </div>
         <div class="search-shell mobile-search-shell">
-          <input id="mobile-search" class="search" type="search" placeholder="Search ticker, company, signal..." autocomplete="off" inputmode="search" data-i18n-placeholder="searchMobile">
-          <button id="mobile-clear-search" class="search-clear hidden" type="button" aria-label="Clear mobile search" data-i18n="clear">Clear</button>
+          <input id="mobile-search" class="search" type="search" placeholder="Search ticker, company, signal..." autocomplete="off" inputmode="search">
+          <button id="mobile-clear-search" class="search-clear hidden" type="button" aria-label="Clear mobile search">Clear</button>
         </div>
         <div class="mobile-filter-row" aria-label="Signal filters">
-          <button type="button" data-mobile-filter="all" data-i18n="all">All</button>
-          <button type="button" data-mobile-filter="buy" data-i18n="buy">Buy</button>
-          <button type="button" data-mobile-filter="setup" data-i18n="building">Building</button>
-          <button type="button" data-mobile-filter="watch" data-i18n="watch">Watch</button>
-          <button type="button" data-mobile-filter="exit" data-i18n="risk">Risk</button>
+          <button type="button" data-mobile-filter="all">All</button>
+          <button type="button" data-mobile-filter="buy">Buy</button>
+          <button type="button" data-mobile-filter="setup">Building</button>
+          <button type="button" data-mobile-filter="watch">Watch</button>
+          <button type="button" data-mobile-filter="exit">Risk</button>
         </div>
       </section>
 
@@ -71,20 +70,20 @@
       <section id="watchlist-table" class="table-wrap">
         <div class="section-heading watchlist-heading">
           <div>
-            <span data-i18n="watchlist">Watchlist</span>
+            <span>Watchlist</span>
           </div>
         </div>
         <section class="controls">
           <div class="search-shell">
-            <input id="search" class="search" type="search" placeholder="Search ticker or behavior..." autocomplete="off" inputmode="search" data-i18n-placeholder="searchDesktop">
-            <button id="clear-search" class="search-clear hidden" type="button" aria-label="Clear search" data-i18n="clear">Clear</button>
+            <input id="search" class="search" type="search" placeholder="Search ticker or behavior..." autocomplete="off" inputmode="search">
+            <button id="clear-search" class="search-clear hidden" type="button" aria-label="Clear search">Clear</button>
           </div>
           <select id="sort" class="control">
-            <option value="execution_priority-asc" data-i18n="sortExecution">Execution tier first</option>
-            <option value="score-desc" data-i18n="sortScore">Trend quality high to low</option>
-            <option value="day_change_pct-desc" data-i18n="sortBestDay">Best day change</option>
-            <option value="day_change_pct-asc" data-i18n="sortWorstDay">Worst day change</option>
-            <option value="ticker-asc" data-i18n="sortTicker">Ticker A to Z</option>
+            <option value="execution_priority-asc">Execution tier first</option>
+            <option value="score-desc">Trend quality high to low</option>
+            <option value="day_change_pct-desc">Best day change</option>
+            <option value="day_change_pct-asc">Worst day change</option>
+            <option value="ticker-asc">Ticker A to Z</option>
           </select>
           <div id="count" class="count">0 / 0 shown</div>
         </section>
@@ -92,14 +91,14 @@
           <thead id="watchlist-head"></thead>
           <tbody id="watchlist-body"></tbody>
         </table>
-        <div id="empty" class="empty hidden" data-i18n="noMatchingRows">No matching rows yet.</div>
+        <div id="empty" class="empty hidden">No matching rows yet.</div>
       </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
-      <a href="#daily-brief" class="active"><span data-i18n="brief">Brief</span></a>
-      <a href="#today-focus"><span data-i18n="focus">Focus</span></a>
-      <a href="#signal-changes"><span data-i18n="changes">Changes</span></a>
-      <a href="#watchlist-table"><span data-i18n="watchlist">Watchlist</span></a>
+      <a href="#daily-brief" class="active"><span>Brief</span></a>
+      <a href="#today-focus"><span>Focus</span></a>
+      <a href="#signal-changes"><span>Changes</span></a>
+      <a href="#watchlist-table"><span>Watchlist</span></a>
     </nav>
   </body>
 </html>
