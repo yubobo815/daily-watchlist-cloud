@@ -1225,13 +1225,15 @@ td:nth-child(2) {
 }
 
 td:nth-child(3) {
-  min-width: 380px;
-  max-width: 560px;
+  min-width: 440px;
+  max-width: 660px;
   white-space: normal;
 }
 
 td:nth-child(4) {
-  min-width: 150px;
+  min-width: 92px;
+  width: 92px;
+  text-align: center;
 }
 
 td:nth-child(5) {

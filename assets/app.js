@@ -1603,18 +1603,9 @@ function riskSummaryLabel(row) {
 
 function renderRiskSummary(row) {
   const [tone, label] = riskSummaryLabel(row);
-  const plan = String(
-    payloadValue(row, "anti_signal_plan")
-    || payloadValue(row, "freshness_plan")
-    || payloadValue(row, "operator_state_plan")
-    || payloadValue(row, "operator_plan")
-    || ""
-  ).trim();
-  const shouldShowPlan = tone !== "strong" && plan;
   return `
     <span class="risk-stack">
       <span class="badge entry-pill entry-${tone}">${escapeHtml(label)}</span>
-      ${shouldShowPlan ? `<small>${escapeHtml(plan)}</small>` : ""}
     </span>
   `;
 }
