@@ -18,26 +18,13 @@ const SETUP_LABELS = {
 };
 
 const WATCHLIST_COLUMNS = [
-  ["ticker", "Sym"],
-  ["name", "Name"],
-  ["action", "Signal"],
-  ["buy_tier", "Tier"],
-  ["next_day_bias", "Next Day"],
-  ["operator_state", "Operator"],
-  ["next_day_plan", "Plan"],
-  ["score", "Trend Quality"],
-  ["close", "Close"],
-  ["day_change_pct", "Chg%"],
-  ["data_provider", "Data"],
-  ["setup", "Pattern"],
-  ["adaptive_mode", "Market Behavior"],
-  ["psychology", "Tape"],
-  ["entry_est", "Ref Zone"],
-  ["stop_est", "Stop"],
-  ["target_est", "Target"],
-  ["risk_pct_to_stop", "Risk%"],
-  ["position_value_1k_risk", "Pos@1k"],
-  ["notes", "Behavior Note"]
+  ["ticker", "Stock"],
+  ["action", "Decision"],
+  ["price_summary", "Price"],
+  ["trade_context", "Setup"],
+  ["risk_summary", "Risk"],
+  ["notes", "Why"],
+  ["data_provider", "Data"]
 ];
 
 const SUMMARY_CARDS = [
@@ -1519,9 +1506,12 @@ async function loadStaticTickerHistory(ticker) {
 function renderWatchlistCell(row, key) {
   if (key === "ticker") {
     return `
-      <span class="ticker-cell">
+      <span class="ticker-cell ticker-cell-rich">
         <button class="focus-toggle ${isFocusTicker(row.ticker) ? "active" : ""}" type="button" data-focus-ticker="${escapeHtml(row.ticker)}" aria-label="${isFocusTicker(row.ticker) ? "Remove" : "Add"} ${escapeHtml(row.ticker)} from Focus List">★</button>
-        <a class="ticker-link" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">${escapeHtml(row.ticker)}</a>
+        <span class="ticker-copy">
+          <a class="ticker-link" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">${escapeHtml(row.ticker)}</a>
+          <span class="ticker-name">${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || row.ticker)}</span>
+        </span>
       </span>
     `;
   }
@@ -1529,14 +1519,11 @@ function renderWatchlistCell(row, key) {
     return escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || row.ticker);
   }
   if (key === "action") {
-    const kind = actionKind(row.action);
-    return `
-      <span class="signal-stack">
-        <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        ${renderEntryQualityPill(row)}
-      </span>
-    `;
+    return renderDecisionSummary(row);
   }
+  if (key === "price_summary") return renderPriceSummary(row);
+  if (key === "trade_context") return renderTradeContext(row);
+  if (key === "risk_summary") return renderRiskSummary(row);
   if (key === "setup") {
     return `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>`;
   }
@@ -1546,7 +1533,7 @@ function renderWatchlistCell(row, key) {
   if (key === "operator_state") return renderOperatorPressure(row);
   if (key === "next_day_plan") return `<span class="behavior-detail">${escapeHtml(payloadValue(row, "next_day_plan") || "")}</span>`;
   if (key === "notes") {
-    return `<span class="behavior-detail">${escapeHtml(behaviorDetail(row))}</span>`;
+    return renderReasonSummary(row);
   }
   if (key === "score") return `<span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>`;
   if (key === "day_change_pct") return renderMovePct(row[key]);
@@ -1554,6 +1541,95 @@ function renderWatchlistCell(row, key) {
   if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
+}
+
+function renderDecisionSummary(row) {
+  const kind = actionKind(row.action);
+  return `
+    <span class="decision-stack">
+      <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+      ${renderBuyTier(row)}
+    </span>
+  `;
+}
+
+function renderPriceSummary(row) {
+  const zone = numericValue(row, "entry_est");
+  const stop = numericValue(row, "stop_est");
+  const secondary = [
+    zone ? `Zone ${fmtNumber(zone, 2)}` : "",
+    stop ? `Stop ${fmtNumber(stop, 2)}` : ""
+  ].filter(Boolean).join(" · ");
+  return `
+    <span class="price-stack">
+      <span><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong> ${renderMovePct(row.day_change_pct)}</span>
+      ${secondary ? `<small>${escapeHtml(secondary)}</small>` : ""}
+    </span>
+  `;
+}
+
+function renderTradeContext(row) {
+  const chips = [
+    `<span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>`,
+    row.setup && row.setup !== "NONE" ? `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>` : "",
+    renderEntryQualityPill(row)
+  ].filter(Boolean).join("");
+  return `
+    <span class="context-stack">
+      <span class="chip-row">${chips}</span>
+      <small>${escapeHtml(payloadValue(row, "adaptive_mode") || payloadValue(row, "personality_type") || "Mixed behavior")}</small>
+    </span>
+  `;
+}
+
+function riskSummaryLabel(row) {
+  const kind = actionKind(row.action);
+  const antiLevel = String(payloadValue(row, "anti_signal_level") || "NONE").toUpperCase();
+  const operator = String(payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL").toUpperCase();
+  const riskPermission = String(payloadValue(row, "risk_permission") || "").toUpperCase();
+  const marketPermission = String(payloadValue(row, "market_permission") || "").toUpperCase();
+  if (kind === "exit") return ["risk", "EXIT RISK"];
+  if (kind === "avoid") return ["risk", "AVOID"];
+  if (row.action === "WAIT") return ["watch", "NO EDGE"];
+  if (payloadValue(row, "freshness_block") === "YES") return ["risk", "STALE DATA"];
+  if (antiLevel === "BLOCK") return ["risk", "BLOCKED"];
+  if (antiLevel === "CAUTION") return ["watch", "CAUTION"];
+  if (payloadValue(row, "extension_state") === "EXTENDED") return ["watch", "EXTENDED"];
+  if (riskPermission === "BLOCK" || marketPermission === "BLOCK") return ["risk", "GATE BLOCK"];
+  if (operator.includes("BULL_TRAP") || operator.includes("DISTRIBUTION") || operator.includes("SHORT")) return ["risk", shortOperatorPressure(operator)];
+  if (operator.includes("ACCUMULATION") || operator.includes("ABSORPTION") || operator.includes("BEAR_TRAP") || operator.includes("SQUEEZE")) return ["constructive", shortOperatorPressure(operator)];
+  return ["strong", "CLEAR"];
+}
+
+function renderRiskSummary(row) {
+  const [tone, label] = riskSummaryLabel(row);
+  const plan = String(
+    payloadValue(row, "anti_signal_plan")
+    || payloadValue(row, "freshness_plan")
+    || payloadValue(row, "operator_state_plan")
+    || payloadValue(row, "operator_plan")
+    || ""
+  ).trim();
+  return `
+    <span class="risk-stack">
+      <span class="chip-row">
+        <span class="badge entry-pill entry-${tone}">${escapeHtml(label)}</span>
+        ${renderPermissionGates(row)}
+      </span>
+      ${plan ? `<small>${escapeHtml(plan)}</small>` : ""}
+    </span>
+  `;
+}
+
+function renderReasonSummary(row) {
+  const detail = behaviorDetail(row);
+  const reasons = whyThisMatters(row).slice(0, 2);
+  return `
+    <span class="reason-stack">
+      <span>${escapeHtml(detail)}</span>
+      ${reasons.length ? `<small>${reasons.map(escapeHtml).join(" · ")}</small>` : ""}
+    </span>
+  `;
 }
 
 function searchableRowText(row) {
@@ -1600,10 +1676,8 @@ function searchableRowText(row) {
 function renderMobileWatchlistSummary(row) {
   const kind = actionKind(row.action);
   const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
-  const pattern = setupLabel(row.setup);
-  const strength = strengthLabel(row);
-  const entry = entryQualityLabel(row);
-  const secondary = [entry, strength, pattern && pattern !== "None" ? pattern : ""].filter(Boolean).join(" · ");
+  const [riskTone, riskLabel] = riskSummaryLabel(row);
+  const reasons = whyThisMatters(row).slice(0, 1);
   return `
     <span class="mobile-watch-shell">
       <a class="mobile-watch-row" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
@@ -1612,7 +1686,8 @@ function renderMobileWatchlistSummary(row) {
           <span>${escapeHtml(company)}</span>
           <span class="mobile-watch-signal">
             <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-            <span>${escapeHtml(secondary)}</span>
+            <span class="badge entry-pill entry-${riskTone}">${escapeHtml(riskLabel)}</span>
+            <span>${escapeHtml(reasons[0] || behaviorDetail(row))}</span>
           </span>
         </span>
         <span class="mobile-watch-price">
@@ -1987,7 +2062,7 @@ function renderWatchlist() {
   document.querySelector("#watchlist-head").innerHTML = `<tr>${WATCHLIST_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("")}</tr>`;
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
     <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
-      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
+      ${WATCHLIST_COLUMNS.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk", "price_summary"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");
