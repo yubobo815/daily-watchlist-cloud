@@ -112,6 +112,38 @@ def audit_post_exit_risk_persistence_allows_strong_reclaim():
     assert_true(result["action"] == "SETUP FORMING", "strong reclaim setup should remain BUILDING")
 
 
+def audit_range_bound_reclaim_cannot_skip_post_exit_cooldown():
+    result = latest([
+        row(
+            "D1",
+            "EXIT PRESSURE",
+            211.14,
+            score=20,
+            next_day_bias="DEFENSIVE / EXIT RISK",
+            seller_score=80,
+            distribution_score=98,
+        ),
+        row(
+            "D2",
+            "BUY CANDIDATE",
+            224.36,
+            setup="MOMENTUM BUY",
+            score=118,
+            next_day_bias="BULLISH CONFIRM",
+            operator_state="MARKUP / DEMAND CONTROL",
+            adaptive_mode="MEAN REVERSION",
+            personality_type="RANGE_BOUND",
+            demand_control_score=86,
+            buyer_score=92,
+            seller_score=3,
+            distribution_score=0,
+        ),
+    ])
+    assert_true(result["contextual_overlay"] == "POST-EXIT COOLDOWN", "range-bound reclaim must not skip post-exit cooldown")
+    assert_true(result["action"] == "SETUP FORMING", "range-bound post-exit rebound must downgrade BUY to BUILDING")
+    assert_true(result["next_day_bias"] == "EXECUTION BLOCKED", "range-bound post-exit rebound must require confirmation")
+
+
 def audit_volatile_hold_has_consistent_score():
     result = latest([
         row(
@@ -236,6 +268,7 @@ def main():
     audit_post_exit_cooldown_sees_short_pressure()
     audit_post_exit_risk_persistence_keeps_exit_pressure()
     audit_post_exit_risk_persistence_allows_strong_reclaim()
+    audit_range_bound_reclaim_cannot_skip_post_exit_cooldown()
     audit_volatile_hold_has_consistent_score()
     audit_behavior_history_seeds_learning()
     audit_defensive_learning_shows_samples_without_promotion()
@@ -245,7 +278,7 @@ def main():
     audit_learning_upgrade_respects_anti_signals()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 12,
+        "cases": 13,
     })
 
 

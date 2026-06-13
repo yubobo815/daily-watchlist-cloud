@@ -1713,12 +1713,23 @@ def post_exit_reclaim_is_strong(row: dict, prior_exit: dict) -> bool:
     mode = str(row.get("adaptive_mode") or "").upper()
     personality = str(row.get("personality_type") or "").upper()
     supply_score = supply_risk_score(row)
+    buyer_score = row_float(row, "buyer_score")
+    demand_control = row_float(row, "demand_control_score")
+    absorption_score = row_float(row, "absorption_score")
+
+    # Range-bound/mean-reversion personalities often print convincing one-day
+    # rebounds after EXIT. Make them prove a second day instead of bypassing
+    # post-exit cooldown immediately.
+    if personality == "RANGE_BOUND" or mode == "MEAN REVERSION":
+        return False
+
     standard_reclaim = (
         reclaim_pct >= POST_EXIT_RECLAIM_MIN_PCT
         and next_day == "BULLISH CONFIRM"
         and operator_state in {"MARKUP / DEMAND CONTROL", "ACCUMULATION", "BEAR_TRAP / SQUEEZE WATCH"}
-        and row_float(row, "buyer_score") >= 75.0
-        and supply_score < 35.0
+        and buyer_score >= 80.0
+        and max(demand_control, absorption_score) >= 55.0
+        and supply_score < 30.0
     )
     trend_reclaim = (
         reclaim_pct >= 2.5
@@ -1726,8 +1737,8 @@ def post_exit_reclaim_is_strong(row: dict, prior_exit: dict) -> bool:
         and mode in {"POWER TREND", "STEADY TREND"}
         and personality != "RANGE_BOUND"
         and operator_state == "MARKUP / DEMAND CONTROL"
-        and row_float(row, "demand_control_score") >= 80.0
-        and row_float(row, "buyer_score") >= 65.0
+        and demand_control >= 80.0
+        and buyer_score >= 70.0
         and supply_score < 30.0
     )
     return standard_reclaim or trend_reclaim
