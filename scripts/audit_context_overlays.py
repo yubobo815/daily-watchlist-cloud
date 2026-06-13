@@ -115,15 +115,43 @@ def audit_behavior_history_seeds_learning():
     assert_true(bool(stats), "backfilled outcomes should feed learning stats")
 
 
+def audit_defensive_learning_shows_samples_without_promotion():
+    history_rows = []
+    for ticker in ["A", "B", "C"]:
+        history_rows.append({**row("2026-06-01", "EXIT PRESSURE", 100, setup="NONE"), "ticker": ticker})
+        history_rows.append({**row("2026-06-02", "EXIT PRESSURE", 98, setup="NONE"), "ticker": ticker})
+    outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
+    stats = dwo.build_learning_stats(outcomes)
+    current = row("2026-06-03", "EXIT PRESSURE", 100, setup="NONE", score=20)
+    current["ticker"] = "NVDA"
+    current["adjusted_score"] = 20
+    dwo.apply_learning_adjustments([current], stats)
+    assert_true(current["learning_sample_count"] == 3, "defensive family samples should be visible")
+    assert_true(current["learning_adjustment"] == 0.0, "successful defensive learning must not promote EXIT score")
+    assert_true(float(current["adjusted_score"]) == 20.0, "EXIT adjusted score must remain unchanged by positive defense learning")
+
+
+def audit_learning_lookback_stays_on_30_day_window():
+    history_rows = [
+        {**row(f"2026-06-{day:02d}", "BUY CANDIDATE", 100 + day, setup="MOMENTUM BUY"), "ticker": "MU"}
+        for day in range(1, 31)
+    ]
+    learning_outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
+    assert_true(dwo.DEFAULT_LEARNING_LOOKBACK_DAYS == 30, "default learning lookback should stay aligned to stored 30-day history")
+    assert_true(len(learning_outcomes) == 29, "30 stored days should create 29 adjacent learning samples")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
     audit_post_exit_cooldown_sees_short_pressure()
     audit_volatile_hold_has_consistent_score()
     audit_behavior_history_seeds_learning()
+    audit_defensive_learning_shows_samples_without_promotion()
+    audit_learning_lookback_stays_on_30_day_window()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 5,
+        "cases": 7,
     })
 
 

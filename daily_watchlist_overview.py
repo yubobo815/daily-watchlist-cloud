@@ -46,6 +46,7 @@ WALK_FORWARD_MIN_TEST_TRADES = 3
 MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
+DEFAULT_LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "30"))
 SELF_SCORE_ACTIONS = {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING", "WATCH TREND", "EXIT PRESSURE"}
 SELF_SCORE_WORKING_RETURN_PCT = 2.0
 SELF_SCORE_FAILED_RETURN_PCT = -2.0
@@ -2154,6 +2155,24 @@ def learning_key_for(row: dict) -> str:
     )
 
 
+def learning_action_setup_key(action: object, setup: object) -> str:
+    return f"ACTION_SETUP|{action or 'UNKNOWN'}|{setup or 'NONE'}"
+
+
+def learning_action_key(action: object) -> str:
+    return f"ACTION|{action or 'UNKNOWN'}"
+
+
+def learning_key_candidates_for(row: dict) -> list[tuple[str, str, float]]:
+    action = row.get("action") or "UNKNOWN"
+    setup = row.get("setup") or "NONE"
+    return [
+        (learning_key_for(row), "exact signal personality", 1.0),
+        (learning_action_setup_key(action, setup), "action/setup family", 0.65),
+        (learning_action_key(action), "action family", 0.45),
+    ]
+
+
 def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
     frames = []
     for path in sorted(Path(".").glob("daily_signal_outcomes_*.csv")):
@@ -2192,38 +2211,74 @@ def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
     if usable.empty:
         return {}
 
+    usable["learning_key_exact"] = usable["learning_key"].astype(str)
+    usable["learning_key_action_setup"] = usable.apply(
+        lambda row: learning_action_setup_key(row.get("prior_action"), row.get("prior_setup")),
+        axis=1,
+    )
+    usable["learning_key_action"] = usable["prior_action"].apply(learning_action_key)
+
     stats: dict[str, dict] = {}
-    for key, group in usable.groupby("learning_key"):
-        labels = group["outcome_label"].astype(str).str.upper()
-        scores = pd.to_numeric(group.get("outcome_score"), errors="coerce").dropna()
-        returns = pd.to_numeric(group.get("close_return_pct"), errors="coerce").dropna()
-        total = int(len(group))
-        working = int((labels == "WORKING").sum())
-        failed = int((labels == "FAILED").sum())
-        trap_avoided = int((labels == "TRAP_AVOIDED").sum())
-        stats[str(key)] = {
-            "sample_count": total,
-            "working_rate": working / total if total else 0.0,
-            "failed_rate": failed / total if total else 0.0,
-            "trap_avoided_rate": trap_avoided / total if total else 0.0,
-            "avg_score": float(scores.mean()) if not scores.empty else 0.0,
-            "avg_return_pct": float(returns.mean()) if not returns.empty else None,
-        }
+    grouped_sources = [
+        ("learning_key_exact", "exact signal personality"),
+        ("learning_key_action_setup", "action/setup family"),
+        ("learning_key_action", "action family"),
+    ]
+    for column, scope in grouped_sources:
+        for key, group in usable.groupby(column):
+            labels = group["outcome_label"].astype(str).str.upper()
+            scores = pd.to_numeric(group.get("outcome_score"), errors="coerce").dropna()
+            returns = pd.to_numeric(group.get("close_return_pct"), errors="coerce").dropna()
+            total = int(len(group))
+            working = int((labels == "WORKING").sum())
+            failed = int((labels == "FAILED").sum())
+            trap_avoided = int((labels == "TRAP_AVOIDED").sum())
+            stats[str(key)] = {
+                "sample_count": total,
+                "working_rate": working / total if total else 0.0,
+                "failed_rate": failed / total if total else 0.0,
+                "trap_avoided_rate": trap_avoided / total if total else 0.0,
+                "avg_score": float(scores.mean()) if not scores.empty else 0.0,
+                "avg_return_pct": float(returns.mean()) if not returns.empty else None,
+                "scope": scope,
+            }
     return stats
 
 
 def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]) -> None:
     for row in rows:
-        key = learning_key_for(row)
-        stats = learning_stats.get(key)
+        candidates = learning_key_candidates_for(row)
+        selected_key = ""
+        selected_scope = ""
+        selected_weight = 1.0
+        stats = None
+        fallback_stats = None
+        fallback_scope = ""
+        for key, scope, weight in candidates:
+            candidate_stats = learning_stats.get(key)
+            if not candidate_stats:
+                continue
+            if fallback_stats is None:
+                fallback_stats = candidate_stats
+                fallback_scope = str(candidate_stats.get("scope") or scope)
+            if int(candidate_stats.get("sample_count", 0)) >= LEARNING_MIN_SAMPLES:
+                selected_key = key
+                selected_scope = str(candidate_stats.get("scope") or scope)
+                selected_weight = weight
+                stats = candidate_stats
+                break
         if not stats or int(stats.get("sample_count", 0)) < LEARNING_MIN_SAMPLES:
-            row["learning_sample_count"] = int(stats.get("sample_count", 0)) if stats else 0
-            row["learning_working_rate"] = round(float(stats.get("working_rate", 0.0)), 3) if stats else ""
-            row["learning_failed_rate"] = round(float(stats.get("failed_rate", 0.0)), 3) if stats else ""
-            row["learning_trap_avoided_rate"] = round(float(stats.get("trap_avoided_rate", 0.0)), 3) if stats else ""
-            row["learning_avg_score"] = round(float(stats.get("avg_score", 0.0)), 3) if stats else ""
+            row["learning_sample_count"] = int(fallback_stats.get("sample_count", 0)) if fallback_stats else 0
+            row["learning_working_rate"] = round(float(fallback_stats.get("working_rate", 0.0)), 3) if fallback_stats else ""
+            row["learning_failed_rate"] = round(float(fallback_stats.get("failed_rate", 0.0)), 3) if fallback_stats else ""
+            row["learning_trap_avoided_rate"] = round(float(fallback_stats.get("trap_avoided_rate", 0.0)), 3) if fallback_stats else ""
+            row["learning_avg_score"] = round(float(fallback_stats.get("avg_score", 0.0)), 3) if fallback_stats else ""
             row["learning_adjustment"] = 0.0
-            row["learning_plan"] = f"Learning pending: needs at least {LEARNING_MIN_SAMPLES} settled samples for this signal personality."
+            row["learning_scope"] = fallback_scope or "none"
+            row["learning_plan"] = (
+                f"Learning pending: needs at least {LEARNING_MIN_SAMPLES} settled samples; "
+                f"currently has {row['learning_sample_count']} from {row['learning_scope']}."
+            )
             continue
 
         avg_score = float(stats.get("avg_score", 0.0))
@@ -2231,22 +2286,28 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         failed_rate = float(stats.get("failed_rate", 0.0))
         trap_rate = float(stats.get("trap_avoided_rate", 0.0))
         adjustment = avg_score * 8.0 + (working_rate - failed_rate) * 4.0 + trap_rate * 2.0
+        adjustment *= selected_weight
         adjustment = max(-LEARNING_ADJUSTMENT_CAP, min(LEARNING_ADJUSTMENT_CAP, adjustment))
 
         anti_level = str(row.get("anti_signal_level") or "NONE").upper()
         stale = str(row.get("freshness_block") or "").upper() == "YES"
         if stale:
             effective_adjustment = 0.0
-            plan = "Learning observed, but data is stale; no score adjustment applied."
+            plan = f"Learning observed from {selected_scope}, but data is stale; no score adjustment applied."
         elif anti_level == "BLOCK":
             effective_adjustment = min(0.0, adjustment)
-            plan = "Learning observed, but anti-signal BLOCK prevents positive promotion."
+            plan = f"Learning observed from {selected_scope}, but anti-signal BLOCK prevents positive promotion."
         elif anti_level == "CAUTION":
             effective_adjustment = min(4.0, adjustment)
-            plan = "Learning adjustment capped by anti-signal caution."
+            plan = f"Learning adjustment from {selected_scope} capped by anti-signal caution."
         else:
             effective_adjustment = adjustment
-            plan = "Learning adjustment applied from settled prior outcomes."
+            plan = f"Learning adjustment applied from settled {selected_scope} outcomes."
+
+        action = str(row.get("action") or "")
+        if action in {"EXIT PRESSURE", "WAIT", "WAIT / AVOID"} and effective_adjustment > 0:
+            effective_adjustment = 0.0
+            plan = f"Learning supports the defensive {action} read from {selected_scope}; no bullish score promotion applied."
 
         base_adjusted = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
         row["adjusted_score"] = round(max(0.0, min(128.0, base_adjusted + effective_adjustment)), 1)
@@ -2258,6 +2319,8 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         row["learning_trap_avoided_rate"] = round(trap_rate, 3)
         row["learning_avg_score"] = round(avg_score, 3)
         row["learning_adjustment"] = round(float(effective_adjustment), 2)
+        row["learning_scope"] = selected_scope
+        row["learning_key_used"] = selected_key
         row["learning_plan"] = plan
 
 
@@ -4618,8 +4681,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Create a daily stock/ETF watchlist overview.")
     parser.add_argument("--watchlist", default="daily_watchlist.txt")
     parser.add_argument("--refresh", action="store_true", help="Fetch fresh data from configured market data providers instead of using cached CSV files.")
-    parser.add_argument("--years", type=int, default=3)
+    parser.add_argument("--years", type=int, default=1)
     parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
+    parser.add_argument("--learning-lookback-days", type=int, default=DEFAULT_LEARNING_LOOKBACK_DAYS, help="Number of recent trading days to replay for learning samples.")
     parser.add_argument("--no-supabase", action="store_true", help="Skip Supabase sync even if credentials are configured.")
     parser.add_argument("--cache-only", action="store_true", help="Use only existing cached price CSV files and skip live Yahoo chart fetches.")
     parser.add_argument(
@@ -4637,6 +4701,7 @@ def main() -> None:
 
     rows = []
     history_rows = []
+    learning_history_rows = []
     failures = []
     stale_cache_fallbacks = []
     benchmark_frames: dict[str, pd.DataFrame] = {}
@@ -4664,6 +4729,11 @@ def main() -> None:
             row = apply_data_provider_context(row, df)
             ticker_history = build_behavior_history(ticker, df, days=args.history_days)
             ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
+            if args.learning_lookback_days > args.history_days:
+                ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days)
+                ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
+            else:
+                ticker_learning_history = ticker_history
             row = apply_latest_signal_context(row, ticker_history)
             row.update(signal_outcome_from_history(row, ticker_history))
             if not args.skip_profiles:
@@ -4671,6 +4741,7 @@ def main() -> None:
             row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
             rows.append(row)
             history_rows.extend(ticker_history)
+            learning_history_rows.extend(ticker_learning_history)
             if args.refresh:
                 record_stale_cache_fallback(stale_cache_fallbacks, ticker, df, live_access_message)
         except URLError as exc:
@@ -4683,6 +4754,11 @@ def main() -> None:
                 row = apply_data_provider_context(row, df)
                 ticker_history = build_behavior_history(ticker, df, days=args.history_days)
                 ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
+                if args.learning_lookback_days > args.history_days:
+                    ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days)
+                    ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
+                else:
+                    ticker_learning_history = ticker_history
                 row = apply_latest_signal_context(row, ticker_history)
                 row.update(signal_outcome_from_history(row, ticker_history))
                 if not args.skip_profiles:
@@ -4690,6 +4766,7 @@ def main() -> None:
                 row = apply_quality_overlays(row, market_context_for(df, benchmark_frames))
                 rows.append(row)
                 history_rows.extend(ticker_history)
+                learning_history_rows.extend(ticker_learning_history)
                 stale_cache_fallbacks.append(
                     {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
                 )
@@ -4713,7 +4790,7 @@ def main() -> None:
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
-    backfilled_outcomes = build_backfilled_signal_outcomes(history_rows)
+    backfilled_outcomes = build_backfilled_signal_outcomes(learning_history_rows)
     learning_history = combine_signal_outcomes(fetch_signal_outcome_history(today), backfilled_outcomes)
     learning_stats = build_learning_stats(learning_history)
     apply_learning_adjustments(rows, learning_stats)
@@ -4772,6 +4849,7 @@ def main() -> None:
         "symbols_stale_cache": len(stale_cache_fallbacks),
         "snapshot_rows": len(report),
         "history_rows": len(history_rows),
+        "learning_history_rows": len(learning_history_rows),
         "scanner_version": SCANNER_VERSION,
         "notes": status_text,
         "payload": {
@@ -4781,6 +4859,8 @@ def main() -> None:
             "stale_cache_fallbacks": stale_cache_fallbacks[:25],
             "stale_execution_blocks": stale_blocks,
             "signal_outcomes": outcome_summary,
+            "backfilled_signal_outcomes": int(len(backfilled_outcomes)),
+            "learning_lookback_days": args.learning_lookback_days,
             "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
         },
     }
