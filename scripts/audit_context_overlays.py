@@ -150,6 +150,54 @@ def audit_action_display_labels_match_product_ui():
     assert_true(dwo.ACTION_DISPLAY_LABELS["WAIT / AVOID"] == "AVOID", "avoid label must match product UI")
 
 
+def learning_confirmed_setup_row(**overrides):
+    current = row(
+        "2026-06-03",
+        "SETUP FORMING",
+        100,
+        setup="PULLBACK BUY",
+        score=78,
+        next_day_bias="BULLISH CONFIRM",
+        operator_state="ACCUMULATION",
+        extension_state="NEAR_ZONE",
+    )
+    current.update({
+        "adjusted_score": 84,
+        "anti_signal_level": "NONE",
+        "freshness_block": "NO",
+        "risk_permission": "ALLOW",
+        "market_permission": "ALLOW",
+        "learning_sample_count": 8,
+        "learning_working_rate": 0.75,
+        "learning_failed_rate": 0.125,
+        "learning_adjustment": 5.0,
+        "signal_quality": "NEXT-DAY BUILDING",
+    })
+    current.update(overrides)
+    return current
+
+
+def audit_learning_can_upgrade_building_execution_tier():
+    current = learning_confirmed_setup_row()
+    tier, priority, plan = dwo.buy_tier_for(current, 0)
+    assert_true(tier == "BUY WATCH", "positive learning should upgrade clean BUILDING to BUY WATCH tier")
+    assert_true(priority == 2, "learning-confirmed BUILDING should rank with buy-watch priority")
+    assert_true("Pine confirmation" in plan, "learning upgrade must still require Pine confirmation")
+    dwo.apply_buy_tiers([current])
+    assert_true("learning_confirmed_setup" in current["reason_codes"], "learning upgrade should be auditable")
+
+
+def audit_learning_upgrade_respects_anti_signals():
+    trapped = learning_confirmed_setup_row(
+        anti_signal_level="BLOCK",
+        operator_state="BULL_TRAP",
+        bull_trap_score=70,
+    )
+    tier, priority, _ = dwo.buy_tier_for(trapped, 0)
+    assert_true(tier == "SETUP ONLY", "anti-signal block must prevent learning-confirmed upgrade")
+    assert_true(priority == 4, "blocked learning setup must stay low execution priority")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
@@ -159,9 +207,11 @@ def main():
     audit_defensive_learning_shows_samples_without_promotion()
     audit_learning_lookback_stays_on_30_day_window()
     audit_action_display_labels_match_product_ui()
+    audit_learning_can_upgrade_building_execution_tier()
+    audit_learning_upgrade_respects_anti_signals()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 8,
+        "cases": 10,
     })
 
 

@@ -122,6 +122,7 @@ const REASON_LABELS = {
   cached_data_ok: "Cached data recent enough",
   top_buy_tier: "A+ buy tier",
   buy_watch_tier: "Buy watch tier",
+  learning_confirmed_setup: "Learning-confirmed building",
   setup_only_tier: "Setup only",
   feedback_failed: "Prior signal failed",
   feedback_stale: "Prior signal stale",

@@ -61,6 +61,11 @@ SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
 LEARNING_MIN_SAMPLES = int(os.getenv("LEARNING_MIN_SAMPLES", "3"))
 LEARNING_ADJUSTMENT_CAP = float(os.getenv("LEARNING_ADJUSTMENT_CAP", "10"))
+LEARNING_CONFIRM_MIN_SAMPLES = int(os.getenv("LEARNING_CONFIRM_MIN_SAMPLES", "6"))
+LEARNING_CONFIRM_MIN_WORKING_RATE = float(os.getenv("LEARNING_CONFIRM_MIN_WORKING_RATE", "0.60"))
+LEARNING_CONFIRM_MAX_FAILED_RATE = float(os.getenv("LEARNING_CONFIRM_MAX_FAILED_RATE", "0.25"))
+LEARNING_CONFIRM_MIN_ADJUSTMENT = float(os.getenv("LEARNING_CONFIRM_MIN_ADJUSTMENT", "2.0"))
+LEARNING_CONFIRM_MIN_SCORE = float(os.getenv("LEARNING_CONFIRM_MIN_SCORE", "78.0"))
 POST_EXIT_COOLDOWN_BARS = int(os.getenv("POST_EXIT_COOLDOWN_BARS", "2"))
 POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
 PROFIT_PROTECT_LOOKBACK_BARS = int(os.getenv("PROFIT_PROTECT_LOOKBACK_BARS", "5"))
@@ -1624,6 +1629,8 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
         return "A+ BUY", 1, "Highest execution tier; still confirm on Pine before acting."
     if action == "BUY CANDIDATE" and fresh and next_day == "BULLISH CONFIRM" and adjusted_score >= 78 and rank_index < BUY_WATCH_TIER_LIMIT:
         return "BUY WATCH", 2, "Qualified buy watch; prefer reference-zone entry and Pine confirmation."
+    if action == "SETUP FORMING" and learning_confirms_setup_upgrade(row) and rank_index < BUY_WATCH_TIER_LIMIT:
+        return "BUY WATCH", 2, "Learning-confirmed BUILDING setup; use reference-zone entry and Pine confirmation, not a chase."
     if action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
         if quality in {"STALE DATA", "EVENT RISK", "EXTENDED"} or row.get("freshness_block") == "YES":
             return "SETUP ONLY", 4, "Do not execute directly; treat as a setup until the blocker clears."
@@ -1633,6 +1640,43 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
     if action == "EXIT PRESSURE":
         return "EXIT RISK", 8, "Risk pressure is elevated."
     return "NO TRADE", 9 if score >= 25 else 10, "No actionable edge."
+
+
+def learning_confirms_setup_upgrade(row: dict) -> bool:
+    action = str(row.get("action") or "")
+    if action != "SETUP FORMING":
+        return False
+
+    anti_level = str(row.get("anti_signal_level") or "NONE").upper()
+    operator_state = str(row.get("operator_state") or "").upper()
+    operator_pressure = str(row.get("operator_pressure") or "").upper()
+    next_day = str(row.get("next_day_bias") or "").upper()
+    quality = str(row.get("signal_quality") or "").upper()
+    extension_state = str(row.get("extension_state") or "").upper()
+    stale = str(row.get("freshness_block") or "").upper() == "YES"
+    risk_ok = row.get("risk_permission") == "ALLOW"
+    market_ok = row.get("market_permission") != "BLOCK"
+    adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
+    samples = int(numeric_or_none(row.get("learning_sample_count")) or 0)
+    working_rate = float(numeric_or_none(row.get("learning_working_rate")) or 0)
+    failed_rate = float(numeric_or_none(row.get("learning_failed_rate")) or 0)
+    adjustment = float(numeric_or_none(row.get("learning_adjustment")) or 0)
+
+    if stale or anti_level != "NONE" or not risk_ok or not market_ok:
+        return False
+    if extension_state == "EXTENDED" or quality in {"STALE DATA", "EVENT RISK", "EXTENDED", "FEEDBACK FAILED", "FEEDBACK STALE"}:
+        return False
+    if operator_state in {"BULL_TRAP", "DISTRIBUTION"} or "DISTRIBUTION" in operator_pressure:
+        return False
+    if next_day not in {"BULLISH CONFIRM", "CONSTRUCTIVE PULLBACK", "WATCH TREND"}:
+        return False
+    return (
+        samples >= LEARNING_CONFIRM_MIN_SAMPLES
+        and working_rate >= LEARNING_CONFIRM_MIN_WORKING_RATE
+        and failed_rate <= LEARNING_CONFIRM_MAX_FAILED_RATE
+        and adjustment >= LEARNING_CONFIRM_MIN_ADJUSTMENT
+        and adjusted_score >= LEARNING_CONFIRM_MIN_SCORE
+    )
 
 
 def row_float(row: dict, field: str, default: float = 0.0) -> float:
@@ -1871,6 +1915,8 @@ def apply_buy_tiers(rows: list[dict]) -> list[dict]:
             append_unique_reason(row, "top_buy_tier")
         elif tier == "BUY WATCH":
             append_unique_reason(row, "buy_watch_tier")
+            if row.get("action") == "SETUP FORMING" and learning_confirms_setup_upgrade(row):
+                append_unique_reason(row, "learning_confirmed_setup")
         elif tier == "SETUP ONLY":
             append_unique_reason(row, "setup_only_tier")
     return rows
