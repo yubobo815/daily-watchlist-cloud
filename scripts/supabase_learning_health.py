@@ -64,24 +64,47 @@ def count_rows(table: str, filters: str) -> int:
     return int(total or 0)
 
 
+def latest_run_date_from_table(table: str, date_column: str = "run_date") -> str:
+    rows, _ = request_json(
+        f"{table}?select={urllib.parse.quote(date_column)}&order={date_column}.desc&limit=1"
+    )
+    if not rows:
+        return ""
+    return str(rows[0].get(date_column) or "")
+
+
+def latest_synced_run_date() -> str:
+    # watchlist_refresh_runs can lag when schema migration is skipped, so audit the
+    # tables that prove the ML inputs were actually written.
+    candidates = [
+        latest_run_date_from_table("watchlist_behavior_history"),
+        latest_run_date_from_table("watchlist_snapshots"),
+    ]
+    candidates = [date for date in candidates if date]
+    return max(candidates) if candidates else ""
+
+
+def emit_metrics(metrics: dict[str, object]) -> None:
+    for key, value in metrics.items():
+        print(f"{key}={value}")
+
+
 def fail(message: str) -> None:
     print(f"SUPABASE_LEARNING_HEALTH=FAIL {message}")
     raise SystemExit(1)
 
 
 def main() -> None:
+    run_date = latest_synced_run_date()
+    if not run_date:
+        fail("No synced watchlist run found in behavior history or snapshots.")
+
     runs, _ = request_json(
         "watchlist_refresh_runs"
         "?select=run_date,history_rows,snapshot_rows,symbols_analyzed,symbols_failed,payload"
-        "&order=run_date.desc&limit=1"
+        f"&run_date=eq.{urllib.parse.quote(str(run_date))}&limit=1"
     )
-    if not runs:
-        fail("No watchlist_refresh_runs row found.")
-
-    latest = runs[0]
-    run_date = latest.get("run_date")
-    if not run_date:
-        fail("Latest watchlist_refresh_runs row has no run_date.")
+    latest = runs[0] if runs else {"run_date": run_date}
 
     filters = f"run_date=eq.{urllib.parse.quote(str(run_date))}"
     history_rows, _ = request_json(
@@ -131,32 +154,41 @@ def main() -> None:
 
     outcome_counts = Counter(str(row.get("outcome_label") or "UNKNOWN") for row in outcome_rows)
 
+    metrics = {
+        "run_date": run_date,
+        "run_health_history_rows": latest.get("history_rows"),
+        "snapshot_rows": len(snapshot_rows),
+        "behavior_history_rows": len(history_rows),
+        "behavior_history_tickers": len(history_by_ticker),
+        "history_days_min": min_days,
+        "history_days_avg": avg_days,
+        "history_days_max": max_days,
+        "tickers_with_25_plus_days": tickers_with_25,
+        "tickers_with_30_plus_days": tickers_with_30,
+        "signal_outcome_rows_for_run": len(outcome_rows),
+        "signal_outcome_labels": dict(outcome_counts),
+        "snapshots_with_learning_samples": learning_ready,
+        "snapshots_with_learning_scope": learning_scope_ready,
+    }
+
     if len(history_rows) < 1000:
+        emit_metrics(metrics)
         fail("Behavior history row count is too low for watchlist lookback learning.")
     if len(history_by_ticker) < 100:
+        emit_metrics(metrics)
         fail("Too few tickers have behavior history.")
     if tickers_with_25 < max(1, int(len(history_by_ticker) * 0.8)):
+        emit_metrics(metrics)
         fail("Less than 80% of tickers have at least 25 lookback trading days.")
     if len(outcome_rows) < 500:
+        emit_metrics(metrics)
         fail("Signal outcome rows are too low; ML/self-learning has insufficient samples.")
     if learning_ready < max(1, int(len(snapshot_rows) * 0.5)):
+        emit_metrics(metrics)
         fail("Less than half of latest snapshots have learning samples attached.")
 
     print("SUPABASE_LEARNING_HEALTH=OK")
-    print(f"run_date={run_date}")
-    print(f"run_health_history_rows={latest.get('history_rows')}")
-    print(f"snapshot_rows={len(snapshot_rows)}")
-    print(f"behavior_history_rows={len(history_rows)}")
-    print(f"behavior_history_tickers={len(history_by_ticker)}")
-    print(f"history_days_min={min_days}")
-    print(f"history_days_avg={avg_days}")
-    print(f"history_days_max={max_days}")
-    print(f"tickers_with_25_plus_days={tickers_with_25}")
-    print(f"tickers_with_30_plus_days={tickers_with_30}")
-    print(f"signal_outcome_rows_for_run={len(outcome_rows)}")
-    print(f"signal_outcome_labels={dict(outcome_counts)}")
-    print(f"snapshots_with_learning_samples={learning_ready}")
-    print(f"snapshots_with_learning_scope={learning_scope_ready}")
+    emit_metrics(metrics)
 
 
 if __name__ == "__main__":

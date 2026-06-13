@@ -178,6 +178,7 @@ create table if not exists public.watchlist_refresh_runs (
   symbols_stale_cache integer,
   snapshot_rows integer,
   history_rows integer,
+  learning_history_rows integer,
   scanner_version text,
   notes text,
   payload jsonb not null default '{}'::jsonb,
@@ -371,6 +372,8 @@ alter table public.watchlist_behavior_history add column if not exists feedback_
 alter table public.watchlist_behavior_history add column if not exists feedback_quality text;
 alter table public.watchlist_behavior_history add column if not exists feedback_plan text;
 alter table public.watchlist_behavior_history add column if not exists reason_codes jsonb not null default '[]'::jsonb;
+
+alter table public.watchlist_refresh_runs add column if not exists learning_history_rows integer;
 
 alter table public.watchlist_snapshots enable row level security;
 alter table public.watchlist_behavior_history enable row level security;

@@ -889,6 +889,10 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "reason_codes",
 }
 
+OPTIONAL_REFRESH_RUN_COLUMNS = {
+    "learning_history_rows",
+}
+
 SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "180"))
 SUPABASE_UPSERT_BATCH_SIZE = int(os.getenv("SUPABASE_UPSERT_BATCH_SIZE", "100"))
 ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().lower() in {"1", "true", "yes"}
@@ -947,6 +951,25 @@ def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict]
         ]
         print(f"Supabase {table} optional signal columns unavailable; storing transition fields in payload only.")
         supabase_upsert_batches(table, stripped_records, conflict_columns)
+
+
+def supabase_upsert_refresh_run(records: list[dict]) -> None:
+    try:
+        supabase_upsert("watchlist_refresh_runs", records, ["run_date"])
+        return
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        schema_cache_error = "could not find" in message or "schema cache" in message or "column" in message
+        has_optional_columns = any(OPTIONAL_REFRESH_RUN_COLUMNS.intersection(record) for record in records)
+        if not schema_cache_error or not has_optional_columns:
+            raise
+
+        stripped_records = [
+            {key: value for key, value in record.items() if key not in OPTIONAL_REFRESH_RUN_COLUMNS}
+            for record in records
+        ]
+        print("Supabase watchlist_refresh_runs optional health columns unavailable; storing full health in payload only.")
+        supabase_upsert("watchlist_refresh_runs", stripped_records, ["run_date"])
 
 
 def supabase_delete_older_than(table: str, date_column: str, cutoff_date: str) -> None:
@@ -1276,7 +1299,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
 
     if run_metadata:
         try:
-            supabase_upsert("watchlist_refresh_runs", [clean_record(run_metadata)], ["run_date"])
+            supabase_upsert_refresh_run([clean_record(run_metadata)])
         except RuntimeError as exc:
             print(f"Supabase run-health sync skipped: {exc}")
 
