@@ -99,14 +99,31 @@ def audit_volatile_hold_has_consistent_score():
     assert_true(float(result["adjusted_score"]) >= 50, "volatile hold WATCH must not retain a collapsed EXIT score")
 
 
+def audit_behavior_history_seeds_learning():
+    history_rows = [
+        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY"), "ticker": "MU"},
+        {**row("2026-06-02", "WATCH TREND", 104, setup="NONE"), "ticker": "MU"},
+        {**row("2026-06-03", "SETUP FORMING", 103, setup="PULLBACK BUY"), "ticker": "MU"},
+    ]
+    outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
+    assert_true(len(outcomes) >= 1, "behavior replay should create backfilled learning samples")
+    first = outcomes.iloc[0].to_dict()
+    assert_true(first["signal_run_date"] == "2026-06-01", "backfilled sample must use prior history date")
+    assert_true(first["evaluation_run_date"] == "2026-06-02", "backfilled sample must evaluate on next history date")
+    assert_true(first["outcome_label"] == "WORKING", "BUY with follow-through should seed WORKING")
+    stats = dwo.build_learning_stats(outcomes)
+    assert_true(bool(stats), "backfilled outcomes should feed learning stats")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
     audit_post_exit_cooldown_sees_short_pressure()
     audit_volatile_hold_has_consistent_score()
+    audit_behavior_history_seeds_learning()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 4,
+        "cases": 5,
     })
 
 

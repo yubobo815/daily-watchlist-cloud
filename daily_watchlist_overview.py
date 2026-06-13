@@ -2062,10 +2062,66 @@ def build_daily_signal_outcomes(previous_rows: list[dict], current_rows: list[di
     return pd.DataFrame(outcomes)
 
 
+def build_backfilled_signal_outcomes(history_rows: list[dict]) -> pd.DataFrame:
+    """Convert generated behavior replay rows into settled learning samples.
+
+    Daily self-scoring starts once production snapshots exist. Behavior history
+    already contains prior-day reads, so seed the same outcome table from that
+    replay instead of making learning wait for new calendar days.
+    """
+    if not history_rows:
+        return pd.DataFrame()
+
+    by_ticker: dict[str, list[dict]] = {}
+    for row in history_rows:
+        ticker = str(row.get("ticker", "")).upper()
+        history_date = row.get("date") or row.get("history_date") or row.get("data_date")
+        if not ticker or not history_date:
+            continue
+        merged = dict(row)
+        merged["date"] = str(history_date)
+        merged["data_date"] = str(history_date)
+        merged["run_date"] = str(history_date)
+        by_ticker.setdefault(ticker, []).append(merged)
+
+    outcomes: list[dict] = []
+    for ticker_rows in by_ticker.values():
+        by_date = {str(item.get("date") or ""): item for item in sorted(ticker_rows, key=lambda item: str(item.get("date") or ""))}
+        ordered = [by_date[date] for date in sorted(date for date in by_date if date)]
+        for prior, current in zip(ordered, ordered[1:]):
+            prior_action = prior.get("action", "")
+            if prior_action not in SELF_SCORE_ACTIONS:
+                continue
+            evaluation_date = str(current.get("date") or "")
+            if not evaluation_date:
+                continue
+            outcomes.append(self_score_prior_signal(prior, current, evaluation_date))
+
+    if not outcomes:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(outcomes)
+    return frame.drop_duplicates(subset=["signal_run_date", "evaluation_run_date", "ticker"], keep="last")
+
+
+def combine_signal_outcomes(*frames: pd.DataFrame) -> pd.DataFrame:
+    usable = [frame for frame in frames if frame is not None and not frame.empty]
+    if not usable:
+        return pd.DataFrame()
+    combined = pd.concat(usable, ignore_index=True)
+    required = {"signal_run_date", "evaluation_run_date", "ticker"}
+    if required.issubset(combined.columns):
+        combined = combined.drop_duplicates(subset=list(required), keep="last")
+    return combined
+
+
 def attach_latest_outcomes(rows: list[dict], outcomes: pd.DataFrame) -> None:
     if outcomes.empty:
         return
-    outcome_by_ticker = {str(row["ticker"]).upper(): row for row in outcomes.to_dict(orient="records")}
+    sortable = outcomes.copy()
+    if "evaluation_run_date" in sortable.columns:
+        sortable = sortable.sort_values("evaluation_run_date")
+    outcome_by_ticker = {str(row["ticker"]).upper(): row for row in sortable.to_dict(orient="records")}
     for row in rows:
         outcome = outcome_by_ticker.get(str(row.get("ticker", "")).upper())
         if not outcome:
@@ -4657,7 +4713,8 @@ def main() -> None:
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
-    learning_history = fetch_signal_outcome_history(today)
+    backfilled_outcomes = build_backfilled_signal_outcomes(history_rows)
+    learning_history = combine_signal_outcomes(fetch_signal_outcome_history(today), backfilled_outcomes)
     learning_stats = build_learning_stats(learning_history)
     apply_learning_adjustments(rows, learning_stats)
     rows = sorted(
@@ -4671,7 +4728,8 @@ def main() -> None:
     )
     rows = apply_buy_tiers(rows)
     previous_rows = fetch_previous_snapshot_rows(today) or load_previous_local_report(today)
-    outcomes = build_daily_signal_outcomes(previous_rows, rows, today)
+    daily_outcomes = build_daily_signal_outcomes(previous_rows, rows, today)
+    outcomes = combine_signal_outcomes(backfilled_outcomes, daily_outcomes)
     attach_latest_outcomes(rows, outcomes)
     report = pd.DataFrame(rows)
     sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
