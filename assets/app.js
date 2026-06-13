@@ -19,12 +19,10 @@ const SETUP_LABELS = {
 
 const WATCHLIST_COLUMNS = [
   ["ticker", "Stock"],
-  ["action", "Decision"],
-  ["price_summary", "Price"],
-  ["trade_context", "Setup"],
+  ["action", "Action"],
+  ["trade_context", "Read"],
   ["risk_summary", "Risk"],
-  ["notes", "Why"],
-  ["data_provider", "Data"]
+  ["price_summary", "Price"]
 ];
 
 const SUMMARY_CARDS = [
@@ -1545,10 +1543,11 @@ function renderWatchlistCell(row, key) {
 
 function renderDecisionSummary(row) {
   const kind = actionKind(row.action);
+  const tier = payloadValue(row, "buy_tier") || (row.action === "BUY CANDIDATE" ? "BUY WATCH" : "");
   return `
     <span class="decision-stack">
       <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-      ${renderBuyTier(row)}
+      ${tier ? `<small>${escapeHtml(String(tier))}</small>` : ""}
     </span>
   `;
 }
@@ -1569,15 +1568,16 @@ function renderPriceSummary(row) {
 }
 
 function renderTradeContext(row) {
-  const chips = [
-    `<span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>`,
-    row.setup && row.setup !== "NONE" ? `<span class="badge pattern-pill pattern-${setupTone(row.setup)}">${escapeHtml(setupLabel(row.setup))}</span>` : "",
-    renderEntryQualityPill(row)
-  ].filter(Boolean).join("");
+  const reason = whyThisMatters(row).at(0) || behaviorDetail(row);
+  const details = [
+    strengthLabel(row),
+    row.setup && row.setup !== "NONE" ? setupLabel(row.setup) : "",
+    entryQualityLabel(row)
+  ].filter(Boolean).join(" · ");
   return `
-    <span class="context-stack">
-      <span class="chip-row">${chips}</span>
-      <small>${escapeHtml(payloadValue(row, "adaptive_mode") || payloadValue(row, "personality_type") || "Mixed behavior")}</small>
+    <span class="read-stack">
+      <strong>${escapeHtml(reason)}</strong>
+      ${details ? `<small>${escapeHtml(details)}</small>` : ""}
     </span>
   `;
 }
@@ -1598,7 +1598,7 @@ function riskSummaryLabel(row) {
   if (riskPermission === "BLOCK" || marketPermission === "BLOCK") return ["risk", "GATE BLOCK"];
   if (operator.includes("BULL_TRAP") || operator.includes("DISTRIBUTION") || operator.includes("SHORT")) return ["risk", shortOperatorPressure(operator)];
   if (operator.includes("ACCUMULATION") || operator.includes("ABSORPTION") || operator.includes("BEAR_TRAP") || operator.includes("SQUEEZE")) return ["constructive", shortOperatorPressure(operator)];
-  return ["strong", "CLEAR"];
+  return ["strong", "OK"];
 }
 
 function renderRiskSummary(row) {
@@ -1610,13 +1610,11 @@ function renderRiskSummary(row) {
     || payloadValue(row, "operator_plan")
     || ""
   ).trim();
+  const shouldShowPlan = tone !== "strong" && plan;
   return `
     <span class="risk-stack">
-      <span class="chip-row">
-        <span class="badge entry-pill entry-${tone}">${escapeHtml(label)}</span>
-        ${renderPermissionGates(row)}
-      </span>
-      ${plan ? `<small>${escapeHtml(plan)}</small>` : ""}
+      <span class="badge entry-pill entry-${tone}">${escapeHtml(label)}</span>
+      ${shouldShowPlan ? `<small>${escapeHtml(plan)}</small>` : ""}
     </span>
   `;
 }

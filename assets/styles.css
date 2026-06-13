@@ -1221,26 +1221,22 @@ th:first-child {
 }
 
 td:nth-child(2) {
-  min-width: 132px;
+  min-width: 116px;
 }
 
 td:nth-child(3) {
-  min-width: 142px;
-  text-align: right;
+  min-width: 380px;
+  max-width: 560px;
+  white-space: normal;
 }
 
 td:nth-child(4) {
-  min-width: 190px;
+  min-width: 150px;
 }
 
 td:nth-child(5) {
-  min-width: 210px;
-}
-
-td:nth-child(6) {
-  min-width: 340px;
-  max-width: 460px;
-  white-space: normal;
+  min-width: 142px;
+  text-align: right;
 }
 
 .ticker-cell {
@@ -1256,6 +1252,7 @@ td:nth-child(6) {
 .ticker-copy,
 .decision-stack,
 .price-stack,
+.read-stack,
 .context-stack,
 .risk-stack,
 .reason-stack {
@@ -1265,7 +1262,9 @@ td:nth-child(6) {
 }
 
 .ticker-name,
+.decision-stack small,
 .price-stack small,
+.read-stack small,
 .context-stack small,
 .risk-stack small,
 .reason-stack small {
@@ -1303,6 +1302,17 @@ td:nth-child(6) {
 .price-stack strong {
   color: var(--ink);
   font-weight: 720;
+}
+
+.read-stack strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 680;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .reason-stack > span {
@@ -1349,28 +1359,36 @@ td:nth-child(6) {
   font-variant-numeric: tabular-nums;
 }
 
+#watchlist-body tr {
+  background: rgba(16, 21, 29, 0.58);
+}
+
+#watchlist-body tr:hover {
+  background: rgba(24, 32, 44, 0.76);
+}
+
 .row-buy {
-  background: var(--buy);
+  box-shadow: inset 4px 0 0 var(--tone-buy);
 }
 
 .row-continue {
-  background: var(--continue);
+  box-shadow: inset 4px 0 0 var(--tone-continue);
 }
 
 .row-setup {
-  background: var(--setup);
+  box-shadow: inset 4px 0 0 var(--tone-setup);
 }
 
 .row-watch {
-  background: var(--watch);
+  box-shadow: inset 4px 0 0 var(--tone-watch);
 }
 
 .row-exit {
-  background: var(--exit);
+  box-shadow: inset 4px 0 0 var(--tone-exit);
 }
 
 .row-avoid {
-  background: var(--avoid);
+  box-shadow: inset 4px 0 0 var(--tone-avoid);
   color: #d1d9e6;
 }
 
