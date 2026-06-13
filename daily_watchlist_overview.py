@@ -57,6 +57,7 @@ POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
 PROFIT_PROTECT_LOOKBACK_BARS = int(os.getenv("PROFIT_PROTECT_LOOKBACK_BARS", "5"))
 PROFIT_PROTECT_TRIGGER_GAIN_PCT = float(os.getenv("PROFIT_PROTECT_TRIGGER_GAIN_PCT", "7"))
 PROFIT_PROTECT_GIVEBACK_PCT = float(os.getenv("PROFIT_PROTECT_GIVEBACK_PCT", "4"))
+PROFIT_PROTECT_SUPPLY_SCORE = float(os.getenv("PROFIT_PROTECT_SUPPLY_SCORE", "45"))
 VOLATILE_TREND_MAX_SUPPLY_SCORE = float(os.getenv("VOLATILE_TREND_MAX_SUPPLY_SCORE", "45"))
 DATA_PROVIDER_PRIORITY = [
     provider.strip().lower()
@@ -1602,6 +1603,14 @@ def set_context_overlay(row: dict, label: str, adjustment: float, plan: str) -> 
     append_context_note(row, plan)
 
 
+def supply_risk_score(row: dict) -> float:
+    return max(
+        row_float(row, "distribution_score"),
+        row_float(row, "bull_trap_score"),
+        row_float(row, "short_pressure_proxy"),
+    )
+
+
 def post_exit_reclaim_is_strong(row: dict, prior_exit: dict) -> bool:
     close = row_float(row, "close")
     prior_close = row_float(prior_exit, "close")
@@ -1610,7 +1619,7 @@ def post_exit_reclaim_is_strong(row: dict, prior_exit: dict) -> bool:
     next_day = str(row.get("next_day_bias") or "").upper()
     mode = str(row.get("adaptive_mode") or "").upper()
     personality = str(row.get("personality_type") or "").upper()
-    supply_score = max(row_float(row, "distribution_score"), row_float(row, "bull_trap_score"))
+    supply_score = supply_risk_score(row)
     standard_reclaim = (
         reclaim_pct >= POST_EXIT_RECLAIM_MIN_PCT
         and next_day == "BULLISH CONFIRM"
@@ -1631,27 +1640,26 @@ def post_exit_reclaim_is_strong(row: dict, prior_exit: dict) -> bool:
     return standard_reclaim or trend_reclaim
 
 
-def apply_post_exit_cooldown(row: dict, prior_rows: list[dict]) -> bool:
+def post_exit_cooldown_candidate(row: dict, prior_rows: list[dict]) -> Optional[dict]:
     if row.get("action") not in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
-        return False
+        return None
     recent = prior_rows[-POST_EXIT_COOLDOWN_BARS:] if POST_EXIT_COOLDOWN_BARS > 0 else []
     prior_exit = next((item for item in reversed(recent) if item.get("action") == "EXIT PRESSURE"), None)
     if not prior_exit or post_exit_reclaim_is_strong(row, prior_exit):
-        return False
+        return None
 
-    row["action"] = "SETUP FORMING"
-    row["signal_stage"] = "SETUP"
-    row["next_day_bias"] = "EXECUTION BLOCKED"
-    row["next_day_plan"] = "Post-exit cooldown: require a stronger reclaim before upgrading back to BUY."
-    row["execution_block"] = "YES"
-    append_unique_reason(row, "post_exit_cooldown")
-    set_context_overlay(
-        row,
-        "POST-EXIT COOLDOWN",
-        -35.0,
-        "EXIT pressure was too recent; downgrade any ordinary rebound to SETUP until buyers prove control.",
-    )
-    return True
+    return {
+        "priority": 100,
+        "label": "POST-EXIT COOLDOWN",
+        "adjustment": -35.0,
+        "transition_label": "Post-Exit Cooldown",
+        "next_day_bias": "EXECUTION BLOCKED",
+        "next_day_plan": "Post-exit cooldown: require a stronger reclaim before upgrading back to BUY.",
+        "force_action": "SETUP FORMING",
+        "execution_block": "YES",
+        "reason_code": "post_exit_cooldown",
+        "plan": "EXIT pressure was too recent; downgrade any ordinary rebound to SETUP until buyers prove control.",
+    }
 
 
 def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[dict]:
@@ -1685,70 +1693,119 @@ def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[
     return best_context
 
 
-def apply_profit_protection(row: dict, history_rows: list[dict], index: int) -> bool:
+def profit_context_candidate(row: dict, history_rows: list[dict], index: int) -> Optional[dict]:
     context = recent_buy_profit_context(history_rows, index)
     if not context or float(context["peak_gain_pct"]) < PROFIT_PROTECT_TRIGGER_GAIN_PCT:
-        return False
+        return None
 
     action = row.get("action")
     giveback_pct = float(context["giveback_pct"])
-    should_protect = (
-        action in {"WATCH TREND", "EXIT PRESSURE"}
-        or row.get("extension_state") == "EXTENDED"
-        or giveback_pct <= -PROFIT_PROTECT_GIVEBACK_PCT
+    supply_score = supply_risk_score(row)
+    hard_protect = (
+        giveback_pct <= -PROFIT_PROTECT_GIVEBACK_PCT
+        or supply_score >= PROFIT_PROTECT_SUPPLY_SCORE
+        or (action == "EXIT PRESSURE" and supply_score >= 35.0)
+        or (row.get("extension_state") == "EXTENDED" and supply_score >= 25.0)
     )
-    if not should_protect:
-        return False
 
-    row["next_day_bias"] = "DEFENSIVE / EXIT RISK"
-    row["next_day_plan"] = "Profit-protection mode: a recent BUY already worked; do not let a trend score hide giveback risk."
-    if action in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
-        row["action"] = "SETUP FORMING"
-        row["signal_stage"] = "SETUP"
-        row["execution_block"] = "YES"
-    append_unique_reason(row, "profit_protect")
-    set_context_overlay(
-        row,
-        "PROFIT PROTECT",
-        -24.0,
-        f"Recent BUY from {context['buy_date']} reached +{float(context['peak_gain_pct']):.1f}%; protect gains before adding exposure.",
-    )
-    return True
+    if hard_protect:
+        return {
+            "priority": 80,
+            "label": "PROFIT PROTECT",
+            "adjustment": -24.0,
+            "transition_label": "Profit Protect",
+            "next_day_bias": "DEFENSIVE / EXIT RISK",
+            "next_day_plan": "Profit-protection mode: recent profit is now facing giveback or supply pressure.",
+            "force_action": "SETUP FORMING" if action in {"BUY CANDIDATE", "STRONG CONTINUATION"} else None,
+            "execution_block": "YES" if action in {"BUY CANDIDATE", "STRONG CONTINUATION"} else None,
+            "reason_code": "profit_protect",
+            "plan": (
+                f"Recent BUY from {context['buy_date']} reached +{float(context['peak_gain_pct']):.1f}% "
+                f"and is now showing {giveback_pct:.1f}% giveback or supply risk; protect gains before adding exposure."
+            ),
+        }
+
+    if action not in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING", "WATCH TREND"}:
+        return None
+
+    return {
+        "priority": 10,
+        "label": "PROFIT ACTIVE",
+        "adjustment": 0.0,
+        "transition_label": None,
+        "reason_code": "profit_active",
+        "plan": f"Recent BUY from {context['buy_date']} reached +{float(context['peak_gain_pct']):.1f}%; avoid fresh chase, but no hard exit pressure yet.",
+    }
 
 
-def apply_volatile_trend_hold(row: dict) -> bool:
+def volatile_trend_hold_candidate(row: dict) -> Optional[dict]:
     if row.get("action") != "EXIT PRESSURE":
-        return False
-    if row.get("personality_type") != "HIGH_BETA":
-        return False
+        return None
+    mode = str(row.get("adaptive_mode") or "").upper()
+    personality = str(row.get("personality_type") or "").upper()
+    strong_trend_personality = (
+        personality == "HIGH_BETA"
+        or (
+            mode in {"POWER TREND", "STEADY TREND", "HIGH VOLATILITY"}
+            and row_float(row, "demand_control_score") >= 45.0
+        )
+    )
+    if not strong_trend_personality:
+        return None
     if row.get("extension_state") == "EXTENDED":
-        return False
-    hard_supply = max(
-        row_float(row, "distribution_score"),
-        row_float(row, "bull_trap_score"),
-        row_float(row, "short_pressure_proxy"),
-    )
+        return None
+    hard_supply = supply_risk_score(row)
     if hard_supply >= VOLATILE_TREND_MAX_SUPPLY_SCORE:
-        return False
+        return None
     if str(row.get("operator_state") or "").upper() in {"BULL_TRAP", "DISTRIBUTION"}:
-        return False
-    if str(row.get("adaptive_mode") or "").upper() not in {"POWER TREND", "STEADY TREND", "HIGH VOLATILITY"}:
-        return False
+        return None
+    if mode not in {"POWER TREND", "STEADY TREND", "HIGH VOLATILITY"}:
+        return None
     if row_float(row, "demand_control_score") < 45.0 and row_float(row, "absorption_score") < 45.0:
-        return False
+        return None
 
-    row["action"] = "WATCH TREND"
-    row["signal_stage"] = "WATCH"
-    row["next_day_bias"] = "WATCH TREND"
-    row["next_day_plan"] = "High-beta trend hold: volatility is elevated, but supply evidence is not strong enough for EXIT."
-    append_unique_reason(row, "volatile_trend_hold")
-    set_context_overlay(
-        row,
-        "VOLATILE TREND HOLD",
-        14.0,
-        "High-beta trend personality: treat ordinary volatility as WATCH unless distribution or bull-trap evidence is clear.",
-    )
-    return True
+    return {
+        "priority": 60,
+        "label": "VOLATILE TREND HOLD",
+        "adjustment": 14.0,
+        "transition_label": "Volatile Trend Hold",
+        "transition_score_override": 0.0,
+        "next_day_bias": "WATCH TREND",
+        "next_day_plan": "Trend hold: volatility is elevated, but supply evidence is not strong enough for EXIT.",
+        "force_action": "WATCH TREND",
+        "score_floor": 50.0,
+        "reason_code": "volatile_trend_hold",
+        "plan": "Strong trend behavior: treat ordinary volatility as WATCH unless distribution or bull-trap evidence is clear.",
+    }
+
+
+def resolve_context_overlay(row: dict, history_rows: list[dict], index: int, prior_rows: list[dict]) -> tuple[Optional[dict], float, Optional[str]]:
+    candidates = [
+        post_exit_cooldown_candidate(row, prior_rows),
+        profit_context_candidate(row, history_rows, index),
+        volatile_trend_hold_candidate(row),
+    ]
+    usable = [candidate for candidate in candidates if candidate]
+    if not usable:
+        return None, 0.0, None
+
+    selected = max(usable, key=lambda item: int(item.get("priority", 0)))
+    if selected.get("force_action"):
+        row["action"] = str(selected["force_action"])
+        row["signal_stage"] = signal_stage(row["action"])
+    if selected.get("score_floor") is not None:
+        row["score"] = max(row_float(row, "score"), float(selected["score_floor"]))
+    if selected.get("next_day_bias"):
+        row["next_day_bias"] = selected["next_day_bias"]
+    if selected.get("next_day_plan"):
+        row["next_day_plan"] = selected["next_day_plan"]
+    if selected.get("execution_block"):
+        row["execution_block"] = selected["execution_block"]
+    reason_code = selected.get("reason_code")
+    if reason_code:
+        append_unique_reason(row, str(reason_code))
+    set_context_overlay(row, str(selected["label"]), float(selected.get("adjustment", 0.0)), str(selected["plan"]))
+    return selected, float(selected.get("adjustment", 0.0)), selected.get("transition_label")
 
 
 def apply_buy_tiers(rows: list[dict]) -> list[dict]:
@@ -3414,15 +3471,11 @@ def enrich_signal_transitions(history_rows: list[dict]) -> list[dict]:
                 transition_label = "Changed"
                 transition_score = 5.0
 
-        if apply_post_exit_cooldown(row, enriched):
-            transition_label = "Post-Exit Cooldown"
-            context_adjustment += row_float(row, "contextual_score_adjustment")
-        if apply_profit_protection(row, history_rows, index):
-            transition_label = "Profit Protect"
-            context_adjustment += row_float(row, "contextual_score_adjustment")
-        if apply_volatile_trend_hold(row):
-            transition_label = "Volatile Trend Hold"
-            context_adjustment += row_float(row, "contextual_score_adjustment")
+        selected_overlay, context_adjustment, overlay_transition = resolve_context_overlay(row, history_rows, index, enriched)
+        if overlay_transition:
+            transition_label = overlay_transition
+        if selected_overlay and selected_overlay.get("transition_score_override") is not None:
+            transition_score = float(selected_overlay["transition_score_override"])
         action = row.get("action", "")
 
         streak_start = index
@@ -3644,6 +3697,8 @@ def apply_quality_overlays(row: dict, market_context: dict) -> dict:
         signal_quality = "COOLDOWN"
     elif overlay == "PROFIT PROTECT":
         signal_quality = "PROFIT PROTECT"
+    elif overlay == "PROFIT ACTIVE":
+        signal_quality = "PROFIT ACTIVE"
     elif overlay == "VOLATILE TREND HOLD":
         signal_quality = "VOLATILE HOLD"
     elif row.get("extension_state") == "EXTENDED":

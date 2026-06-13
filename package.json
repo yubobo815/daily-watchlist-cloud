@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "audit:watchlist": "node scripts/audit_watchlist_app.js",
+    "audit:watchlist": "node scripts/audit_watchlist_app.js && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_context_overlays.py",
     "vercel-build": "echo Static watchlist app ready"
   }
 }
