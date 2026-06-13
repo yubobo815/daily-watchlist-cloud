@@ -155,6 +155,9 @@ function auditSupabaseFallback() {
       feedback_return_pct: 4.2,
       feedback_max_drawdown_pct: -1.1,
       feedback_stop_hit: "NO",
+      learning_sample_count: 12,
+      learning_scope: "action/setup family",
+      learning_key_used: "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY",
       data_provider: "polygon",
       data_provider_status: "LIVE_OK",
       data_provider_latency_ms: 180,
@@ -169,6 +172,8 @@ function auditSupabaseFallback() {
   assert(gated.payload.buy_tier === "A+ BUY", "execution-gated BUY row must keep execution tier");
   assert(gated.payload.freshness_block === "NO", "execution-gated BUY row must keep freshness gate state");
   assert(gated.payload.feedback_quality === "WORKING", "execution-gated BUY row must keep feedback state");
+  assert(gated.payload.learning_scope === "action/setup family", "execution-gated row must keep learning scope");
+  assert(gated.payload.learning_key_used === "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY", "execution-gated row must keep learning key");
   assert(gated.payload.data_provider === "polygon", "execution-gated BUY row must keep data provider");
   assert(gated.payload.data_provider_status === "LIVE_OK", "execution-gated BUY row must keep data provider status");
 

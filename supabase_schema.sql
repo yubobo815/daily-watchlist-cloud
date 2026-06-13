@@ -55,6 +55,8 @@ create table if not exists public.watchlist_snapshots (
   learning_trap_avoided_rate numeric,
   learning_avg_score numeric,
   learning_adjustment numeric,
+  learning_scope text,
+  learning_key_used text,
   learning_plan text,
   data_provider text,
   data_provider_status text,
@@ -136,6 +138,8 @@ create table if not exists public.watchlist_behavior_history (
   learning_trap_avoided_rate numeric,
   learning_avg_score numeric,
   learning_adjustment numeric,
+  learning_scope text,
+  learning_key_used text,
   learning_plan text,
   data_provider text,
   data_provider_status text,
@@ -275,6 +279,8 @@ alter table public.watchlist_snapshots add column if not exists learning_failed_
 alter table public.watchlist_snapshots add column if not exists learning_trap_avoided_rate numeric;
 alter table public.watchlist_snapshots add column if not exists learning_avg_score numeric;
 alter table public.watchlist_snapshots add column if not exists learning_adjustment numeric;
+alter table public.watchlist_snapshots add column if not exists learning_scope text;
+alter table public.watchlist_snapshots add column if not exists learning_key_used text;
 alter table public.watchlist_snapshots add column if not exists learning_plan text;
 alter table public.watchlist_snapshots add column if not exists contextual_overlay text;
 alter table public.watchlist_snapshots add column if not exists contextual_score_adjustment numeric;
@@ -340,6 +346,8 @@ alter table public.watchlist_behavior_history add column if not exists learning_
 alter table public.watchlist_behavior_history add column if not exists learning_trap_avoided_rate numeric;
 alter table public.watchlist_behavior_history add column if not exists learning_avg_score numeric;
 alter table public.watchlist_behavior_history add column if not exists learning_adjustment numeric;
+alter table public.watchlist_behavior_history add column if not exists learning_scope text;
+alter table public.watchlist_behavior_history add column if not exists learning_key_used text;
 alter table public.watchlist_behavior_history add column if not exists learning_plan text;
 alter table public.watchlist_behavior_history add column if not exists contextual_overlay text;
 alter table public.watchlist_behavior_history add column if not exists contextual_score_adjustment numeric;

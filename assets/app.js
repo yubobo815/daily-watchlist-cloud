@@ -1220,6 +1220,7 @@ function renderScoreBreakdown(row) {
   const lastOutcomeReturn = Number(payloadValue(row, "last_outcome_return_pct"));
   const learningSamples = Number(payloadValue(row, "learning_sample_count"));
   const learningAdjustment = Number(payloadValue(row, "learning_adjustment"));
+  const learningScope = payloadValue(row, "learning_scope");
   const dataProvider = payloadValue(row, "data_provider") || "unknown";
   const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
   const items = [
@@ -1227,7 +1228,7 @@ function renderScoreBreakdown(row) {
     ["Context", `${contextualOverlay}${contextualOverlayRaw && Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
-    ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}`],
+    ["Learning", `${Number.isFinite(learningSamples) ? `${fmtNumber(learningSamples, 0)} samples` : "pending"}${Number.isFinite(learningAdjustment) ? ` / ${fmtSignedNumber(learningAdjustment, 1)} pts` : ""}${learningScope ? ` / ${learningScope}` : ""}`],
     ["Data Source", `${dataProvider} / ${dataProviderStatus}`],
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
