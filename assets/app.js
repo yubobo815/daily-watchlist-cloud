@@ -2141,6 +2141,7 @@ async function initWatchlist() {
   };
   const updateSearch = (value, shouldScroll = true) => {
     state.query = value;
+    if (state.query.trim()) state.filter = "all";
     syncSearchClear();
     renderWatchlist();
     if (shouldScroll && state.query.trim()) scrollToWatchlistResults();
