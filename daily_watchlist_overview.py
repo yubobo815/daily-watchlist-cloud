@@ -47,7 +47,15 @@ MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
 DEFAULT_LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "30"))
-SELF_SCORE_ACTIONS = {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING", "WATCH TREND", "EXIT PRESSURE"}
+SELF_SCORE_ACTIONS = {
+    "BUY CANDIDATE",
+    "STRONG CONTINUATION",
+    "SETUP FORMING",
+    "WATCH TREND",
+    "EXIT PRESSURE",
+    "WAIT",
+    "WAIT / AVOID",
+}
 SELF_SCORE_WORKING_RETURN_PCT = 2.0
 SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
@@ -2044,6 +2052,26 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
                 outcome = "STALE"
                 score = 0.0
                 reason = "EXIT pressure remains unresolved."
+        elif prior_action in {"WAIT", "WAIT / AVOID"}:
+            too_defensive = current_action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"} and return_pct >= 2.5
+            avoided_weakness = return_pct <= (-1.0 if prior_action == "WAIT" else 0.5) or current_risk
+            stayed_defensive = current_action in {"WAIT", "WAIT / AVOID", "EXIT PRESSURE"}
+            if avoided_weakness:
+                outcome = "TRAP_AVOIDED"
+                score = 0.7
+                reason = "WAIT avoided weak follow-through or risk pressure."
+            elif too_defensive:
+                outcome = "FAILED"
+                score = -0.5
+                reason = "WAIT was too defensive before a constructive upgrade."
+            elif stayed_defensive:
+                outcome = "STALE"
+                score = 0.0
+                reason = "WAIT stayed defensive without enough price evidence."
+            else:
+                outcome = "STALE"
+                score = 0.0
+                reason = "WAIT remains unresolved."
         else:
             outcome = "PENDING"
             score = 0.0
