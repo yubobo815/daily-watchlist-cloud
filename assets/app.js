@@ -410,6 +410,22 @@ function normaliseTicker(value) {
   return (value || "ORCL").trim().toUpperCase().replace("BRK.B", "BRK-B");
 }
 
+function normaliseSearchTicker(value) {
+  return String(value || "").trim().toUpperCase().replace("BRK.B", "BRK-B");
+}
+
+function tickerSearchAliases(row) {
+  const ticker = normaliseSearchTicker(row?.ticker);
+  if (!ticker) return [];
+  return [...new Set([ticker, ticker.replace("-", ".")].filter(Boolean))];
+}
+
+function exactTickerSearchNeedle(query, rows) {
+  const ticker = normaliseSearchTicker(query);
+  if (!ticker || !/^[A-Z0-9.-]{1,8}$/.test(ticker)) return "";
+  return rows.some((row) => tickerSearchAliases(row).includes(ticker)) ? ticker : "";
+}
+
 function actionKind(action) {
   return {
     "BUY CANDIDATE": "buy",
@@ -1721,6 +1737,12 @@ function searchableRowText(row) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
+function rowMatchesSearch(row, query, exactTickerNeedle = "") {
+  if (exactTickerNeedle) return tickerSearchAliases(row).includes(exactTickerNeedle);
+  const needle = String(query || "").trim().toLowerCase();
+  return !needle || searchableRowText(row).includes(needle);
+}
+
 function renderMobileWatchlistSummary(row) {
   const kind = actionKind(row.action);
   const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
@@ -2090,12 +2112,13 @@ function renderWatchlist() {
 
   const needle = state.query.trim().toLowerCase();
   const searchActive = Boolean(needle);
+  const exactTickerNeedle = exactTickerSearchNeedle(state.query, state.rows);
   document.body.classList.toggle("search-active", searchActive);
   const [sortKey, direction] = state.sort.split("-");
   const multiplier = direction === "asc" ? 1 : -1;
   state.visibleRows = state.rows
     .filter((row) => state.filter === "all" || actionKind(row.action) === state.filter)
-    .filter((row) => !needle || searchableRowText(row).includes(needle))
+    .filter((row) => rowMatchesSearch(row, state.query, exactTickerNeedle))
     .sort((a, b) => {
       if (sortKey === "ticker") return a.ticker.localeCompare(b.ticker) * multiplier;
       if (sortKey === "score") return (convictionScore(a) - convictionScore(b)) * multiplier;

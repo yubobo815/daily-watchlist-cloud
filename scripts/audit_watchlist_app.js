@@ -1,6 +1,7 @@
 const { staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
 const { rowDto, runDto } = require("../api/_supabase");
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
+const fs = require("fs");
 
 const REQUIRED_GATES = [
   "market_permission",
@@ -32,6 +33,43 @@ function hasMissingGate(row) {
 
 function adjustedScore(row) {
   return Number(row.adjusted_score ?? row.payload?.adjusted_score ?? row.score ?? 0);
+}
+
+function normaliseSearchTicker(value) {
+  return String(value || "").trim().toUpperCase().replace("BRK.B", "BRK-B");
+}
+
+function tickerSearchAliases(row) {
+  const ticker = normaliseSearchTicker(row?.ticker);
+  if (!ticker) return [];
+  return [...new Set([ticker, ticker.replace("-", ".")].filter(Boolean))];
+}
+
+function exactTickerSearchNeedle(query, rows) {
+  const ticker = normaliseSearchTicker(query);
+  if (!ticker || !/^[A-Z0-9.-]{1,8}$/.test(ticker)) return "";
+  return rows.some((row) => tickerSearchAliases(row).includes(ticker)) ? ticker : "";
+}
+
+function auditSearchBehavior() {
+  const source = fs.readFileSync("assets/app.js", "utf8");
+  assert(source.includes("function exactTickerSearchNeedle"), "watchlist search must include exact ticker matching");
+  assert(source.includes("rowMatchesSearch(row, state.query, exactTickerNeedle)"), "watchlist render must use ticker-aware search matching");
+
+  const rows = staticLatestPayload().rows || [];
+  const muNeedle = exactTickerSearchNeedle("MU", rows);
+  const muMatches = rows.filter((row) => tickerSearchAliases(row).includes(muNeedle)).map((row) => row.ticker);
+  const micronMatches = rows.filter((row) => String(row.name || "").toLowerCase().includes("micron")).map((row) => row.ticker);
+
+  assert(muNeedle === "MU", "MU query must resolve to exact ticker search");
+  assert(muMatches.length === 1 && muMatches[0] === "MU", `MU exact search must only match MU, got ${muMatches.join(",")}`);
+  assert(micronMatches.includes("MU"), "company-name search for Micron must still find MU");
+
+  return {
+    muNeedle,
+    muMatches,
+    micronMatches,
+  };
 }
 
 function auditStaticFallback() {
@@ -307,6 +345,7 @@ const result = {
   staticFallback: auditStaticFallback(),
   staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
   supabaseFallback: auditSupabaseFallback(),
+  searchBehavior: auditSearchBehavior(),
   runHealthProviders: auditRunHealthProviderPayload(),
   tickerDetailMerge: auditTickerDetailMerge(),
 };
