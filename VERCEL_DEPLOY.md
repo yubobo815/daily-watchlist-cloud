@@ -2,6 +2,8 @@
 
 This repo contains a static Vercel app. It intentionally has no Next.js dependency so Vercel can deploy it quickly without framework security/version gates.
 
+This repository is the production source of truth for the app, API routes, scanner, Supabase schema, and refresh workflow. See `SOURCE_OF_TRUTH.md`.
+
 ## Data flow
 
 - GitHub Actions still refreshes the scanner each day around 8:00am Australia/Melbourne.

@@ -2,6 +2,8 @@
 
 This project is ready to publish the daily watchlist report with GitHub Actions and GitHub Pages.
 
+This repository is the production source of truth for scanner logic, app UI, Supabase schema, and workflow automation. See `SOURCE_OF_TRUTH.md`.
+
 ## What it does
 
 - Runs `python daily_watchlist_overview.py --refresh --skip-profiles`.
