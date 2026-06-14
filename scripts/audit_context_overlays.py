@@ -205,6 +205,32 @@ def audit_learning_lookback_stays_on_30_day_window():
     assert_true(len(learning_outcomes) == 29, "30 stored days should create 29 adjacent learning samples")
 
 
+def audit_learning_key_uses_behavior_not_ticker_identity():
+    current = row(
+        "2026-06-03",
+        "BUY CANDIDATE",
+        100,
+        setup="MOMENTUM BUY",
+        ticker="NVDA",
+        personality_type="RANGE_BOUND",
+        operator_state="MARKUP / DEMAND CONTROL",
+        anti_signal_level="NONE",
+    )
+    key = dwo.learning_key_for(current)
+    segments = key.split("|")
+    assert_true("NVDA" not in segments, "learning key must not include ticker identity")
+    assert_true("RANGE_BOUND" in segments, "learning key should learn personality behavior pattern")
+    assert_true(key == "BUY CANDIDATE|MOMENTUM BUY|RANGE_BOUND|MARKUP / DEMAND CONTROL|NONE", "learning key shape must stay behavior-only")
+
+    outcomes = dwo.build_backfilled_signal_outcomes([
+        {**current, "date": "2026-06-03"},
+        {**current, "date": "2026-06-04", "close": 103, "action": "WATCH TREND"},
+    ])
+    outcome_key = str(outcomes.iloc[0]["learning_key"])
+    assert_true("NVDA" not in outcome_key.split("|"), "backfilled learning key must not include ticker identity")
+    assert_true("RANGE_BOUND" in outcome_key.split("|"), "backfilled learning key must include personality behavior")
+
+
 def audit_action_display_labels_match_product_ui():
     assert_true(dwo.ACTION_DISPLAY_LABELS["BUY CANDIDATE"] == "BUY", "BUY label must match product UI")
     assert_true(dwo.ACTION_DISPLAY_LABELS["STRONG CONTINUATION"] == "TRENDING", "continuation label must match product UI")
@@ -273,12 +299,13 @@ def main():
     audit_behavior_history_seeds_learning()
     audit_defensive_learning_shows_samples_without_promotion()
     audit_learning_lookback_stays_on_30_day_window()
+    audit_learning_key_uses_behavior_not_ticker_identity()
     audit_action_display_labels_match_product_ui()
     audit_learning_can_upgrade_building_execution_tier()
     audit_learning_upgrade_respects_anti_signals()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 13,
+        "cases": 14,
     })
 
 

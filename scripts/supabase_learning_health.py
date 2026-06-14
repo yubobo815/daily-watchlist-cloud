@@ -178,6 +178,12 @@ def main() -> None:
             learning_scope_ready += 1
 
     outcome_counts = Counter(str(row.get("outcome_label") or "UNKNOWN") for row in outcome_rows)
+    ticker_leaking_keys = []
+    for row in outcome_rows:
+        ticker = str(row.get("ticker") or "").upper().strip()
+        key = str(row.get("learning_key") or "").upper()
+        if ticker and ticker in [segment.strip() for segment in key.split("|")]:
+            ticker_leaking_keys.append({"ticker": ticker, "learning_key": row.get("learning_key")})
 
     metrics = {
         "run_date": run_date,
@@ -192,6 +198,7 @@ def main() -> None:
         "tickers_with_30_plus_days": tickers_with_30,
         "signal_outcome_rows_for_run": len(outcome_rows),
         "signal_outcome_labels": dict(outcome_counts),
+        "ticker_leaking_learning_keys": len(ticker_leaking_keys),
         "snapshots_with_learning_samples": learning_ready,
         "snapshots_with_learning_scope": learning_scope_ready,
     }
@@ -208,6 +215,10 @@ def main() -> None:
     if len(outcome_rows) < 500:
         emit_metrics(metrics)
         fail("Signal outcome rows are too low; ML/self-learning has insufficient samples.")
+    if ticker_leaking_keys:
+        metrics["ticker_leaking_learning_key_examples"] = ticker_leaking_keys[:5]
+        emit_metrics(metrics)
+        fail("Learning keys must describe behavior patterns, not ticker identity.")
     if learning_ready < max(50, int(len(snapshot_rows) * 0.35)):
         emit_metrics(metrics)
         fail("Too few latest snapshots have learning samples attached.")

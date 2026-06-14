@@ -2192,6 +2192,7 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
         [
             str(prior_action or "UNKNOWN"),
             str(prior.get("setup") or "NONE"),
+            str(prior.get("personality_type") or "UNKNOWN"),
             str(prior.get("operator_state") or "NEUTRAL"),
             str(prior.get("anti_signal_level") or "NONE"),
         ]
@@ -2315,6 +2316,7 @@ def learning_key_for(row: dict) -> str:
         [
             str(row.get("action") or "UNKNOWN"),
             str(row.get("setup") or "NONE"),
+            str(row.get("personality_type") or "UNKNOWN"),
             str(row.get("operator_state") or "NEUTRAL"),
             str(row.get("anti_signal_level") or "NONE"),
         ]
