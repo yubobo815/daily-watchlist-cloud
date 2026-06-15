@@ -1613,8 +1613,16 @@ function renderWatchlistCell(row, key) {
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (key === "risk_pct_to_stop") return escapeHtml(fmtNumber(payloadValue(row, "risk_pct_to_stop"), 1));
   if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
+  if (key === "entry_est") return escapeHtml(formatEntryZone(row));
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
+}
+
+function formatEntryZone(row) {
+  const low = payloadNumeric(row, "entry_zone_low");
+  const high = payloadNumeric(row, "entry_zone_high") || numericValue(row, "entry_est");
+  if (low && high && low < high) return `${fmtNumber(low, 2)}-${fmtNumber(high, 2)}`;
+  return fmtNumber(high || row?.entry_est, 2);
 }
 
 function renderDecisionSummary(row) {
@@ -1629,10 +1637,10 @@ function renderDecisionSummary(row) {
 }
 
 function renderPriceSummary(row) {
-  const zone = numericValue(row, "entry_est");
+  const zone = formatEntryZone(row);
   const stop = numericValue(row, "stop_est");
   const secondary = [
-    zone ? `Zone ${fmtNumber(zone, 2)}` : "",
+    zone ? `Zone ${zone}` : "",
     stop ? `Stop ${fmtNumber(stop, 2)}` : ""
   ].filter(Boolean).join(" · ");
   return `
@@ -2301,7 +2309,7 @@ function renderLatestHistoryPanel(latest) {
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
         <div><span>Trend Quality</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
-        <div><span>Ref Zone</span><strong>${fmtNumber(latest.entry_est, 2)}</strong></div>
+        <div><span>Ref Zone</span><strong>${escapeHtml(formatEntryZone(latest))}</strong></div>
       </div>
       ${renderScoreBreakdown(latest)}
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}

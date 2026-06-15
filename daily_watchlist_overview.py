@@ -2511,6 +2511,37 @@ def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_
     return entry, ""
 
 
+def entry_zone_width_pct(setup: str, personality_type: str, atr_pct: float) -> float:
+    personality_floor = {
+        "ETF": 0.55,
+        "COMPOUNDER": 0.75,
+        "BALANCED": 0.95,
+        "RANGE_BOUND": 1.05,
+        "HIGH_BETA": 1.35,
+    }.get(str(personality_type or "").upper(), 0.95)
+    setup_mult = {
+        "BREAKOUT BUY": 0.90,
+        "MOMENTUM BUY": 0.95,
+        "PULLBACK BUY": 1.12,
+        "EARLY PULLBACK BUY": 1.05,
+        "REVERSAL BUY": 1.18,
+    }.get(setup, 1.0)
+    atr_component = max(0.0, float(atr_pct or 0.0)) * 0.22
+    width = max(personality_floor, atr_component) * setup_mult
+    cap = 3.20 if str(personality_type or "").upper() == "HIGH_BETA" else 2.45
+    return clamp_float(width, 0.50, cap)
+
+
+def minimum_stop_pct(personality_type: str) -> float:
+    return {
+        "ETF": 0.75,
+        "COMPOUNDER": 0.95,
+        "BALANCED": 1.15,
+        "RANGE_BOUND": 1.20,
+        "HIGH_BETA": 1.60,
+    }.get(str(personality_type or "").upper(), 1.10)
+
+
 def latest_pivot(values: pd.Series, left: int = 3, right: int = 3, kind: str = "high") -> float:
     if len(values) < left + right + 1:
         return np.nan
@@ -3115,13 +3146,26 @@ def classify_and_score(
         entry_est = np.nan
         entry_note = ""
 
-    trade_entry = close
+    if setup_forming and not math.isnan(entry_est) and float(entry_est) > 0:
+        zone_width_pct = entry_zone_width_pct(setup, str(personality_profile["personality_type"]), float(row.atr_pct))
+        entry_zone_high = float(entry_est)
+        entry_zone_low = entry_zone_high * (1 - zone_width_pct / 100)
+    else:
+        zone_width_pct = np.nan
+        entry_zone_high = np.nan
+        entry_zone_low = np.nan
+
+    trade_entry = entry_zone_high if setup_forming and not math.isnan(entry_zone_high) else close
     stop_pct = 6.0 if setup == "BREAKOUT BUY" else 4.0 if setup == "MOMENTUM BUY" else 7.0 if setup == "PULLBACK BUY" else 6.0 if setup == "EARLY PULLBACK BUY" else 5.0
     atr_stop_mult = 4.0 if setup in {"BREAKOUT BUY", "MOMENTUM BUY"} else 3.5 if setup == "PULLBACK BUY" else 3.25 if setup == "EARLY PULLBACK BUY" else 3.0
-    percent_stop = max(close * (1 - stop_pct / 100), close * 0.93)
-    atr_stop = close - atr_now * atr_stop_mult if atr_now > 0 else percent_stop
-    stop = max(percent_stop, atr_stop)
-    target = close + atr_now * 3.0 if atr_now > 0 else close * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
+    max_risk_stop = trade_entry * (1 - stop_pct / 100)
+    min_stop_distance_pct = minimum_stop_pct(str(personality_profile["personality_type"]))
+    min_stop_distance = max(trade_entry * (min_stop_distance_pct / 100), atr_now * 0.20 if atr_now > 0 else 0.0)
+    zone_stop_buffer = max(trade_entry * 0.0045, atr_now * 0.18 if atr_now > 0 else 0.0)
+    zone_stop = entry_zone_low - zone_stop_buffer if setup_forming and not math.isnan(entry_zone_low) else max_risk_stop
+    atr_stop = trade_entry - atr_now * atr_stop_mult if atr_now > 0 else max_risk_stop
+    stop = max(max_risk_stop, min(zone_stop, atr_stop, trade_entry - min_stop_distance))
+    target = trade_entry + atr_now * 3.0 if atr_now > 0 else trade_entry * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
     reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
     risk_pct_to_stop = (trade_entry - stop) / trade_entry * 100 if trade_entry > stop else np.nan
     position_value_1k_risk = SCANNER_RISK_DOLLARS / (risk_pct_to_stop / 100) if not math.isnan(risk_pct_to_stop) and risk_pct_to_stop > 0 else np.nan
@@ -3555,6 +3599,8 @@ def classify_and_score(
         notes.append("Strong continuation")
     if entry_note:
         notes.append(entry_note)
+    if setup_forming and not math.isnan(entry_zone_low) and not math.isnan(entry_zone_high):
+        notes.append("Entry zone uses personality-adjusted pullback band")
     if profile_extended_from_zone:
         notes.append("Personality-adjusted zone is extended")
     if high_quality_entry_override:
@@ -3691,6 +3737,10 @@ def classify_and_score(
         "seller_score": round(float(seller_score), 0),
         "volume_state": "BREAKDOWN" if breakdown_vol else "DISTRIBUTION" if dist_vol else "BREAKOUT" if breakout_vol else "DEMAND" if accum_vol else "DRY-UP" if dry_up_vol else "NEUTRAL",
         "entry_est": round(float(entry_est), 2) if setup_forming and not math.isnan(entry_est) else "",
+        "entry_zone_low": round(float(entry_zone_low), 2) if setup_forming and not math.isnan(entry_zone_low) else "",
+        "entry_zone_high": round(float(entry_zone_high), 2) if setup_forming and not math.isnan(entry_zone_high) else "",
+        "entry_zone_width_pct": round(float(zone_width_pct), 2) if setup_forming and not math.isnan(zone_width_pct) else "",
+        "entry_zone_plan": "Buy only inside the zone; gap-through below the zone requires reclaim confirmation." if setup_forming and not math.isnan(entry_zone_low) else "",
         "stop_est": round(float(stop), 2) if setup_forming else "",
         "target_est": round(float(target), 2) if setup_forming else "",
         "reward_risk": round(float(reward_risk), 2) if setup_forming and not math.isnan(reward_risk) else "",
@@ -4347,7 +4397,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "setup", "adaptive_mode", "psychology", "reward_risk",
         "risk_pct_to_stop", "position_value_1k_risk",
         "market_permission", "risk_permission",
-        "volume_state", "entry_est", "stop_est", "target_est", "notes",
+        "volume_state", "entry_zone_low", "entry_zone_high", "entry_zone_width_pct",
+        "entry_est", "stop_est", "target_est", "notes",
     ]
     display_columns = [col for col in display_columns if col in df.columns]
     visible_df = df[display_columns].copy()
@@ -4392,6 +4443,9 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "market_permission": "Mkt",
         "risk_permission": "Risk",
         "volume_state": "Vol",
+        "entry_zone_low": "Zone Low",
+        "entry_zone_high": "Zone High",
+        "entry_zone_width_pct": "Zone%",
         "entry_est": "Ref Zone",
         "stop_est": "Stop",
         "target_est": "Target",
@@ -4453,7 +4507,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return "<span class='dash'>-</span>"
             klass = "exit" if "DISTRIBUTION" in text or "BULL_TRAP" in text else "setup" if "BEAR_TRAP" in text or "ACCUMULATION" in text or "MARKUP" in text else "watch"
             return f"<span class='badge action {klass}'>{escaped}</span>"
-        if col in {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "last_outcome_return_pct"}:
+        if col in {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "last_outcome_return_pct", "entry_zone_width_pct"}:
             try:
                 return f"{float(value):.1f}"
             except (TypeError, ValueError):
@@ -4463,14 +4517,14 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return f"{float(value):,.0f}"
             except (TypeError, ValueError):
                 return escaped
-        if col in {"close", "entry_est", "stop_est", "target_est"}:
+        if col in {"close", "entry_est", "entry_zone_low", "entry_zone_high", "stop_est", "target_est"}:
             try:
                 return f"{float(value):.2f}"
             except (TypeError, ValueError):
                 return escaped
         return escaped
 
-    numeric_columns = {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "stop_est", "target_est"}
+    numeric_columns = {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "entry_zone_low", "entry_zone_high", "entry_zone_width_pct", "stop_est", "target_est"}
 
     rows = []
     for _, row in visible_df.iterrows():
@@ -5072,6 +5126,7 @@ def main() -> None:
         "ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct",
         "data_provider", "data_provider_status",
         "market_permission", "ticker_permission", "walk_forward_permission", "risk_permission",
+        "entry_zone_low", "entry_zone_high", "entry_zone_width_pct",
         "risk_pct_to_stop", "position_value_1k_risk", "notes",
     ]
     print(report[columns].to_string(index=False))
