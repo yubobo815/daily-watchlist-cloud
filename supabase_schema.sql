@@ -8,6 +8,9 @@ create table if not exists public.watchlist_snapshots (
   adaptive_mode text,
   psychology text,
   score numeric,
+  open numeric,
+  high numeric,
+  low numeric,
   close numeric,
   day_change_pct numeric,
   entry_est numeric,
@@ -91,6 +94,9 @@ create table if not exists public.watchlist_behavior_history (
   adaptive_mode text,
   psychology text,
   score numeric,
+  open numeric,
+  high numeric,
+  low numeric,
   close numeric,
   day_change_pct numeric,
   entry_est numeric,
@@ -240,6 +246,9 @@ create index if not exists focus_tickers_list_idx
   on public.focus_tickers (list_id, ticker);
 
 alter table public.watchlist_snapshots add column if not exists signal_stage text;
+alter table public.watchlist_snapshots add column if not exists open numeric;
+alter table public.watchlist_snapshots add column if not exists high numeric;
+alter table public.watchlist_snapshots add column if not exists low numeric;
 alter table public.watchlist_snapshots add column if not exists transition_label text;
 alter table public.watchlist_snapshots add column if not exists transition_score numeric;
 alter table public.watchlist_snapshots add column if not exists signal_age_days integer;
@@ -307,6 +316,9 @@ alter table public.watchlist_snapshots add column if not exists feedback_plan te
 alter table public.watchlist_snapshots add column if not exists reason_codes jsonb not null default '[]'::jsonb;
 
 alter table public.watchlist_behavior_history add column if not exists signal_stage text;
+alter table public.watchlist_behavior_history add column if not exists open numeric;
+alter table public.watchlist_behavior_history add column if not exists high numeric;
+alter table public.watchlist_behavior_history add column if not exists low numeric;
 alter table public.watchlist_behavior_history add column if not exists transition_label text;
 alter table public.watchlist_behavior_history add column if not exists transition_score numeric;
 alter table public.watchlist_behavior_history add column if not exists signal_age_days integer;

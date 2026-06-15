@@ -275,6 +275,9 @@ function auditHistoricalReplayDto() {
     action: "BUY CANDIDATE",
     setup: "BREAKOUT BUY",
     score: 96,
+    open: 194.2,
+    high: 205.4,
+    low: 193.8,
     close: 203.7,
     payload: {
       adjusted_score: 96,
@@ -297,6 +300,7 @@ function auditHistoricalReplayDto() {
   assert(historical.payload.signal_quality === "FRESH", "historical replay row must preserve original quality");
   assert(historical.payload.transition_label === "Fresh Setup To Buy", "historical replay row must preserve transition label");
   assert(historical.payload.next_day_bias === "BULLISH CONFIRM", "historical replay row must not be current-date execution-blocked");
+  assert(historical.open === 194.2 && historical.high === 205.4 && historical.low === 193.8, "historical replay row must expose OHLC for entry/stop audit");
   assert(!historical.payload.reason_codes.includes("data_stale_block"), "historical replay row must not add stale-data reason");
   assert(!historical.payload.reason_codes.includes("missing_execution_proof"), "historical replay row must not add execution-proof reason");
 
