@@ -82,8 +82,8 @@ jobs:
         shell: bash
         run: |
           if [ -z "$SUPABASE_DB_URL" ]; then
-            echo "SUPABASE_DB_URL is not set; skipping schema apply."
-            exit 0
+            echo "SUPABASE_DB_URL is not set; refusing to refresh because schema migrations cannot be applied."
+            exit 1
           fi
           npx --yes supabase@2 db query --db-url "$SUPABASE_DB_URL" --file supabase_schema.sql
 

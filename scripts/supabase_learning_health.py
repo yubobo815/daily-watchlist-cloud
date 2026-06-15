@@ -130,12 +130,12 @@ def main() -> None:
     filters = f"run_date=eq.{urllib.parse.quote(str(run_date))}"
     history_rows = request_all_json(
         "watchlist_behavior_history"
-        "?select=ticker,history_date,payload"
+        "?select=ticker,history_date,open,high,low,close,payload"
         f"&{filters}&order=ticker.asc,history_date.asc"
     )
     snapshot_rows = request_all_json(
         "watchlist_snapshots"
-        "?select=ticker,payload"
+        "?select=ticker,open,high,low,close,payload"
         f"&{filters}&order=ticker.asc"
     )
 
@@ -178,6 +178,14 @@ def main() -> None:
             learning_scope_ready += 1
 
     outcome_counts = Counter(str(row.get("outcome_label") or "UNKNOWN") for row in outcome_rows)
+    missing_ohlc_history_rows = [
+        row for row in history_rows
+        if any(row.get(field) in (None, "") for field in ("open", "high", "low", "close"))
+    ]
+    missing_ohlc_snapshot_rows = [
+        row for row in snapshot_rows
+        if any(row.get(field) in (None, "") for field in ("open", "high", "low", "close"))
+    ]
     ticker_leaking_keys = []
     for row in outcome_rows:
         ticker = str(row.get("ticker") or "").upper().strip()
@@ -198,6 +206,8 @@ def main() -> None:
         "tickers_with_30_plus_days": tickers_with_30,
         "signal_outcome_rows_for_run": len(outcome_rows),
         "signal_outcome_labels": dict(outcome_counts),
+        "history_rows_missing_ohlc": len(missing_ohlc_history_rows),
+        "snapshot_rows_missing_ohlc": len(missing_ohlc_snapshot_rows),
         "ticker_leaking_learning_keys": len(ticker_leaking_keys),
         "snapshots_with_learning_samples": learning_ready,
         "snapshots_with_learning_scope": learning_scope_ready,
@@ -215,6 +225,13 @@ def main() -> None:
     if len(outcome_rows) < 500:
         emit_metrics(metrics)
         fail("Signal outcome rows are too low; ML/self-learning has insufficient samples.")
+    if missing_ohlc_history_rows or missing_ohlc_snapshot_rows:
+        metrics["missing_ohlc_examples"] = {
+            "history": missing_ohlc_history_rows[:5],
+            "snapshot": missing_ohlc_snapshot_rows[:5],
+        }
+        emit_metrics(metrics)
+        fail("Supabase OHLC columns are required for entry-zone and stop audits.")
     if ticker_leaking_keys:
         metrics["ticker_leaking_learning_key_examples"] = ticker_leaking_keys[:5]
         emit_metrics(metrics)
