@@ -2310,6 +2310,7 @@ function renderLatestHistoryPanel(latest) {
         <div><span>Trend Quality</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Ref Zone</span><strong>${escapeHtml(formatEntryZone(latest))}</strong></div>
+        <div><span>Stop</span><strong>${fmtNumber(latest.stop_est, 2) || "-"}</strong></div>
       </div>
       ${renderScoreBreakdown(latest)}
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
