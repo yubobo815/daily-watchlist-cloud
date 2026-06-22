@@ -25,6 +25,7 @@ ETF_HINTS = {
 }
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
+MARKET_TIMEZONE = ZoneInfo("America/New_York")
 SCANNER_VERSION = "2026.06.12-context-overlays"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
@@ -383,6 +384,11 @@ def request_json(url: str, provider: str, timeout: int = 30) -> tuple[dict, floa
     return payload, round((time.perf_counter() - started) * 1000, 1)
 
 
+def market_dates_from_timestamps(values, unit: str) -> list:
+    timestamps = pd.to_datetime(values, unit=unit, utc=True, errors="coerce")
+    return list(timestamps.tz_convert(MARKET_TIMEZONE).date)
+
+
 def fetch_polygon_chart(ticker: str, years: int = 3) -> pd.DataFrame:
     if not POLYGON_API_KEY:
         raise RuntimeError("Polygon/Massive API key is not configured.")
@@ -405,7 +411,7 @@ def fetch_polygon_chart(ticker: str, years: int = 3) -> pd.DataFrame:
         raise RuntimeError(f"Polygon/Massive returned no bars for {display_ticker(ticker)}: {message}")
     df = pd.DataFrame(
         {
-            "date": pd.to_datetime([item.get("t") for item in results], unit="ms", utc=True).tz_convert(None).date,
+            "date": market_dates_from_timestamps([item.get("t") for item in results], "ms"),
             "open": [item.get("o") for item in results],
             "high": [item.get("h") for item in results],
             "low": [item.get("l") for item in results],
@@ -518,7 +524,7 @@ def fetch_yahoo_chart(ticker: str, years: int = 3) -> pd.DataFrame:
     adj = result["indicators"].get("adjclose", [{}])[0].get("adjclose", q["close"])
     df = pd.DataFrame(
         {
-            "date": pd.to_datetime(result["timestamp"], unit="s", utc=True).tz_convert(None).date,
+            "date": market_dates_from_timestamps(result["timestamp"], "s"),
             "open": q["open"],
             "high": q["high"],
             "low": q["low"],
@@ -5088,6 +5094,9 @@ def main() -> None:
     write_html(report, html_path, status_text=status_text, preflight_text=preflight_text)
     report.to_csv("daily_watchlist_overview_latest.csv", index=False)
     write_html(report, Path("daily_watchlist_overview_latest.html"), status_text=status_text, preflight_text=preflight_text)
+    run_metadata_path = Path(f"daily_watchlist_run_metadata_{today}.json")
+    run_metadata_path.write_text(json.dumps(run_metadata, separators=(",", ":"), default=str))
+    Path("daily_watchlist_run_metadata_latest.json").write_text(json.dumps(run_metadata, separators=(",", ":"), default=str))
     if not outcomes.empty:
         outcomes_path = Path(f"daily_signal_outcomes_{today}.csv")
         outcomes.to_csv(outcomes_path, index=False)

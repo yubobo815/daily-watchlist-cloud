@@ -163,13 +163,15 @@ function conservativeFallbackRow(row) {
 
 function staticLatestPayload() {
   const rows = Array.isArray(latestData.rows) ? latestData.rows.map(conservativeFallbackRow) : [];
+  const bundledRunInfo = latestData.runInfo && typeof latestData.runInfo === "object" ? latestData.runInfo : null;
+  const latestRunDate = latestData.run_date || bundledRunInfo?.run_date || rows[0]?.run_date || "";
   return {
-    latest: latestData.run_date || rows[0]?.run_date || "",
+    latest: latestRunDate,
     previous: "",
     rows,
     previousRows: [],
-    runInfo: {
-      run_date: latestData.run_date || rows[0]?.run_date || "",
+    runInfo: bundledRunInfo || {
+      run_date: latestRunDate,
       status: "static_fallback",
       live_access_ok: false,
       live_access_message: "Using bundled published data because the live database is unavailable.",
@@ -228,6 +230,8 @@ function staticTickerPayload(ticker, profile = {}) {
 }
 
 module.exports = {
+  conservativeFallbackRow,
+  normalizeTicker,
   staticLatestPayload,
   staticTickerPayload,
 };

@@ -146,6 +146,8 @@ const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const FOCUS_PIN_KEY = "daily-trade-copilot:focus-pin:v1";
 const STATIC_FALLBACK_MAX_AGE_DAYS = 10;
+const PUBLISHED_LATEST_JSON_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/latest.json";
+const PUBLISHED_HISTORY_JSON_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/history.json";
 const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
 
 function copyText(key, replacements = {}) {
@@ -1474,10 +1476,23 @@ function assertFreshStaticFallback(runDate) {
   }
 }
 
-async function fetchStaticJson(path) {
+function staticFallbackRunDate(payload) {
+  return payload?.run_date || payload?.latest || payload?.runInfo?.run_date || payload?.runInfo?.latest_data_date || "";
+}
+
+async function fetchJsonNoStore(path, errorPrefix = "Static fallback") {
   const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Static fallback returned HTTP ${response.status}.`);
+  if (!response.ok) throw new Error(`${errorPrefix} returned HTTP ${response.status}.`);
   return response.json();
+}
+
+async function fetchStaticJson(path, publishedUrl = "") {
+  if (publishedUrl) {
+    try {
+      return await fetchJsonNoStore(`${publishedUrl}?v=${Date.now()}`, "Published fallback");
+    } catch {}
+  }
+  return fetchJsonNoStore(path);
 }
 
 function parseCsvLine(line) {
@@ -1516,18 +1531,19 @@ function parseCsv(text) {
 }
 
 async function loadStaticLatestRows() {
-  const fallback = await fetchStaticJson("./data/latest.json");
-  assertFreshStaticFallback(fallback.run_date);
+  const fallback = await fetchStaticJson("./data/latest.json", PUBLISHED_LATEST_JSON_URL);
+  assertFreshStaticFallback(staticFallbackRunDate(fallback));
   return {
-    latest: fallback.run_date,
+    latest: staticFallbackRunDate(fallback),
     previous: "",
     rows: (fallback.rows || []).map((row) => ({
       ...row,
-      run_date: row.run_date || fallback.run_date,
+      run_date: row.run_date || staticFallbackRunDate(fallback),
       data_date: row.data_date || row.date,
       name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
     })),
     previousRows: [],
+    runInfo: fallback.runInfo || null,
   };
 }
 
@@ -1551,7 +1567,7 @@ async function loadPublishedTickerHistory(ticker) {
 }
 
 async function loadStaticTickerHistory(ticker) {
-  const fallback = await fetchStaticJson("./data/history.json");
+  const fallback = await fetchStaticJson("./data/history.json", PUBLISHED_HISTORY_JSON_URL);
   const rawRows = fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || (fallback.rows || []).filter((row) => row.ticker === ticker);
   let rows = rawRows
     .map((row) => ({

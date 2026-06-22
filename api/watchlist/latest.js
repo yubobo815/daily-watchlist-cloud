@@ -8,7 +8,7 @@ const {
   sortRows,
   supabaseSelect,
 } = require("../_supabase");
-const { staticLatestPayload } = require("../_static_data");
+const { publishedLatestPayload } = require("../_published_data");
 
 module.exports = async function handler(request, response) {
   try {
@@ -46,6 +46,6 @@ module.exports = async function handler(request, response) {
   } catch (error) {
     console.error(error);
     response.setHeader("Cache-Control", "no-store");
-    response.status(200).json(staticLatestPayload());
+    response.status(200).json(await publishedLatestPayload());
   }
 };

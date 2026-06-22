@@ -124,6 +124,7 @@ jobs:
           cp -R assets public/assets
           cp daily_watchlist_overview_latest.csv public/daily_watchlist_overview_latest.csv
           cp watchlist_behavior_history_latest.csv public/watchlist_behavior_history_latest.csv
+          cp daily_watchlist_run_metadata_latest.json public/data/run_metadata.json
           cp daily_watchlist_overview_failures.csv public/daily_watchlist_overview_failures.csv 2>/dev/null || true
           cp daily_watchlist_overview_stale_cache.csv public/daily_watchlist_overview_stale_cache.csv 2>/dev/null || true
           python - <<'PY'
@@ -138,9 +139,13 @@ jobs:
 
           latest_rows = read_csv("daily_watchlist_overview_latest.csv")
           history_rows = read_csv("watchlist_behavior_history_latest.csv")
-          run_date = ""
+          run_metadata = {}
+          metadata_path = pathlib.Path("daily_watchlist_run_metadata_latest.json")
+          if metadata_path.exists():
+              run_metadata = json.loads(metadata_path.read_text())
+          run_date = str(run_metadata.get("run_date") or "")
           for row in latest_rows:
-              run_date = row.get("run_date") or row.get("date") or run_date
+              run_date = row.get("run_date") or run_date or row.get("date") or ""
               row["payload"] = {key: value for key, value in row.items() if key != "payload"}
           by_ticker = {}
           for row in history_rows:
@@ -148,8 +153,13 @@ jobs:
               row["payload"] = {key: value for key, value in row.items() if key != "payload"}
               if ticker:
                   by_ticker.setdefault(ticker, []).append(row)
-          pathlib.Path("public/data/latest.json").write_text(json.dumps({"run_date": run_date, "rows": latest_rows}, separators=(",", ":")))
-          pathlib.Path("public/data/history.json").write_text(json.dumps({"run_date": run_date, "rows": history_rows, "by_ticker": by_ticker}, separators=(",", ":")))
+          latest_payload = {"run_date": run_date, "rows": latest_rows}
+          history_payload = {"run_date": run_date, "rows": history_rows, "by_ticker": by_ticker}
+          if run_metadata:
+              latest_payload["runInfo"] = run_metadata
+              history_payload["runInfo"] = run_metadata
+          pathlib.Path("public/data/latest.json").write_text(json.dumps(latest_payload, separators=(",", ":")))
+          pathlib.Path("public/data/history.json").write_text(json.dumps(history_payload, separators=(",", ":")))
           PY
 
       - name: Configure Pages

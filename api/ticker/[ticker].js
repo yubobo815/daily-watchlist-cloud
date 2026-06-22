@@ -10,7 +10,7 @@ const {
   supabaseSelect,
 } = require("../_supabase");
 const { fetchCompanyProfile } = require("../company");
-const { staticTickerPayload } = require("../_static_data");
+const { publishedTickerPayload } = require("../_published_data");
 
 function withTimeout(promise, milliseconds, fallback) {
   return Promise.race([
@@ -79,7 +79,7 @@ async function handler(request, response) {
     console.error(error);
     const profile = await withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {});
     response.setHeader("Cache-Control", "no-store");
-    response.status(200).json(staticTickerPayload(ticker, profile));
+    response.status(200).json(await publishedTickerPayload(ticker, profile));
   }
 }
 
