@@ -10,12 +10,23 @@ import urllib.parse
 import urllib.request
 from urllib.error import HTTPError, URLError
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import date as date_cls, datetime, time as time_cls, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar,
+    GoodFriday,
+    Holiday,
+    USLaborDay,
+    USMartinLutherKingJr,
+    USMemorialDay,
+    USPresidentsDay,
+    USThanksgivingDay,
+    nearest_workday,
+)
 
 
 ETF_HINTS = {
@@ -26,6 +37,7 @@ ETF_HINTS = {
 
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
+US_MARKET_CLOSE_TIME = time_cls(16, 0)
 SCANNER_VERSION = "2026.06.12-context-overlays"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
@@ -930,10 +942,10 @@ def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[
         return False, "No valid data_date values were produced."
 
     latest_data_date = str(latest_dates.dt.date.max())
-    data_age_days = days_between_dates(run_date, latest_data_date)
-    if data_age_days is None or data_age_days > MAX_EXECUTION_DATA_AGE_DAYS:
+    data_age_days = nyse_session_age(latest_data_date)
+    if data_age_days is None or data_age_days > 0:
         return False, (
-            f"Latest market data is {data_age_days if data_age_days is not None else 'unknown'} day(s) old "
+            f"Latest market data is {data_age_days if data_age_days is not None else 'unknown'} NYSE session(s) old "
             f"({latest_data_date}); not overwriting Supabase snapshots."
         )
 
@@ -941,7 +953,7 @@ def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[
     if stale_count >= len(report):
         return False, "Every row is execution-blocked for stale data; not overwriting Supabase snapshots."
 
-    return True, f"Latest market data is fresh enough for Supabase sync ({latest_data_date}, age {data_age_days} day(s))."
+    return True, f"Latest market data is fresh enough for Supabase sync ({latest_data_date}, age {data_age_days} NYSE session(s))."
 
 
 def batched_records(records: list[dict], batch_size: int = SUPABASE_UPSERT_BATCH_SIZE) -> list[list[dict]]:
@@ -1481,6 +1493,67 @@ def days_between_dates(later: str, earlier: str) -> Optional[int]:
     return (later_date - earlier_date).days
 
 
+class NyseHolidayCalendar(AbstractHolidayCalendar):
+    rules = [
+        Holiday("NewYearsDay", month=1, day=1, observance=nearest_workday),
+        USMartinLutherKingJr,
+        USPresidentsDay,
+        GoodFriday,
+        USMemorialDay,
+        Holiday("JuneteenthNationalIndependenceDay", month=6, day=19, observance=nearest_workday, start_date="2022-01-01"),
+        Holiday("IndependenceDay", month=7, day=4, observance=nearest_workday),
+        USLaborDay,
+        USThanksgivingDay,
+        Holiday("ChristmasDay", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+def nyse_holidays(start: date_cls, end: date_cls) -> set[date_cls]:
+    return set(NyseHolidayCalendar().holidays(start=start, end=end).date)
+
+
+def is_nyse_trading_day(day: date_cls) -> bool:
+    if day.weekday() >= 5:
+        return False
+    return day not in nyse_holidays(day, day)
+
+
+def previous_nyse_trading_day(day: date_cls) -> date_cls:
+    candidate = day - timedelta(days=1)
+    while not is_nyse_trading_day(candidate):
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def latest_completed_nyse_session(now: Optional[datetime] = None) -> date_cls:
+    current = (now or datetime.now(MARKET_TIMEZONE)).astimezone(MARKET_TIMEZONE)
+    candidate = current.date()
+    if not is_nyse_trading_day(candidate):
+        return previous_nyse_trading_day(candidate)
+    if current.time() < US_MARKET_CLOSE_TIME:
+        return previous_nyse_trading_day(candidate)
+    return candidate
+
+
+def nyse_session_age(data_date_text: Optional[str], now: Optional[datetime] = None) -> Optional[int]:
+    if not data_date_text:
+        return None
+    try:
+        data_day = datetime.fromisoformat(str(data_date_text)).date()
+    except (TypeError, ValueError):
+        return None
+    reference_day = latest_completed_nyse_session(now)
+    if data_day >= reference_day:
+        return 0
+    age = 0
+    cursor = data_day
+    while cursor < reference_day:
+        cursor += timedelta(days=1)
+        if is_nyse_trading_day(cursor):
+            age += 1
+    return age
+
+
 def append_unique_reason(row: dict, code: str) -> None:
     codes = list(row.get("reason_codes") or [])
     if code not in codes:
@@ -1491,14 +1564,14 @@ def append_unique_reason(row: dict, code: str) -> None:
 def apply_data_freshness_gate(row: dict, run_date: str, cached_tickers: set[str]) -> dict:
     ticker = str(row.get("ticker", "")).upper()
     data_date = row.get("date") or row.get("data_date") or row.get("history_date")
-    data_age_days = days_between_dates(run_date, str(data_date)) if data_date else None
+    data_age_days = nyse_session_age(str(data_date)) if data_date else None
     cached_source = ticker in cached_tickers
-    freshness_block = data_age_days is None or data_age_days > MAX_EXECUTION_DATA_AGE_DAYS
+    freshness_block = data_age_days is None or data_age_days > 0
 
     if freshness_block:
         freshness_status = "STALE_BLOCK"
         freshness_plan = (
-            f"Execution blocked: market data is {data_age_days if data_age_days is not None else 'unknown'} day(s) old; refresh live data before acting."
+            f"Execution blocked: market data is {data_age_days if data_age_days is not None else 'unknown'} NYSE session(s) old; refresh live data before acting."
         )
         append_unique_reason(row, "data_stale_block")
         actionable_stale = row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}

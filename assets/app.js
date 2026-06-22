@@ -1065,9 +1065,7 @@ function dataDateSummary(rows) {
 }
 
 function isStaleMarketDate(runDate, rows) {
-  const dates = rows.map((row) => row.data_date || row.date || row.history_date).filter(Boolean).sort();
-  const latestDataDate = dates.at(-1);
-  return Boolean(runDate && latestDataDate && latestDataDate < runDate);
+  return rows.some((row) => payloadValue(row, "freshness_block") === "YES");
 }
 
 function historyDateSummary(rows) {
