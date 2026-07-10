@@ -60,6 +60,7 @@ MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
 DEFAULT_LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "30"))
+MARKET_DATA_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12"))
 SELF_SCORE_ACTIONS = {
     "BUY CANDIDATE",
     "STRONG CONTINUATION",
@@ -416,7 +417,7 @@ def fetch_polygon_chart(ticker: str, years: int = 3) -> pd.DataFrame:
         }
     )
     url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/range/1/day/{from_date}/{to_date}?{params}"
-    payload, latency_ms = request_json(url, "polygon")
+    payload, latency_ms = request_json(url, "polygon", timeout=MARKET_DATA_TIMEOUT_SECONDS)
     results = payload.get("results") or []
     if not results:
         message = payload.get("error") or payload.get("message") or "no aggregate bars returned"
@@ -451,7 +452,7 @@ def fetch_twelvedata_chart(ticker: str, years: int = 3) -> pd.DataFrame:
             "apikey": TWELVE_DATA_API_KEY,
         }
     )
-    payload, latency_ms = request_json(f"https://api.twelvedata.com/time_series?{params}", "twelvedata")
+    payload, latency_ms = request_json(f"https://api.twelvedata.com/time_series?{params}", "twelvedata", timeout=MARKET_DATA_TIMEOUT_SECONDS)
     if str(payload.get("status", "")).lower() == "error":
         raise RuntimeError(payload.get("message") or "Twelve Data returned error status.")
     values = payload.get("values") or []
@@ -500,7 +501,7 @@ def fetch_stooq_chart(ticker: str, years: int = 3) -> pd.DataFrame:
     started = time.perf_counter()
     req = urllib.request.Request(f"https://stooq.com/q/d/l/?{params}", headers={"User-Agent": "DailyTradeCopilot/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=MARKET_DATA_TIMEOUT_SECONDS) as resp:
             body = resp.read().decode("utf-8", errors="replace")
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:500]
@@ -530,7 +531,7 @@ def fetch_yahoo_chart(ticker: str, years: int = 3) -> pd.DataFrame:
         f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
         f"?period1={period1}&period2={period2}&interval=1d&events=history"
     )
-    payload, latency_ms = request_json(url, "yahoo")
+    payload, latency_ms = request_json(url, "yahoo", timeout=MARKET_DATA_TIMEOUT_SECONDS)
     result = payload["chart"]["result"][0]
     q = result["indicators"]["quote"][0]
     adj = result["indicators"].get("adjclose", [{}])[0].get("adjclose", q["close"])

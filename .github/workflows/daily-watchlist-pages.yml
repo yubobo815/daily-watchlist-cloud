@@ -100,7 +100,8 @@ jobs:
           MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          DATA_PROVIDER_PRIORITY: polygon,twelvedata,stooq,yahoo
+          DATA_PROVIDER_PRIORITY: yahoo,polygon,twelvedata,stooq
+          MARKET_DATA_TIMEOUT_SECONDS: "12"
         run: python daily_watchlist_overview.py --refresh --skip-profiles --years 1 --history-days 30 --learning-lookback-days 30
 
       - name: Audit Supabase learning health
