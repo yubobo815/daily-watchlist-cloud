@@ -584,6 +584,7 @@ def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFr
     for provider in configured_data_providers():
         try:
             df = fetch_live_chart_from_provider(provider, ticker, years)
+            reject_stale_live_frame(df, ticker, provider)
             df.to_csv(cache_path, index=False)
             return df
         except Exception as exc:
@@ -1552,6 +1553,26 @@ def nyse_session_age(data_date_text: Optional[str], now: Optional[datetime] = No
         if is_nyse_trading_day(cursor):
             age += 1
     return age
+
+
+def latest_frame_date(df: pd.DataFrame) -> Optional[str]:
+    if df.empty or "date" not in df.columns:
+        return None
+    dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+    if dates.empty:
+        return None
+    return str(dates.dt.date.max())
+
+
+def reject_stale_live_frame(df: pd.DataFrame, ticker: str, provider: str) -> None:
+    latest_date = latest_frame_date(df)
+    age = nyse_session_age(latest_date)
+    if age is not None and age <= 0:
+        return
+    raise RuntimeError(
+        f"{provider} returned stale data for {display_ticker(ticker)}: "
+        f"latest bar {latest_date or 'unknown'} is {age if age is not None else 'unknown'} NYSE session(s) old"
+    )
 
 
 def append_unique_reason(row: dict, code: str) -> None:
