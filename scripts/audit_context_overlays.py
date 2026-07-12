@@ -288,6 +288,24 @@ def audit_learning_upgrade_respects_anti_signals():
     assert_true(priority == 4, "blocked learning setup must stay low execution priority")
 
 
+def audit_personality_setup_governor_blocks_range_chase():
+    allowed = dwo.personality_setup_execution_allowed(
+        "RANGE_BOUND", "MOMENTUM BUY", "MEAN REVERSION", True, 92, False, False, False, True, True
+    )
+    assert_true(not allowed, "range-bound momentum must remain BUILDING even with strong buyer tape")
+    reversal = dwo.personality_setup_execution_allowed(
+        "RANGE_BOUND", "REVERSAL BUY", "MEAN REVERSION", True, 75, True, True, False, False, False
+    )
+    assert_true(reversal, "confirmed range-bound reversal should remain executable")
+
+
+def audit_personality_exit_separates_profit_protect():
+    soft_range_exit = dwo.personality_exit_pressure("RANGE_BOUND", False, True, True)
+    assert_true(not soft_range_exit, "range-bound distribution without hard damage must stay profit protect")
+    hard_range_exit = dwo.personality_exit_pressure("RANGE_BOUND", True, False, True)
+    assert_true(hard_range_exit, "range-bound structural damage must remain a hard EXIT")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
@@ -303,9 +321,11 @@ def main():
     audit_action_display_labels_match_product_ui()
     audit_learning_can_upgrade_building_execution_tier()
     audit_learning_upgrade_respects_anti_signals()
+    audit_personality_setup_governor_blocks_range_chase()
+    audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 14,
+        "cases": 16,
     })
 
 

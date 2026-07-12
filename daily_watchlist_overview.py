@@ -876,6 +876,9 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "personality_weight_transition",
     "personality_weight_setup",
     "personality_weight_trend",
+    "personality_setup_allowed",
+    "profit_protect_pressure",
+    "hard_exit_pressure",
     "operator_pressure",
     "operator_pressure_score",
     "operator_plan",
@@ -2786,6 +2789,47 @@ def personality_weight_profile(personality_type: object) -> dict:
     return profiles.get(personality, profiles["BALANCED"])
 
 
+def personality_setup_execution_allowed(
+    personality_type: object,
+    setup: str,
+    mode: str,
+    transition_buy_setup: bool,
+    buyer_score: float,
+    fear_rejected: bool,
+    right_side: bool,
+    quiet_absorption: bool,
+    accum_vol: bool,
+    breakout_vol: bool,
+) -> bool:
+    personality = str(personality_type or "BALANCED").upper()
+    if setup == "NONE":
+        return False
+    if personality == "RANGE_BOUND":
+        return (
+            setup == "REVERSAL BUY"
+            and transition_buy_setup
+            and buyer_score >= 68.0
+            and (fear_rejected or right_side or (quiet_absorption and (accum_vol or breakout_vol)))
+        )
+    if personality == "BALANCED" and setup == "MOMENTUM BUY":
+        return mode == "POWER TREND" and breakout_vol and buyer_score >= 75.0
+    if personality == "COMPOUNDER" and setup == "EARLY PULLBACK BUY":
+        return transition_buy_setup and buyer_score >= 65.0
+    return True
+
+
+def personality_exit_pressure(
+    personality_type: object,
+    hard_exit_pressure: bool,
+    early_distribution_pressure: bool,
+    trend_damage: bool,
+) -> bool:
+    personality = str(personality_type or "BALANCED").upper()
+    if personality == "RANGE_BOUND":
+        return hard_exit_pressure
+    return hard_exit_pressure or (early_distribution_pressure and trend_damage)
+
+
 def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     if i < 210:
         return "NONE"
@@ -3331,11 +3375,19 @@ def classify_and_score(
         or (greed_rejected and row.close_loc <= 0.50)
         or (upper_wick > body_for_ratio * 1.8 and row.close_loc <= 0.45 and vol_ready and row.volume >= row.vol_ma)
     )
-    exit_pressure = (
+    profit_protect_pressure = atr_extension_exhaustion or early_distribution_pressure
+    hard_exit_pressure = (
         (confirmed_exhaustion and confirmed_break)
-        or atr_extension_exhaustion
-        or early_distribution_pressure
-        or (seller_control and (close_off_high or trend_damage))
+        or (confirmed_break and (breakdown_vol or seller_control))
+        or (seller_control and trend_damage and close < row.ema_slow)
+    )
+    # Range-bound names frequently mean-revert after one-day supply. Only
+    # structural damage is an EXIT; softer supply remains profit protection.
+    exit_pressure = personality_exit_pressure(
+        personality_profile["personality_type"],
+        hard_exit_pressure,
+        early_distribution_pressure,
+        trend_damage,
     )
 
     candle_entry_midpoint = (high + low) / 2
@@ -3481,6 +3533,19 @@ def classify_and_score(
         and (dry_up_vol or accum_vol or breakout_vol or quiet_absorption or fear_rejected)
         and not extended_from_zone
         and not profile_extended_from_zone
+    )
+
+    personality_setup_allowed = personality_setup_execution_allowed(
+        personality_profile["personality_type"],
+        setup,
+        mode,
+        transition_buy_setup,
+        buyer_score,
+        fear_rejected,
+        right_side,
+        quiet_absorption,
+        accum_vol,
+        breakout_vol,
     )
 
     if extended_from_zone or profile_extended_from_zone:
@@ -3733,6 +3798,7 @@ def classify_and_score(
     next_day_buyable = (
         next_day_bias_score >= 70.0
         and execution_safety_ok
+        and personality_setup_allowed
         and not operator_blocks_buy
         and not profile_extended_from_zone
         and not extended_from_zone
@@ -3772,8 +3838,8 @@ def classify_and_score(
 
     if setup_forming and include_audit_gates:
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
-        filters_ok = filters_ok and next_day_buyable
-        continuation_ok = continuation_ok and not profile_extended_from_zone and execution_safety_ok and next_day_constructive and not operator_blocks_buy
+        filters_ok = filters_ok and next_day_buyable and personality_setup_allowed
+        continuation_ok = continuation_ok and personality_setup_allowed and not profile_extended_from_zone and execution_safety_ok and next_day_constructive and not operator_blocks_buy
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     if filters_ok:
@@ -3842,6 +3908,10 @@ def classify_and_score(
         notes.append("Market regime hostile")
     if setup_forming and risk_permission != "ALLOW":
         notes.append("Risk governor blocked")
+    if setup_forming and not personality_setup_allowed:
+        notes.append("Personality requires another confirmation before execution")
+    if profit_protect_pressure and not exit_pressure:
+        notes.append("Profit protect only; structure is not broken")
     if next_day_plan:
         notes.append(next_day_plan)
     if operator_plan and operator_pressure != "NEUTRAL" and operator_plan != next_day_plan:
@@ -3876,6 +3946,10 @@ def classify_and_score(
         reason_codes.append("seller_pressure")
     if exit_pressure:
         reason_codes.append("exit_pressure")
+    elif profit_protect_pressure:
+        reason_codes.append("profit_protect_pressure")
+    if setup_forming and not personality_setup_allowed:
+        reason_codes.append("personality_setup_gate")
     if next_day_bias == "BULLISH CONFIRM":
         reason_codes.append("next_day_bullish_confirm")
     elif next_day_bias == "CONSTRUCTIVE PULLBACK":
@@ -3962,6 +4036,7 @@ def classify_and_score(
         "personality_weight_transition": round(float(score_weights["transition"]), 2),
         "personality_weight_setup": round(float(score_weights["setup"]), 2),
         "personality_weight_trend": round(float(score_weights["trend"]), 2),
+        "personality_setup_allowed": bool_text(personality_setup_allowed),
         "operator_pressure": operator_pressure,
         "operator_pressure_score": round(float(operator_pressure_score), 1),
         "operator_plan": operator_plan,
@@ -4008,6 +4083,8 @@ def classify_and_score(
         "hist_win_rate": setup_stats["hist_win_rate"],
         "hist_avg_return": setup_stats["hist_avg_return"],
         "exit_pressure": bool_text(exit_pressure),
+        "profit_protect_pressure": bool_text(profit_protect_pressure and not exit_pressure),
+        "hard_exit_pressure": bool_text(hard_exit_pressure),
         "confirmed_break": bool_text(confirmed_break),
         "notes": "; ".join(notes),
     }
@@ -4155,6 +4232,9 @@ LATEST_SIGNAL_FIELDS = [
     "personality_weight_transition",
     "personality_weight_setup",
     "personality_weight_trend",
+    "personality_setup_allowed",
+    "profit_protect_pressure",
+    "hard_exit_pressure",
     "operator_pressure",
     "operator_pressure_score",
     "operator_plan",
