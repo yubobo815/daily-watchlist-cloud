@@ -32,6 +32,12 @@ create table if not exists public.watchlist_snapshots (
   emotion_score numeric,
   trend_location_score numeric,
   setup_context_score numeric,
+  transition_edge_score numeric,
+  personality_weight_label text,
+  personality_weight_emotion numeric,
+  personality_weight_transition numeric,
+  personality_weight_setup numeric,
+  personality_weight_trend numeric,
   operator_pressure text,
   operator_pressure_score numeric,
   operator_plan text,
@@ -118,6 +124,12 @@ create table if not exists public.watchlist_behavior_history (
   emotion_score numeric,
   trend_location_score numeric,
   setup_context_score numeric,
+  transition_edge_score numeric,
+  personality_weight_label text,
+  personality_weight_emotion numeric,
+  personality_weight_transition numeric,
+  personality_weight_setup numeric,
+  personality_weight_trend numeric,
   operator_pressure text,
   operator_pressure_score numeric,
   operator_plan text,
@@ -263,6 +275,12 @@ alter table public.watchlist_snapshots add column if not exists next_day_plan te
 alter table public.watchlist_snapshots add column if not exists emotion_score numeric;
 alter table public.watchlist_snapshots add column if not exists trend_location_score numeric;
 alter table public.watchlist_snapshots add column if not exists setup_context_score numeric;
+alter table public.watchlist_snapshots add column if not exists transition_edge_score numeric;
+alter table public.watchlist_snapshots add column if not exists personality_weight_label text;
+alter table public.watchlist_snapshots add column if not exists personality_weight_emotion numeric;
+alter table public.watchlist_snapshots add column if not exists personality_weight_transition numeric;
+alter table public.watchlist_snapshots add column if not exists personality_weight_setup numeric;
+alter table public.watchlist_snapshots add column if not exists personality_weight_trend numeric;
 alter table public.watchlist_snapshots add column if not exists operator_pressure text;
 alter table public.watchlist_snapshots add column if not exists operator_pressure_score numeric;
 alter table public.watchlist_snapshots add column if not exists operator_plan text;
@@ -333,6 +351,12 @@ alter table public.watchlist_behavior_history add column if not exists next_day_
 alter table public.watchlist_behavior_history add column if not exists emotion_score numeric;
 alter table public.watchlist_behavior_history add column if not exists trend_location_score numeric;
 alter table public.watchlist_behavior_history add column if not exists setup_context_score numeric;
+alter table public.watchlist_behavior_history add column if not exists transition_edge_score numeric;
+alter table public.watchlist_behavior_history add column if not exists personality_weight_label text;
+alter table public.watchlist_behavior_history add column if not exists personality_weight_emotion numeric;
+alter table public.watchlist_behavior_history add column if not exists personality_weight_transition numeric;
+alter table public.watchlist_behavior_history add column if not exists personality_weight_setup numeric;
+alter table public.watchlist_behavior_history add column if not exists personality_weight_trend numeric;
 alter table public.watchlist_behavior_history add column if not exists operator_pressure text;
 alter table public.watchlist_behavior_history add column if not exists operator_pressure_score numeric;
 alter table public.watchlist_behavior_history add column if not exists operator_plan text;

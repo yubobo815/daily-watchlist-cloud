@@ -870,6 +870,12 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "emotion_score",
     "trend_location_score",
     "setup_context_score",
+    "transition_edge_score",
+    "personality_weight_label",
+    "personality_weight_emotion",
+    "personality_weight_transition",
+    "personality_weight_setup",
+    "personality_weight_trend",
     "operator_pressure",
     "operator_pressure_score",
     "operator_plan",
@@ -2738,6 +2744,48 @@ def stock_personality_profile(d: pd.DataFrame, i: int, is_etf: bool, trend_effic
     return profile
 
 
+def personality_weight_profile(personality_type: object) -> dict:
+    personality = str(personality_type or "BALANCED").upper()
+    profiles = {
+        "HIGH_BETA": {
+            "emotion": 0.40,
+            "transition": 0.38,
+            "setup": 0.16,
+            "trend": 0.06,
+            "label": "high-beta transition",
+        },
+        "COMPOUNDER": {
+            "emotion": 0.30,
+            "transition": 0.24,
+            "setup": 0.26,
+            "trend": 0.20,
+            "label": "compounder quality-trend",
+        },
+        "RANGE_BOUND": {
+            "emotion": 0.38,
+            "transition": 0.40,
+            "setup": 0.17,
+            "trend": 0.05,
+            "label": "range-bound reversal",
+        },
+        "ETF": {
+            "emotion": 0.32,
+            "transition": 0.24,
+            "setup": 0.24,
+            "trend": 0.20,
+            "label": "ETF regime-trend",
+        },
+        "BALANCED": {
+            "emotion": 0.38,
+            "transition": 0.32,
+            "setup": 0.20,
+            "trend": 0.10,
+            "label": "balanced transition",
+        },
+    }
+    return profiles.get(personality, profiles["BALANCED"])
+
+
 def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     if i < 210:
         return "NONE"
@@ -2754,6 +2802,12 @@ def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     high = float(row.high)
     low = float(row.low)
     atr_now = float(row.atr)
+    vol_ready = not math.isnan(row.vol_ma) and row.vol_ma > 0
+    body_for_ratio = max(float(row.body), 0.01)
+    lower_wick = min(open_, close) - low
+    breakdown_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close < row.ema_fast and close < prev.low and row.close_loc <= 0.45
+    quiet_absorption = vol_ready and row.volume < row.vol_ma and row.close_loc >= 0.45 and close >= row.ema_slow and (low <= row.ema_fast * 1.02 or low <= row.bb_basis)
+    fear_rejected = lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.60 and (low <= row.lower_bb or low <= row.ema_fast or low < prev.low) and not breakdown_vol
 
     price_follow = close > prev.high
     constructive_close = row.close_loc >= 0.55 and close >= (open_ + prev.close) / 2
@@ -2767,21 +2821,33 @@ def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     back_inside_bb = close > row.lower_bb
     right_side = recent_oversold_bb and back_inside_bb and row.rsi > prev.rsi and (price_follow or constructive_close or demand_tail)
 
+    trend_condition = close > row.ema_slow and row.ema_fast >= row.ema_slow
+    transition_reclaim = close > prev.high or (close > row.ema_fast and prev.close <= prev.ema_fast)
+    reclaiming_slow = close > row.ema_slow and prev.close <= prev.ema_slow
+    local_higher_low = low >= min(float(prev.low), float(d.iloc[i - 2].low)) and close >= prev.close
+    early_reclaim_context = (
+        close >= row.ema_slow
+        or reclaiming_slow
+        or (back_inside_bb and close >= row.bb_basis)
+        or (close > row.ema_fast and row.ema_fast >= row.ema_slow * 0.985)
+    )
     uptrend = close > row.ema_slow and row.ema_fast > row.ema_slow and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
     strong_momentum = close > row.ema_fast and row.ema_fast > row.ema_slow and row.ema_fast >= d.iloc[i - ema_slope_bars].ema_fast and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
     pullback_support = low <= row.ema_fast or low <= row.bb_basis or close <= row.ema_fast * 1.02
     shallow_pullback = low <= row.ema_fast * 1.015 or low <= row.bb_basis or close <= row.ema_fast * 1.025
     support_held = close > row.ema_slow and close > row.lower_bb
+    early_support_held = (close > row.ema_slow or early_reclaim_context) and close >= row.lower_bb and row.close_loc >= 0.50
     pullback_reversal = 40 <= row.rsi <= 60 and row.rsi > prev.rsi and (price_follow or constructive_close)
     pullback = uptrend and (pullback_support or (strong_momentum and shallow_pullback)) and support_held and pullback_reversal
 
     early_pullback = (
-        uptrend
+        (uptrend or early_reclaim_context)
         and (low <= row.ema_fast * 1.03 or low <= row.bb_basis * 1.02 or close <= row.ema_fast * 1.04)
-        and support_held
+        and early_support_held
         and 38 <= row.rsi <= 68
         and row.rsi >= prev.rsi - 2
         and (demand_tail or constructive_close)
+        and not breakdown_vol
     )
 
     recent_momentum_high = d["high"].iloc[i - 10 : i].max()
@@ -2792,12 +2858,18 @@ def detect_setup_at(d: pd.DataFrame, i: int) -> str:
     breakout_ext = (close - row.ema_fast) / atr_now if atr_now > 0 else 0
     breakout = strong_momentum and close >= breakout_level and close > prev.high and wide_bullish and 55 <= row.rsi <= 82 and breakout_ext <= 3.5 and row.macd_hist >= prev.macd_hist
 
-    body_for_ratio = max(float(row.body), 0.01)
-    lower_wick = min(open_, close) - low
-    vol_ready = not math.isnan(row.vol_ma) and row.vol_ma > 0
-    breakdown_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close < row.ema_fast and close < prev.low and row.close_loc <= 0.45
-    fear_rejected = lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.60 and (low <= row.lower_bb or low <= row.ema_fast or low < prev.low) and not breakdown_vol
-    reversal = right_side or (fear_rejected and recent_oversold_bb and back_inside_bb)
+    frequent_buy_setup = back_inside_bb and (recent_oversold_bb or row.rsi < 45 or row.rsi > prev.rsi)
+    transition_buy_setup = (
+        (fear_rejected or quiet_absorption or demand_tail or right_side)
+        and early_reclaim_context
+        and (transition_reclaim or local_higher_low or row.rsi > prev.rsi)
+        and not breakdown_vol
+    )
+    reversal = right_side or (
+        frequent_buy_setup
+        or (fear_rejected and recent_oversold_bb and back_inside_bb)
+        or transition_buy_setup
+    ) and (trend_condition or early_reclaim_context)
 
     if breakout:
         return "BREAKOUT BUY"
@@ -3113,19 +3185,36 @@ def classify_and_score(
     right_side = recent_oversold_bb and bb_reclaim and row.rsi > prev.rsi and (price_follow or bullish_reversal_close or demand_tail)
 
     trend_condition = close > row.ema_slow and row.ema_fast >= row.ema_slow
+    transition_reclaim = close > prev.high or (close > row.ema_fast and prev.close <= prev.ema_fast)
+    reclaiming_slow = close > row.ema_slow and prev.close <= prev.ema_slow
+    local_higher_low = low >= min(float(prev.low), float(d.iloc[i - 2].low)) and close >= prev.close
+    early_reclaim_context = (
+        close >= row.ema_slow
+        or reclaiming_slow
+        or (back_inside_bb and close >= row.bb_basis)
+        or (close > row.ema_fast and row.ema_fast >= row.ema_slow * 0.985)
+    )
     uptrend = close > row.ema_slow and row.ema_fast > row.ema_slow and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
     strong_momentum = close > row.ema_fast and row.ema_fast > row.ema_slow and row.ema_fast >= d.iloc[i - ema_slope_bars].ema_fast and row.ema_slow >= d.iloc[i - ema_slope_bars].ema_slow
     pullback_support = low <= row.ema_fast or low <= row.bb_basis or close <= row.ema_fast * 1.02
     shallow_pullback = low <= row.ema_fast * 1.015 or low <= row.bb_basis or close <= row.ema_fast * 1.025
     support_held = close > row.ema_slow and close > row.lower_bb
     early_support_zone = low <= row.ema_fast * 1.03 or low <= row.bb_basis * 1.02 or close <= row.ema_fast * 1.04
-    early_support_held = close > row.ema_slow and close >= row.lower_bb and row.close_loc >= 0.50
+    early_support_held = (close > row.ema_slow or early_reclaim_context) and close >= row.lower_bb and row.close_loc >= 0.50
     early_pullback_candle = demand_tail or constructive_close or (close >= prev.close and row.close_loc >= 0.50)
     standard_pullback_reversal = 40 <= row.rsi <= 60 and row.rsi > prev.rsi and (price_follow or constructive_close)
     momentum_pullback_reversal = 45 <= row.rsi <= 70 and row.rsi >= prev.rsi and (close > row.ema_fast or price_follow or constructive_close)
     pullback_reversal = standard_pullback_reversal or (strong_momentum and momentum_pullback_reversal)
     pullback = uptrend and (pullback_support or (strong_momentum and shallow_pullback)) and support_held and pullback_reversal
-    early_pullback = uptrend and early_support_zone and early_support_held and 38 <= row.rsi <= 68 and row.rsi >= prev.rsi - 2 and early_pullback_candle
+    early_pullback = (
+        (uptrend or early_reclaim_context)
+        and early_support_zone
+        and early_support_held
+        and 38 <= row.rsi <= 68
+        and row.rsi >= prev.rsi - 2
+        and early_pullback_candle
+        and not breakdown_vol
+    )
     recent_momentum_high = d["high"].iloc[i - 10 : i].max()
     momentum_dip = d["low"].iloc[i - 2 : i + 1].min() <= recent_momentum_high * 0.97
     momentum_reclaim = close > open_ and close > prev.close and close > row.ema_fast and row.close_loc >= 0.55
@@ -3134,7 +3223,17 @@ def classify_and_score(
     breakout_ext = (close - row.ema_fast) / atr_now if atr_now > 0 else 0
     breakout = strong_momentum and close >= breakout_level and close > prev.high and wide_bullish and 55 <= row.rsi <= 82 and breakout_ext <= 3.5 and row.macd_hist >= prev.macd_hist
     frequent_buy_setup = bb_touch_or_pierce and back_inside_bb and (rsi_near_oversold or rsi_turning_up)
-    profile_buy = (frequent_buy_setup or (fear_rejected and recent_oversold_bb and back_inside_bb)) and trend_condition
+    transition_buy_setup = (
+        (fear_rejected or quiet_absorption or demand_tail or right_side)
+        and early_reclaim_context
+        and (transition_reclaim or local_higher_low or row.rsi > prev.rsi)
+        and not breakdown_vol
+    )
+    profile_buy = (
+        frequent_buy_setup
+        or (fear_rejected and recent_oversold_bb and back_inside_bb)
+        or transition_buy_setup
+    ) and (trend_condition or early_reclaim_context)
     reversal = right_side or profile_buy
 
     selected = (
@@ -3225,7 +3324,19 @@ def classify_and_score(
     atr_extension_exhaustion = atr_extension >= 4.5 and (close_off_high or row.macd_hist < prev.macd_hist or row.rsi < prev.rsi)
     trend_damage = close < row.ema_fast or (row.macd_hist < 0 <= prev.macd_hist) or (row.rsi < prev.rsi and close < prev.low)
     confirmed_break = close < row.ema_fast and close < prev.low and ((close < open_ and row.close_loc <= 0.40 and row.body_pct >= 0.35) or breakdown_vol or row.macd_hist < prev.macd_hist)
-    exit_pressure = ((confirmed_exhaustion and confirmed_break) or atr_extension_exhaustion or (seller_control and (close_off_high or trend_damage)))
+    failed_intraday_strength = high > prev.high and close <= max(prev.close, open_) and row.close_loc <= 0.50
+    early_distribution_pressure = (
+        (dist_vol and (close_off_high or failed_intraday_strength))
+        or (seller_control and close_off_high)
+        or (greed_rejected and row.close_loc <= 0.50)
+        or (upper_wick > body_for_ratio * 1.8 and row.close_loc <= 0.45 and vol_ready and row.volume >= row.vol_ma)
+    )
+    exit_pressure = (
+        (confirmed_exhaustion and confirmed_break)
+        or atr_extension_exhaustion
+        or early_distribution_pressure
+        or (seller_control and (close_off_high or trend_damage))
+    )
 
     candle_entry_midpoint = (high + low) / 2
     prior_high = float(prev.high)
@@ -3428,6 +3539,20 @@ def classify_and_score(
     setup_context_score -= 10.0 if avoid or exit_pressure else 0.0
     setup_context_score = clamp_float(setup_context_score, 0.0, 100.0)
 
+    transition_edge_score = 45.0
+    transition_edge_score += 18.0 if fear_rejected else 0.0
+    transition_edge_score += 15.0 if quiet_absorption else 0.0
+    transition_edge_score += 14.0 if transition_buy_setup else 0.0
+    transition_edge_score += 12.0 if right_side else 0.0
+    transition_edge_score += 10.0 if transition_reclaim or reclaiming_slow else 0.0
+    transition_edge_score += 8.0 if local_higher_low and row.rsi >= prev.rsi else 0.0
+    transition_edge_score += 6.0 if accum_vol or breakout_vol else 0.0
+    transition_edge_score -= 18.0 if early_distribution_pressure else 0.0
+    transition_edge_score -= 16.0 if fomo or greed_rejected else 0.0
+    transition_edge_score -= 14.0 if breakdown_vol or seller_control else 0.0
+    transition_edge_score -= 10.0 if profile_extended_from_zone or extended_from_zone else 0.0
+    transition_edge_score = clamp_float(transition_edge_score, 0.0, 100.0)
+
     market_risk_adjustment = 0.0
     market_risk_adjustment -= 10.0 if market_permission_value == "BLOCK" else 0.0
     market_risk_adjustment -= 14.0 if risk_permission == "BLOCK" else 0.0
@@ -3435,10 +3560,12 @@ def classify_and_score(
     personality_bias_bonus += 4.0 if personality_profile["personality_type"] == "HIGH_BETA" and (fast_breakout_entry or momentum) else 0.0
     personality_bias_bonus += 4.0 if personality_profile["personality_type"] == "COMPOUNDER" and steady_trend and not profile_extended_from_zone else 0.0
     personality_bias_bonus += 3.0 if personality_profile["personality_type"] == "RANGE_BOUND" and (fear_rejected or quiet_absorption) else 0.0
+    score_weights = personality_weight_profile(personality_profile["personality_type"])
     next_day_bias_score = clamp_float(
-        emotion_score * 0.36
-        + trend_location_score * 0.34
-        + setup_context_score * 0.30
+        emotion_score * float(score_weights["emotion"])
+        + transition_edge_score * float(score_weights["transition"])
+        + setup_context_score * float(score_weights["setup"])
+        + trend_location_score * float(score_weights["trend"])
         + market_risk_adjustment
         + personality_bias_bonus,
         0.0,
@@ -3672,9 +3799,10 @@ def classify_and_score(
         rank = 30
 
     score = rank
-    score += 10 if mode == "POWER TREND" else 7 if mode == "STEADY TREND" else 4 if mode == "MEAN REVERSION" else 0
+    score += 4 if mode == "POWER TREND" else 3 if mode == "STEADY TREND" else 4 if mode == "MEAN REVERSION" else 0
     score += 8 if psych in {"FR", "QA", "BUYERS"} else -8 if psych in {"FOMO", "GR", "SELLERS"} else 0
-    score += min(max(trend_efficiency * 20, 0), 10)
+    score += min(max(trend_efficiency * 10, 0), 4)
+    score += max(0.0, min((transition_edge_score - 55.0) * 0.20, 8.0))
     score -= min(max(row.atr_pct - setup_max_atr, 0), 15)
     score -= max(0.0, (float(personality_profile["min_buy_quality"]) - buy_quality_score) * 0.25) if setup_forming else 0.0
     score += 4 if operator_pressure == "ACCUMULATION / ABSORPTION" else 0
@@ -3694,6 +3822,8 @@ def classify_and_score(
         notes.append("Fear rejected")
     if quiet_absorption:
         notes.append("Quiet absorption")
+    if transition_edge_score >= 65:
+        notes.append("Transition edge")
     if breakout:
         notes.append("Breakout attempt")
     if continuation_ok:
@@ -3734,6 +3864,12 @@ def classify_and_score(
         reason_codes.append("fear_rejection")
     if quiet_absorption:
         reason_codes.append("quiet_absorption")
+    if transition_buy_setup:
+        reason_codes.append("transition_buy_setup")
+    if transition_reclaim or reclaiming_slow:
+        reason_codes.append("early_reclaim")
+    if early_distribution_pressure:
+        reason_codes.append("early_distribution_pressure")
     if buyer_control:
         reason_codes.append("buyer_tape")
     if seller_control:
@@ -3820,6 +3956,12 @@ def classify_and_score(
         "emotion_score": round(float(emotion_score), 1),
         "trend_location_score": round(float(trend_location_score), 1),
         "setup_context_score": round(float(setup_context_score), 1),
+        "transition_edge_score": round(float(transition_edge_score), 1),
+        "personality_weight_label": score_weights["label"],
+        "personality_weight_emotion": round(float(score_weights["emotion"]), 2),
+        "personality_weight_transition": round(float(score_weights["transition"]), 2),
+        "personality_weight_setup": round(float(score_weights["setup"]), 2),
+        "personality_weight_trend": round(float(score_weights["trend"]), 2),
         "operator_pressure": operator_pressure,
         "operator_pressure_score": round(float(operator_pressure_score), 1),
         "operator_plan": operator_plan,
@@ -4007,6 +4149,12 @@ LATEST_SIGNAL_FIELDS = [
     "emotion_score",
     "trend_location_score",
     "setup_context_score",
+    "transition_edge_score",
+    "personality_weight_label",
+    "personality_weight_emotion",
+    "personality_weight_transition",
+    "personality_weight_setup",
+    "personality_weight_trend",
     "operator_pressure",
     "operator_pressure_score",
     "operator_plan",

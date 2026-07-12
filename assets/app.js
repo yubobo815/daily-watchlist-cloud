@@ -1274,6 +1274,12 @@ function renderScoreBreakdown(row) {
   const emotion = Number(payloadValue(row, "emotion_score"));
   const location = Number(payloadValue(row, "trend_location_score"));
   const setupContext = Number(payloadValue(row, "setup_context_score"));
+  const transitionEdge = Number(payloadValue(row, "transition_edge_score"));
+  const personalityWeightLabel = payloadValue(row, "personality_weight_label") || "balanced transition";
+  const personalityWeightEmotion = Number(payloadValue(row, "personality_weight_emotion"));
+  const personalityWeightTransition = Number(payloadValue(row, "personality_weight_transition"));
+  const personalityWeightSetup = Number(payloadValue(row, "personality_weight_setup"));
+  const personalityWeightTrend = Number(payloadValue(row, "personality_weight_trend"));
   const operatorPressure = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL";
   const operatorScore = Number(payloadValue(row, "operator_state_score") ?? payloadValue(row, "operator_pressure_score"));
   const demandControl = Number(payloadValue(row, "demand_control_score"));
@@ -1307,6 +1313,8 @@ function renderScoreBreakdown(row) {
     ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
     ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
     ["Operator", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
+    ["Transition Edge", Number.isFinite(transitionEdge) ? `${fmtNumber(transitionEdge, 0)}/100` : "n/a"],
+    ["Weight Model", `${personalityWeightLabel}${Number.isFinite(personalityWeightEmotion) ? ` E${fmtNumber(personalityWeightEmotion * 100, 0)} T${fmtNumber(personalityWeightTransition * 100, 0)} S${fmtNumber(personalityWeightSetup * 100, 0)} M${fmtNumber(personalityWeightTrend * 100, 0)}` : ""}`],
     ["Feedback", `${feedbackQuality}${Number.isFinite(feedbackReturn) ? ` ${fmtSignedNumber(feedbackReturn, 1)}%` : ""}${Number.isFinite(feedbackDrawdown) ? ` / DD ${fmtNumber(feedbackDrawdown, 1)}%` : ""}`],
     ["Trend", row.adaptive_mode || "Mixed"],
     ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
