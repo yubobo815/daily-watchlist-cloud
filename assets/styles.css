@@ -150,7 +150,9 @@ input:-webkit-autofill:focus {
 }
 
 body[data-page="watchlist"] .hero {
-  padding: 14px 16px;
+  padding: 12px 16px;
+  border-color: rgba(226, 232, 218, 0.2);
+  box-shadow: none;
 }
 
 @media (min-width: 961px) {
@@ -349,7 +351,7 @@ body[data-page="watchlist"] .meta {
 }
 
 .daily-brief {
-  margin: 14px 0 12px;
+  margin: 14px 0 10px;
 }
 
 .brief-card {
@@ -357,13 +359,67 @@ body[data-page="watchlist"] .meta {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px;
-  border: 1px solid rgba(46, 230, 159, 0.22);
-  border-radius: var(--radius-ios);
+  padding: 16px 18px;
+  border: 1px solid rgba(226, 232, 218, 0.17);
+  border-radius: 16px;
   background:
     linear-gradient(135deg, rgba(46, 230, 159, 0.13), rgba(114, 169, 255, 0.07)),
     rgba(16, 21, 29, 0.72);
-  box-shadow: var(--shadow);
+  box-shadow: none;
+}
+
+/* The watchlist is the decision surface. Keep auxiliary panels available,
+   but do not make them compete with the current execution read. */
+.secondary-insights {
+  margin: 12px 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.secondary-insights > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 2px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.secondary-insights > summary::-webkit-details-marker {
+  display: none;
+}
+
+.secondary-insights > summary::after {
+  content: "+";
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.secondary-insights[open] > summary::after {
+  content: "-";
+}
+
+.secondary-insights > summary span {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.secondary-insights > .today-focus,
+.secondary-insights > .changed-today,
+.secondary-insights > .price-movers,
+.secondary-insights > .focus-list {
+  margin-top: 12px;
 }
 
 .brief-kicker {
@@ -1474,6 +1530,29 @@ td:nth-child(5) {
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
+}
+
+body[data-page="watchlist"] .table-wrap {
+  border-color: rgba(226, 232, 218, 0.18);
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+body[data-page="watchlist"] .watchlist-heading {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+body[data-page="watchlist"] .controls {
+  padding: 10px 0;
+}
+
+body[data-page="watchlist"] #watchlist-body tr {
+  transition: background-color 160ms ease;
+}
+
+body[data-page="watchlist"] #watchlist-body tr:hover {
+  background: rgba(242, 245, 236, 0.035);
 }
 
 .gate-stack {

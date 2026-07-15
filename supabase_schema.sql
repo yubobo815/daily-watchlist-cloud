@@ -214,6 +214,10 @@ create table if not exists public.watchlist_signal_outcomes (
   prior_operator_state text,
   prior_anti_signal_level text,
   prior_close numeric,
+  entry_model_version text,
+  entry_eligible boolean,
+  entry_filled boolean,
+  entry_fill_est numeric,
   current_action text,
   current_operator_state text,
   current_close numeric,
@@ -244,6 +248,9 @@ create index if not exists watchlist_snapshots_action_score_idx
 
 create index if not exists watchlist_behavior_history_ticker_date_idx
   on public.watchlist_behavior_history (ticker, history_date desc);
+
+create index if not exists watchlist_behavior_history_ticker_run_date_idx
+  on public.watchlist_behavior_history (ticker, run_date desc);
 
 create index if not exists watchlist_refresh_runs_status_idx
   on public.watchlist_refresh_runs (run_date desc, status);
@@ -410,6 +417,10 @@ alter table public.watchlist_behavior_history add column if not exists feedback_
 alter table public.watchlist_behavior_history add column if not exists reason_codes jsonb not null default '[]'::jsonb;
 
 alter table public.watchlist_refresh_runs add column if not exists learning_history_rows integer;
+alter table public.watchlist_signal_outcomes add column if not exists entry_model_version text;
+alter table public.watchlist_signal_outcomes add column if not exists entry_eligible boolean;
+alter table public.watchlist_signal_outcomes add column if not exists entry_filled boolean;
+alter table public.watchlist_signal_outcomes add column if not exists entry_fill_est numeric;
 
 alter table public.watchlist_snapshots enable row level security;
 alter table public.watchlist_behavior_history enable row level security;

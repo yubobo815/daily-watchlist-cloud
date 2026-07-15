@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      reclaim_database_space:
+        description: "Run VACUUM FULL after retention cleanup (locks tables briefly)"
+        required: false
+        default: false
+        type: boolean
   schedule:
     # GitHub schedules use UTC. Running at both 21:00 and 22:00 UTC lets
     # the timezone gate below handle Australia/Melbourne daylight saving.
@@ -111,6 +117,20 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/supabase_learning_health.py
+
+      - name: Report Supabase storage
+        if: steps.time_gate.outputs.run == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        shell: bash
+        run: |
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
+          if [ "${{ inputs.reclaim_database_space }}" = "true" ]; then
+            echo "Reclaiming database space after retention cleanup."
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_behavior_history"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_behavior_history"
+          fi
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select pg_size_pretty(pg_database_size(current_database())) as database_size, pg_size_pretty(pg_total_relation_size('public.watchlist_behavior_history')) as behavior_history_total, count(*) as behavior_history_rows from public.watchlist_behavior_history"
 
       - name: Prepare Pages artifact
         if: steps.time_gate.outputs.run == 'true'

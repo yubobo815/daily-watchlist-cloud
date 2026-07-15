@@ -38,7 +38,8 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.06.12-context-overlays"
+SCANNER_VERSION = "2026.07.15-executable-learning"
+LEARNING_MODEL_VERSION = "next-session-zone-v1"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -936,7 +937,11 @@ OPTIONAL_REFRESH_RUN_COLUMNS = {
     "learning_history_rows",
 }
 
-SUPABASE_RETENTION_DAYS = int(os.getenv("SUPABASE_RETENTION_DAYS", "180"))
+# Each table has a different job. A single blanket retention window made the
+# replay table grow by every ticker x every replay day x every scanner run.
+SUPABASE_SNAPSHOT_RETENTION_DAYS = int(os.getenv("SUPABASE_SNAPSHOT_RETENTION_DAYS", "14"))
+SUPABASE_OUTCOME_RETENTION_DAYS = int(os.getenv("SUPABASE_OUTCOME_RETENTION_DAYS", "120"))
+SUPABASE_REFRESH_RUN_RETENTION_DAYS = int(os.getenv("SUPABASE_REFRESH_RUN_RETENTION_DAYS", "60"))
 SUPABASE_UPSERT_BATCH_SIZE = int(os.getenv("SUPABASE_UPSERT_BATCH_SIZE", "100"))
 ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().lower() in {"1", "true", "yes"}
 
@@ -1040,6 +1045,22 @@ def supabase_delete_older_than(table: str, date_column: str, cutoff_date: str) -
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:1000]
         raise RuntimeError(f"Supabase retention cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
+
+
+def supabase_delete_other_runs(table: str, run_date: str) -> None:
+    """Keep one canonical replay run; historical outcomes have their own table."""
+    url, key = supabase_credentials()
+    if not url or not key:
+        return
+    endpoint = f"{url}/rest/v1/{table}?run_date=neq.{urllib.parse.quote(str(run_date))}"
+    req = urllib.request.Request(endpoint, method="DELETE", headers=supabase_headers(key))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            if resp.status not in {200, 202, 204}:
+                raise RuntimeError(f"Supabase run cleanup for {table} returned HTTP {resp.status}")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Supabase run cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
 
 
 def supabase_delete_run_ticker(table: str, run_date: str, ticker: str) -> None:
@@ -1167,19 +1188,25 @@ def cleanup_supabase_failed_tickers(run_date: str, run_metadata: Optional[dict])
 
 
 def cleanup_supabase_retention(run_date: str) -> None:
-    if SUPABASE_RETENTION_DAYS <= 0:
-        return
-
-    cutoff = (datetime.fromisoformat(run_date).date() - timedelta(days=SUPABASE_RETENTION_DAYS)).isoformat()
-    cleanup_targets = [
-        ("watchlist_snapshots", "run_date"),
-        ("watchlist_behavior_history", "run_date"),
-        ("watchlist_signal_outcomes", "evaluation_run_date"),
-        ("watchlist_refresh_runs", "run_date"),
+    run_day = datetime.fromisoformat(run_date).date()
+    targets = [
+        ("watchlist_snapshots", "run_date", SUPABASE_SNAPSHOT_RETENTION_DAYS),
+        ("watchlist_signal_outcomes", "evaluation_run_date", SUPABASE_OUTCOME_RETENTION_DAYS),
+        ("watchlist_refresh_runs", "run_date", SUPABASE_REFRESH_RUN_RETENTION_DAYS),
     ]
-    for table, date_column in cleanup_targets:
-        supabase_delete_older_than(table, date_column, cutoff)
-    print(f"Supabase retention cleanup complete: kept rows from {cutoff} onward ({SUPABASE_RETENTION_DAYS} days).")
+    for table, date_column, retention_days in targets:
+        if retention_days > 0:
+            cutoff = (run_day - timedelta(days=retention_days)).isoformat()
+            supabase_delete_older_than(table, date_column, cutoff)
+
+    # The application serves only the latest replay run. Learning reads the
+    # compact outcome table, so prior replay runs are pure duplicated storage.
+    supabase_delete_other_runs("watchlist_behavior_history", run_date)
+    print(
+        "Supabase retention cleanup complete: "
+        f"snapshots={SUPABASE_SNAPSHOT_RETENTION_DAYS}d, outcomes={SUPABASE_OUTCOME_RETENTION_DAYS}d, "
+        f"runs={SUPABASE_REFRESH_RUN_RETENTION_DAYS}d, behavior_history=latest run only."
+    )
 
 
 def optional_signal_values(row: dict) -> dict:
@@ -1341,6 +1368,10 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
                     "prior_operator_state": row.get("prior_operator_state"),
                     "prior_anti_signal_level": row.get("prior_anti_signal_level"),
                     "prior_close": numeric_or_none(row.get("prior_close")),
+                    "entry_model_version": row.get("entry_model_version"),
+                    "entry_eligible": bool(row.get("entry_eligible")),
+                    "entry_filled": bool(row.get("entry_filled")),
+                    "entry_fill_est": numeric_or_none(row.get("entry_fill_est")),
                     "current_action": row.get("current_action"),
                     "current_operator_state": row.get("current_operator_state"),
                     "current_close": numeric_or_none(row.get("current_close")),
@@ -2205,13 +2236,47 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
     prior_close = numeric_or_none(prior.get("close"))
     current_close = numeric_or_none(current.get("close"))
     current_stale = str(current.get("freshness_block") or "").upper() == "YES"
-    if not prior_close or not current_close or float(prior_close) <= 0:
+    executable_action = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    zone_low = numeric_or_none(prior.get("entry_zone_low"))
+    zone_high = numeric_or_none(prior.get("entry_zone_high"))
+    entry_est = numeric_or_none(prior.get("entry_est"))
+    if zone_low is None or zone_high is None or zone_high < zone_low:
+        zone_low = entry_est
+        zone_high = entry_est
+    current_low = numeric_or_none(current.get("low"))
+    current_high = numeric_or_none(current.get("high"))
+    current_open = numeric_or_none(current.get("open"))
+    entry_filled = False
+    entry_fill_est = None
+    if executable_action and zone_low is not None and zone_high is not None and current_low is not None and current_high is not None:
+        entry_filled = float(current_low) <= float(zone_high) and float(current_high) >= float(zone_low)
+        if entry_filled:
+            candidate_open = float(current_open) if current_open is not None else float(zone_high)
+            entry_fill_est = min(max(candidate_open, float(zone_low)), float(zone_high))
+
+    # A close-only result promotes signals that could not have been entered.
+    # For entry-capable signals, require the next session to touch the zone.
+    if executable_action and not entry_filled:
+        return_pct = ""
+        outcome = "NOT_FILLED"
+        score = 0.0
+        reason = "Next session did not touch the planned entry zone; excluded from learning."
+    elif entry_filled and entry_fill_est and current_close:
+        return_pct = (float(current_close) / float(entry_fill_est) - 1) * 100
         outcome = "PENDING"
         score = 0.0
-        reason = "No valid close-to-close result yet."
+        reason = "Executable entry filled; evaluating next-session follow-through."
+    elif not prior_close or not current_close or float(prior_close) <= 0:
         return_pct = ""
+        outcome = "PENDING"
+        score = 0.0
+        reason = "No valid price result yet."
     else:
         return_pct = (float(current_close) / float(prior_close) - 1) * 100
+        outcome = "PENDING"
+        score = 0.0
+        reason = "Evaluating directional follow-through."
+    if outcome != "NOT_FILLED" and return_pct != "":
         current_action = current.get("action", "")
         prior_anti = str(prior.get("anti_signal_level") or "NONE").upper()
         prior_operator = str(prior.get("operator_state") or "").upper()
@@ -2323,6 +2388,10 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
         "prior_operator_state": prior.get("operator_state"),
         "prior_anti_signal_level": prior.get("anti_signal_level"),
         "prior_close": round(float(prior_close), 2) if prior_close else "",
+        "entry_model_version": LEARNING_MODEL_VERSION,
+        "entry_eligible": executable_action,
+        "entry_filled": entry_filled,
+        "entry_fill_est": round(float(entry_fill_est), 2) if entry_fill_est else "",
         "current_action": current.get("action"),
         "current_operator_state": current.get("operator_state"),
         "current_close": round(float(current_close), 2) if current_close else "",
@@ -2491,7 +2560,11 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
 def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
     if outcome_history.empty or "learning_key" not in outcome_history.columns:
         return {}
-    usable = outcome_history[outcome_history["outcome_label"].astype(str).str.upper() != "PENDING"].copy()
+    usable = outcome_history[outcome_history["outcome_label"].astype(str).str.upper().isin({"WORKING", "FAILED", "TRAP_AVOIDED", "STALE"})].copy()
+    # Legacy close-to-close rows have no execution model. Do not blend them
+    # into the new adaptive weights once executable samples exist.
+    if "entry_model_version" in usable.columns:
+        usable = usable[usable["entry_model_version"].astype(str) == LEARNING_MODEL_VERSION]
     if usable.empty:
         return {}
 
@@ -4201,7 +4274,9 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
                 d.iloc[:end].copy(),
                 prepared=True,
                 include_setup_stats=False,
-                include_audit_gates=False,
+                # Replay must use the same executable gates as production;
+                # otherwise learning can reward signals the app would block.
+                include_audit_gates=True,
             )
         except Exception:
             continue

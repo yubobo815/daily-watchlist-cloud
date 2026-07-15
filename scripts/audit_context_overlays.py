@@ -165,8 +165,8 @@ def audit_volatile_hold_has_consistent_score():
 
 def audit_behavior_history_seeds_learning():
     history_rows = [
-        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY"), "ticker": "MU"},
-        {**row("2026-06-02", "WATCH TREND", 104, setup="NONE"), "ticker": "MU"},
+        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101), "ticker": "MU"},
+        {**row("2026-06-02", "WATCH TREND", 104, setup="NONE", open=100, low=99.5, high=105), "ticker": "MU"},
         {**row("2026-06-03", "SETUP FORMING", 103, setup="PULLBACK BUY"), "ticker": "MU"},
     ]
     outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
@@ -175,8 +175,20 @@ def audit_behavior_history_seeds_learning():
     assert_true(first["signal_run_date"] == "2026-06-01", "backfilled sample must use prior history date")
     assert_true(first["evaluation_run_date"] == "2026-06-02", "backfilled sample must evaluate on next history date")
     assert_true(first["outcome_label"] == "WORKING", "BUY with follow-through should seed WORKING")
+    assert_true(first["entry_filled"] is True, "BUY learning must require a next-session entry-zone fill")
     stats = dwo.build_learning_stats(outcomes)
     assert_true(bool(stats), "backfilled outcomes should feed learning stats")
+
+
+def audit_unfilled_buy_is_excluded_from_learning():
+    history_rows = [
+        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101), "ticker": "MU"},
+        {**row("2026-06-02", "WATCH TREND", 108, setup="NONE", open=107, low=106, high=109), "ticker": "MU"},
+    ]
+    outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
+    first = outcomes.iloc[0].to_dict()
+    assert_true(first["outcome_label"] == "NOT_FILLED", "gap-away BUY must not be recorded as a working trade")
+    assert_true(not dwo.build_learning_stats(outcomes), "unfilled BUY must not change learning weights")
 
 
 def audit_defensive_learning_shows_samples_without_promotion():
@@ -315,6 +327,7 @@ def main():
     audit_range_bound_reclaim_cannot_skip_post_exit_cooldown()
     audit_volatile_hold_has_consistent_score()
     audit_behavior_history_seeds_learning()
+    audit_unfilled_buy_is_excluded_from_learning()
     audit_defensive_learning_shows_samples_without_promotion()
     audit_learning_lookback_stays_on_30_day_window()
     audit_learning_key_uses_behavior_not_ticker_identity()
