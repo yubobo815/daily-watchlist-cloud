@@ -12,10 +12,10 @@ on:
         default: false
         type: boolean
   schedule:
-    # GitHub schedules use UTC. Running at both 21:00 and 22:00 UTC lets
+    # GitHub schedules use UTC. Running at both 22:00 and 23:00 UTC lets
     # the timezone gate below handle Australia/Melbourne daylight saving.
-    # The gate accepts only 08:xx local time so the refresh runs once per day.
-    - cron: "0 21,22 * * *"
+    # 09:xx Melbourne leaves a buffer after the US regular-session close.
+    - cron: "0 22,23 * * *"
 
 permissions:
   contents: read
@@ -27,7 +27,8 @@ env:
 
 concurrency:
   group: daily-watchlist-pages
-  cancel-in-progress: true
+  # A cancelled run can stop after writes but before retention cleanup.
+  cancel-in-progress: false
 
 jobs:
   refresh-and-publish:
@@ -56,7 +57,7 @@ jobs:
           fi
 
           local_hour="$(TZ=Australia/Melbourne date +%H)"
-          if [ "$local_hour" = "08" ]; then
+          if [ "$local_hour" = "09" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -117,13 +118,18 @@ jobs:
         shell: bash
         run: |
           storage_soft_limit_bytes=209715200
-          storage_hard_limit_bytes=262144000
+          storage_hard_limit_bytes=250000000
           outcome_row_cap=25000
+          snapshot_retention_days=14
+          run_retention_days=60
+          current_run_date="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select max(run_date) from public.watchlist_snapshots")"
 
           # REST deletes are constrained by PostgREST statement timeouts. This
           # runs after a successful refresh and retains the current canonical replay.
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where run_date < (select max(run_date) from public.watchlist_behavior_history)"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where run_date <> date '$current_run_date'"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_signal_outcomes where (signal_run_date, evaluation_run_date, ticker) in (select signal_run_date, evaluation_run_date, ticker from public.watchlist_signal_outcomes order by evaluation_run_date desc, signal_run_date desc offset ${outcome_row_cap})"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_snapshots where run_date < date '$current_run_date' - ${snapshot_retention_days}"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_refresh_runs where run_date < date '$current_run_date' - ${run_retention_days}"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_snapshots"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_signal_outcomes"
@@ -161,6 +167,7 @@ jobs:
           git checkout -- index.html history.html assets manifest.webmanifest
           cp index.html public/index.html
           cp history.html public/history.html
+          cp ticker.html public/ticker.html
           cp manifest.webmanifest public/manifest.webmanifest
           cp -R assets public/assets
           cp daily_watchlist_overview_latest.csv public/daily_watchlist_overview_latest.csv

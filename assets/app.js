@@ -25,11 +25,14 @@ const UI_LABELS = {
     avoid: "AVOID"
   },
   columns: {
-    ticker: "Stock",
-    action: "Decision",
-    trade_context: "Why now",
-    risk_summary: "Execution & risk",
-    price_summary: "Price action"
+    ticker: "Ticker",
+    action: "Signal",
+    score: "Score",
+    entry_est: "Entry zone",
+    stop_est: "Stop",
+    risk_pct_to_stop: "Risk",
+    trade_context: "Signal rationale",
+    action_rail: "Action"
   },
   text: {
     watchlist: "Watchlist",
@@ -58,7 +61,7 @@ const UI_LABELS = {
   }
 };
 
-const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "trade_context", "risk_summary", "price_summary"];
+const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "score", "entry_est", "stop_est", "risk_pct_to_stop", "trade_context", "action_rail"];
 const ACTION_LABELS = UI_LABELS.actions;
 const SETUP_LABELS = UI_LABELS.setup;
 const KIND_LABELS = UI_LABELS.kinds;
@@ -411,7 +414,8 @@ const state = {
   focusPin: "",
   focusMessage: "",
   focusSyncing: false,
-  runInfo: null
+  runInfo: null,
+  selectedTicker: ""
 };
 
 function escapeHtml(value) {
@@ -624,7 +628,12 @@ function reasonCodes(row) {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
     } catch {
-      return raw.split(",").map((item) => item.trim()).filter(Boolean);
+      return raw
+        .replace(/^\s*\[/, "")
+        .replace(/\]\s*$/, "")
+        .split(",")
+        .map((item) => item.trim().replace(/^['\"]|['\"]$/g, ""))
+        .filter(Boolean);
     }
   }
   return [];
@@ -1415,6 +1424,31 @@ function renderRunHealthPanel(runInfo, rows = []) {
   panel.hidden = true;
 }
 
+function renderMarketRail(runInfo, rows = []) {
+  const rail = document.querySelector("#market-rail");
+  const heroBrief = document.querySelector("#hero-brief");
+  if (!rail && !heroBrief) return;
+  const health = runHealthStatus(runInfo, rows);
+  const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
+  const total = Number(runInfo?.symbols_total || rows.length || 0);
+  const coverage = total ? `${analyzed}/${total} analysed` : `${analyzed} analysed`;
+  const dataDate = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "Unavailable";
+  if (rail) rail.innerHTML = `
+    <span class="rail-brand">Daily Trading <b>Copilot</b></span>
+    <span>Data date <strong>${escapeHtml(dataDate)}</strong></span>
+    <span>Coverage <strong>${escapeHtml(coverage)}</strong></span>
+    <span class="rail-health tone-${health.tone}">${escapeHtml(health.label)}</span>
+  `;
+  if (heroBrief) heroBrief.innerHTML = `
+    <div><span class="eyebrow">Daily brief</span><p>${escapeHtml(health.detail || "No current data summary available.")}</p></div>
+    <dl>
+      <div><dt>Coverage</dt><dd>${escapeHtml(coverage)}</dd></div>
+      <div><dt>Data date</dt><dd>${escapeHtml(dataDate)}</dd></div>
+      <div><dt>Execution</dt><dd class="tone-${health.tone}">${escapeHtml(health.label)}</dd></div>
+    </dl>
+  `;
+}
+
 function runHealthStatus(runInfo, rows = []) {
   const failed = Number(runInfo?.symbols_failed || 0);
   const stale = Number(runInfo?.symbols_stale_cache || 0);
@@ -1481,6 +1515,7 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   if (disclaimer) disclaimer.textContent = APP_DISCLAIMER;
   if (runStatus && !(runInfo && Number(runInfo.payload?.stale_execution_blocks || 0))) runStatus.classList.remove("bad");
   renderRunHealthPanel(runInfo, rows);
+  renderMarketRail(runInfo, rows);
 }
 
 function fallbackAgeDays(runDate) {
@@ -1619,7 +1654,7 @@ function renderWatchlistCell(row, key) {
       <span class="ticker-cell ticker-cell-rich">
         <button class="focus-toggle ${isFocusTicker(row.ticker) ? "active" : ""}" type="button" data-focus-ticker="${escapeHtml(row.ticker)}" aria-label="${isFocusTicker(row.ticker) ? "Remove" : "Add"} ${escapeHtml(row.ticker)} from Focus List">★</button>
         <span class="ticker-copy">
-          <a class="ticker-link" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">${escapeHtml(row.ticker)}</a>
+          <button class="ticker-link ticker-select" type="button" data-select-ticker="${escapeHtml(row.ticker)}" aria-label="Review ${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</button>
           <span class="ticker-name">${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || row.ticker)}</span>
         </span>
       </span>
@@ -1632,6 +1667,7 @@ function renderWatchlistCell(row, key) {
     return renderDecisionSummary(row);
   }
   if (key === "price_summary") return renderPriceSummary(row);
+  if (key === "action_rail") return `<button class="action-rail action-${actionKind(row.action)}" type="button" data-select-ticker="${escapeHtml(row.ticker)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</button>`;
   if (key === "trade_context") return renderTradeContext(row);
   if (key === "risk_summary") return renderRiskSummary(row);
   if (key === "setup") {
@@ -1645,11 +1681,14 @@ function renderWatchlistCell(row, key) {
   if (key === "notes") {
     return renderReasonSummary(row);
   }
-  if (key === "score") return `<span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>`;
+  if (key === "score") return `<span class="table-score score-${strengthTone(row)}">${escapeHtml(fmtConviction(row))}</span>`;
   if (key === "day_change_pct") return renderMovePct(row[key]);
-  if (key === "risk_pct_to_stop") return escapeHtml(fmtNumber(payloadValue(row, "risk_pct_to_stop"), 1));
+  if (key === "risk_pct_to_stop") {
+    const risk = payloadNumeric(row, "risk_pct_to_stop");
+    return risk ? `<span class="risk-value">-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%</span>` : "-";
+  }
   if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
-  if (key === "entry_est") return escapeHtml(formatEntryZone(row));
+  if (key === "entry_est") return escapeHtml(formatEntryZone(row) || "-");
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }
@@ -1793,9 +1832,13 @@ function renderMobileWatchlistSummary(row) {
   const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
   const [riskTone, riskLabel] = riskSummaryLabel(row);
   const reasons = whyThisMatters(row).slice(0, 1);
+  const isRisk = ["exit", "avoid"].includes(kind);
+  const execution = isRisk
+    ? riskLabel
+    : `Entry ${formatEntryZone(row) || "-"} · Stop ${fmtNumber(row.stop_est, 2) || "-"}${payloadNumeric(row, "risk_pct_to_stop") ? ` · Risk ${fmtNumber(Math.abs(payloadNumeric(row, "risk_pct_to_stop")), 1)}%` : ""}`;
   return `
     <span class="mobile-watch-shell">
-      <a class="mobile-watch-row" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+      <a class="mobile-watch-row" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
         <span class="mobile-watch-main">
           <strong>${escapeHtml(row.ticker)}</strong>
           <span>${escapeHtml(company)}</span>
@@ -1804,6 +1847,7 @@ function renderMobileWatchlistSummary(row) {
             <span class="badge entry-pill entry-${riskTone}">${escapeHtml(riskLabel)}</span>
             <span>${escapeHtml(reasons[0] || behaviorDetail(row))}</span>
           </span>
+          <span class="mobile-execution">${escapeHtml(execution)}</span>
         </span>
         <span class="mobile-watch-price">
           <strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>
@@ -1813,6 +1857,44 @@ function renderMobileWatchlistSummary(row) {
       <button class="focus-toggle mobile-focus-toggle ${isFocusTicker(row.ticker) ? "active" : ""}" type="button" data-focus-ticker="${escapeHtml(row.ticker)}" aria-label="${isFocusTicker(row.ticker) ? "Remove" : "Add"} ${escapeHtml(row.ticker)} from Focus List">★</button>
     </span>
   `;
+}
+
+function selectedRow() {
+  return state.rows.find((row) => row.ticker === state.selectedTicker) || state.visibleRows[0] || state.rows[0] || null;
+}
+
+function renderTickerDetailPanel() {
+  const panel = document.querySelector("#ticker-detail-panel");
+  if (!panel) return;
+  const row = selectedRow();
+  if (!row) { panel.innerHTML = ""; return; }
+  state.selectedTicker = row.ticker;
+  const kind = actionKind(row.action);
+  const risk = payloadNumeric(row, "risk_pct_to_stop");
+  const target = numericValue(row, "target_est");
+  const operator = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "Unavailable";
+  panel.innerHTML = `
+    <div class="detail-panel-head"><div><span class="eyebrow">Selected plan</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open</a></div>
+    <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
+    <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+    <dl class="execution-sheet">
+      <div><dt>Entry zone</dt><dd>${escapeHtml(formatEntryZone(row) || "Unavailable")}</dd></div>
+      <div><dt>Stop</dt><dd>${escapeHtml(fmtNumber(row.stop_est, 2) || "Unavailable")}</dd></div>
+      <div><dt>Risk</dt><dd class="risk-value">${risk ? `-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%` : "Unavailable"}</dd></div>
+      <div><dt>Target estimate</dt><dd>${escapeHtml(target ? fmtNumber(target, 2) : "Unavailable")}</dd></div>
+      <div><dt>Operator state</dt><dd>${escapeHtml(operator)}</dd></div>
+    </dl>
+    <section class="detail-rationale"><span class="eyebrow">Signal rationale</span><p>${escapeHtml(behaviorDetail(row))}</p></section>
+    <p class="detail-confirm">Confirm any BUY on the TradingView Pine chart before acting.</p>
+  `;
+}
+
+function selectTicker(ticker) {
+  state.selectedTicker = normaliseTicker(ticker);
+  const params = new URLSearchParams(window.location.search);
+  params.set("ticker", state.selectedTicker);
+  window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
+  renderTickerDetailPanel();
 }
 
 function renderCards(counts) {
@@ -1885,7 +1967,7 @@ function renderDailyBrief(counts) {
         ${renderTrafficHealth(state.runInfo, state.rows)}
       </div>
       <div class="brief-actions">
-        ${topBuy ? `<a class="brief-primary" href="./history.html?ticker=${encodeURIComponent(topBuy.ticker)}">${escapeHtml(copyText("reviewTicker", { ticker: topBuy.ticker }))}</a>` : ""}
+        ${topBuy ? `<a class="brief-primary" href="./ticker.html?ticker=${encodeURIComponent(topBuy.ticker)}">${escapeHtml(copyText("reviewTicker", { ticker: topBuy.ticker }))}</a>` : ""}
         <button class="brief-secondary" type="button" data-filter-brief="buy">${escapeHtml(copyText("showBuy"))}</button>
       </div>
     </div>
@@ -1912,7 +1994,7 @@ function focusItem(row, reason) {
   if (!row) return "";
   const kind = actionKind(row.action);
   return `
-    <a class="focus-item tone-${kind}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+    <a class="focus-item tone-${kind}" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
       <span class="focus-kicker">${escapeHtml(reason)}</span>
       <span class="focus-main">
         <strong>${escapeHtml(row.ticker)}</strong>
@@ -1962,7 +2044,7 @@ function renderTodayFocus() {
 function changedTodayCard({ row, previous, pricePct }, duplicate = false) {
   const signal = ACTION_LABELS[row.action] || row.action || "Signal";
   return `
-    <a class="change-card tone-${actionKind(row.action)}" href="./history.html?ticker=${encodeURIComponent(row.ticker)}"${duplicate ? ' aria-hidden="true" tabindex="-1"' : ""}>
+    <a class="change-card tone-${actionKind(row.action)}" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}"${duplicate ? ' aria-hidden="true" tabindex="-1"' : ""}>
       <div class="change-card-head">
         <strong>${escapeHtml(row.ticker)}</strong>
         <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
@@ -2090,7 +2172,7 @@ function renderFocusList() {
         const previous = previousRowFor(row);
         return `
           <div class="focus-list-item tone-${kind}">
-            <a class="focus-list-link" href="./history.html?ticker=${encodeURIComponent(row.ticker)}">
+            <a class="focus-list-link" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
               <span>
                 <strong>${escapeHtml(row.ticker)}</strong>
                 <small>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</small>
@@ -2184,11 +2266,12 @@ function renderWatchlist() {
   const columns = watchlistColumns();
   document.querySelector("#watchlist-head").innerHTML = `<tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>`;
   document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
-    <tr class="row-${actionKind(row.action)}" style="--score-pct: ${fmtConviction(row)}%">
+    <tr class="row-${actionKind(row.action)} ${row.ticker === state.selectedTicker ? "selected" : ""}" style="--score-pct: ${fmtConviction(row)}%">
       ${columns.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk", "price_summary"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");
+  document.querySelectorAll("[data-select-ticker]").forEach((button) => button.addEventListener("click", () => selectTicker(button.dataset.selectTicker)));
   document.querySelectorAll("[data-focus-ticker]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
@@ -2210,6 +2293,7 @@ function renderWatchlist() {
   const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
   if (watchlistTitle) watchlistTitle.textContent = searchActive ? copyText("searchResults") : copyText("watchlist");
   document.querySelector("#empty").classList.toggle("hidden", state.visibleRows.length > 0);
+  renderTickerDetailPanel();
 }
 
 function scrollToWatchlistResults() {
@@ -2260,7 +2344,6 @@ async function initWatchlist() {
   };
   const updateSearch = (value, shouldScroll = true) => {
     state.query = value;
-    if (state.query.trim()) state.filter = "all";
     syncSearchClear();
     renderWatchlist();
     if (shouldScroll && state.query.trim()) scrollToWatchlistResults();
@@ -2302,6 +2385,7 @@ async function initWatchlist() {
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
     state.previousRows = latestPayload.previousRows || [];
     state.previousByTicker = rowByTicker(state.previousRows);
+    state.selectedTicker = normaliseTicker(new URLSearchParams(window.location.search).get("ticker") || state.rows[0]?.ticker || "");
     if (!state.rows.length) {
       const fallback = await loadStaticLatestRows();
       state.rows = fallback.rows;
@@ -2352,11 +2436,14 @@ function renderLatestHistoryPanel(latest) {
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
         <div><span>Trend Quality</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
         <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
-        <div><span>Ref Zone</span><strong>${escapeHtml(formatEntryZone(latest))}</strong></div>
+        <div><span>Entry Zone</span><strong>${escapeHtml(formatEntryZone(latest) || "Unavailable")}</strong></div>
         <div><span>Stop</span><strong>${fmtNumber(latest.stop_est, 2) || "-"}</strong></div>
+        <div><span>Risk</span><strong>${payloadNumeric(latest, "risk_pct_to_stop") ? `-${fmtNumber(Math.abs(payloadNumeric(latest, "risk_pct_to_stop")), 1)}%` : "Unavailable"}</strong></div>
+        <div><span>Target Estimate</span><strong>${fmtNumber(latest.target_est, 2) || "Unavailable"}</strong></div>
       </div>
       ${renderScoreBreakdown(latest)}
       ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
+      <p class="pine-confirmation">Confirm a BUY on the TradingView Pine chart before acting.</p>
     </div>
   `;
 }
@@ -2500,7 +2587,7 @@ function renderHistoryRows() {
         </div>
       </div>
     `).join("")}
-    <details class="raw-history" open>
+    <details class="raw-history">
       <summary>Show Earlier Days</summary>
       <div class="lookback-grid">
       ${lookbackRows.length ? lookbackRows.map((row) => `
@@ -2539,7 +2626,7 @@ async function loadHistory(ticker) {
     <div class="company-context-empty subtle">Loading company context...</div>
   `;
   document.title = state.ticker;
-  window.history.replaceState(null, "", `./history.html?ticker=${encodeURIComponent(state.ticker)}`);
+  window.history.replaceState(null, "", `./ticker.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
   document.querySelector("#run-status").textContent = "No history loaded";
   document.querySelector("#run-status").classList.add("bad");

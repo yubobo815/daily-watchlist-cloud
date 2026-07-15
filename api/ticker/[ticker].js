@@ -43,7 +43,8 @@ async function handler(request, response) {
   }
 
   try {
-    const runRows = await supabaseSelect(`watchlist_behavior_history?select=run_date&ticker=eq.${encodeFilterValue(ticker)}&order=run_date.desc&limit=1`);
+    // The list page is snapshot-led, so detail must use the identical current run.
+    const runRows = await supabaseSelect("watchlist_snapshots?select=run_date&order=run_date.desc&limit=1");
     const latest = runRows[0]?.run_date;
     if (!latest) {
       response.status(404).json({ error: `No 30-day history found for ${ticker}.` });

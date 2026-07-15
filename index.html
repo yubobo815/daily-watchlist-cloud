@@ -12,12 +12,13 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=execution-queues-20260716">
-    <script defer src="./assets/app.js?v=execution-queues-20260716"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=editorial-workspace-20260716">
+    <script defer src="./assets/app.js?v=editorial-workspace-20260716"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
-      <section class="hero">
+      <section id="market-rail" class="market-rail" aria-label="Data freshness"></section>
+      <section class="hero editorial-hero">
         <div>
           <a class="brand" href="./" aria-label="Daily Trade Copilot home">
             <span class="brand-mark" aria-hidden="true">
@@ -33,6 +34,7 @@
           <div id="run-status" class="status bad">Waiting for database config</div>
           <p id="app-disclaimer" class="app-disclaimer"></p>
         </div>
+        <div id="hero-brief" class="hero-brief" aria-live="polite"></div>
       </section>
 
       <section class="mobile-search-panel" aria-label="Mobile watchlist search">
@@ -67,6 +69,7 @@
         <section id="focus-list" class="focus-list"></section>
       </details>
 
+      <section class="watchlist-workspace">
       <section id="watchlist-table" class="table-wrap">
         <div class="section-heading watchlist-heading">
           <div>
@@ -92,6 +95,8 @@
           <tbody id="watchlist-body"></tbody>
         </table>
         <div id="empty" class="empty hidden">No matching rows yet.</div>
+      </section>
+      <aside id="ticker-detail-panel" class="ticker-detail-panel" aria-label="Selected ticker execution plan"></aside>
       </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">

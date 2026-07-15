@@ -5455,7 +5455,9 @@ def main() -> None:
     status_text = " | ".join(status_parts)
     preflight_text = None if live_access_ok else f"{live_access_message} Running cache-backed refresh."
     run_status = "ok"
-    if not live_access_ok or stale_cache_fallbacks:
+    # A partial scan is usable for context, but must never be reported as a
+    # fully healthy daily run when symbols failed to refresh.
+    if not live_access_ok or stale_cache_fallbacks or failures:
         run_status = "degraded"
     if failures and not rows:
         run_status = "failed"

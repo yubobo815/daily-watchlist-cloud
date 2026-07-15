@@ -75,12 +75,34 @@ function auditSearchBehavior() {
 function auditDecisionFunnelUi() {
   const appSource = fs.readFileSync("assets/app.js", "utf8");
   const pageSource = fs.readFileSync("index.html", "utf8");
+  const tickerSource = fs.readFileSync("ticker.html", "utf8");
   assert(appSource.includes("function executionQueues(counts)"), "watchlist must render execution queues");
   assert(appSource.includes('state.filter === "building"'), "BUILDING queue must retain Trending, Building, and Watch rows");
   assert(appSource.includes('state.filter === "risk"'), "RISK queue must retain Exit and Avoid rows");
   assert(pageSource.includes('id="market-activity"'), "secondary market activity must have a navigable target");
   assert(appSource.includes("target.open = true"), "Activity navigation must open the details drawer before scrolling");
+  assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker execution panel");
+  assert(appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must retain the Pine confirmation boundary");
+  assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
+  assert(tickerSource.includes("editorial-workspace-20260716"), "ticker detail must load the current shared application bundle");
+  assert(!appSource.includes('if (state.query.trim()) state.filter = "all"'), "search must preserve the selected decision queue");
   return { executionQueues: 3, activityTarget: "market-activity" };
+}
+
+function auditStorageGuard() {
+  const workflow = fs.readFileSync(".github/workflows/daily-watchlist-pages.yml", "utf8");
+  assert(workflow.includes("cancel-in-progress: false"), "refresh must not cancel a run before retention cleanup");
+  assert(workflow.includes("storage_hard_limit_bytes=250000000"), "database hard cap must be 250,000,000 bytes");
+  assert(workflow.includes("delete from public.watchlist_snapshots"), "SQL fallback must retain snapshots");
+  assert(workflow.includes("delete from public.watchlist_refresh_runs"), "SQL fallback must retain refresh runs");
+  assert(workflow.includes("where run_date <> date '$current_run_date'"), "replay retention must target the verified current run");
+  return { hardCapBytes: 250000000 };
+}
+
+function auditPartialRunStatus() {
+  const scanner = fs.readFileSync("daily_watchlist_overview.py", "utf8");
+  assert(scanner.includes("not live_access_ok or stale_cache_fallbacks or failures"), "partial ticker failures must mark a daily refresh degraded");
+  return { partialFailures: "degraded" };
 }
 
 function auditStaticFallback() {
@@ -413,6 +435,8 @@ const result = {
   historicalReplayDto: auditHistoricalReplayDto(),
   searchBehavior: auditSearchBehavior(),
   decisionFunnelUi: auditDecisionFunnelUi(),
+  storageGuard: auditStorageGuard(),
+  partialRunStatus: auditPartialRunStatus(),
   runHealthProviders: auditRunHealthProviderPayload(),
   tickerDetailMerge: auditTickerDetailMerge(),
 };
