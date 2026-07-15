@@ -116,14 +116,31 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         shell: bash
         run: |
+          storage_soft_limit_bytes=209715200
+          storage_hard_limit_bytes=262144000
+          outcome_row_cap=25000
+
           # REST deletes are constrained by PostgREST statement timeouts. This
           # runs after a successful refresh and retains the current canonical replay.
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where run_date < (select max(run_date) from public.watchlist_behavior_history)"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_signal_outcomes where (signal_run_date, evaluation_run_date, ticker) in (select signal_run_date, evaluation_run_date, ticker from public.watchlist_signal_outcomes order by evaluation_run_date desc, signal_run_date desc offset ${outcome_row_cap})"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
-          if [ "${{ inputs.reclaim_database_space }}" = "true" ]; then
-            echo "Reclaiming database space after retention cleanup."
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_snapshots"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_signal_outcomes"
+          database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
+          if [ "${{ inputs.reclaim_database_space }}" = "true" ] || [ "$database_bytes" -gt "$storage_soft_limit_bytes" ]; then
+            echo "Reclaiming physical storage (database_bytes=$database_bytes)."
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_behavior_history"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_snapshots"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_signal_outcomes"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_behavior_history"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_snapshots"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_signal_outcomes"
+          fi
+          database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
+          if [ "$database_bytes" -gt "$storage_hard_limit_bytes" ]; then
+            echo "Database exceeds the 250 MB hard limit after cleanup: $database_bytes bytes"
+            exit 1
           fi
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select pg_size_pretty(pg_database_size(current_database())) as database_size, pg_size_pretty(pg_total_relation_size('public.watchlist_behavior_history')) as behavior_history_total, count(*) as behavior_history_rows from public.watchlist_behavior_history"
 

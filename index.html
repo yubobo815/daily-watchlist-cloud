@@ -12,8 +12,8 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=decision-surface-20260715">
-    <script defer src="./assets/app.js?v=decision-surface-20260715"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=execution-queues-20260716">
+    <script defer src="./assets/app.js?v=execution-queues-20260716"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -59,8 +59,8 @@
 
       <section id="cards" class="cards"></section>
 
-      <details class="secondary-insights">
-        <summary>Secondary insights <span>changes, movers, saved names</span></summary>
+      <details id="market-activity" class="secondary-insights">
+        <summary>Market activity <span>changes, movers, saved names</span></summary>
         <section id="today-focus" class="today-focus"></section>
         <section id="signal-changes" class="changed-today"></section>
         <section id="price-movers" class="price-movers"></section>
@@ -96,8 +96,7 @@
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
       <a href="#daily-brief" class="active"><span>Brief</span></a>
-      <a href="#today-focus"><span>Focus</span></a>
-      <a href="#signal-changes"><span>Changes</span></a>
+      <a href="#market-activity"><span>Activity</span></a>
       <a href="#watchlist-table"><span>Watchlist</span></a>
     </nav>
   </body>

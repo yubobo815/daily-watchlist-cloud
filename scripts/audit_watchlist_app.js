@@ -72,6 +72,17 @@ function auditSearchBehavior() {
   };
 }
 
+function auditDecisionFunnelUi() {
+  const appSource = fs.readFileSync("assets/app.js", "utf8");
+  const pageSource = fs.readFileSync("index.html", "utf8");
+  assert(appSource.includes("function executionQueues(counts)"), "watchlist must render execution queues");
+  assert(appSource.includes('state.filter === "building"'), "BUILDING queue must retain Trending, Building, and Watch rows");
+  assert(appSource.includes('state.filter === "risk"'), "RISK queue must retain Exit and Avoid rows");
+  assert(pageSource.includes('id="market-activity"'), "secondary market activity must have a navigable target");
+  assert(appSource.includes("target.open = true"), "Activity navigation must open the details drawer before scrolling");
+  return { executionQueues: 3, activityTarget: "market-activity" };
+}
+
 function auditStaticFallback() {
   const payload = staticLatestPayload();
   assert(Array.isArray(payload.rows), "static fallback rows must be an array");
@@ -401,6 +412,7 @@ const result = {
   supabaseFallback: auditSupabaseFallback(),
   historicalReplayDto: auditHistoricalReplayDto(),
   searchBehavior: auditSearchBehavior(),
+  decisionFunnelUi: auditDecisionFunnelUi(),
   runHealthProviders: auditRunHealthProviderPayload(),
   tickerDetailMerge: auditTickerDetailMerge(),
 };

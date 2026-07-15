@@ -26,10 +26,10 @@ const UI_LABELS = {
   },
   columns: {
     ticker: "Stock",
-    action: "Action",
-    trade_context: "Read",
-    risk_summary: "Risk",
-    price_summary: "Price"
+    action: "Decision",
+    trade_context: "Why now",
+    risk_summary: "Execution & risk",
+    price_summary: "Price action"
   },
   text: {
     watchlist: "Watchlist",
@@ -59,8 +59,6 @@ const UI_LABELS = {
 };
 
 const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "trade_context", "risk_summary", "price_summary"];
-const SUMMARY_CARD_KEYS = ["buy", "continue", "setup", "watch", "exit", "avoid"];
-
 const ACTION_LABELS = UI_LABELS.actions;
 const SETUP_LABELS = UI_LABELS.setup;
 const KIND_LABELS = UI_LABELS.kinds;
@@ -162,8 +160,24 @@ function watchlistColumns() {
   return WATCHLIST_COLUMN_KEYS.map((key) => [key, UI_LABELS.columns[key] || key]);
 }
 
-function summaryCards() {
-  return SUMMARY_CARD_KEYS.map((key) => [key, KIND_LABELS[key] || String(key).toUpperCase()]);
+function executionQueues(counts) {
+  return [
+    { key: "buy", filter: "buy", label: "BUY", count: counts.buy || 0, detail: "Pine-confirmed entry only" },
+    {
+      key: "building",
+      filter: "building",
+      label: "BUILDING",
+      count: (counts.continue || 0) + (counts.setup || 0) + (counts.watch || 0),
+      detail: `${counts.continue || 0} trending · ${counts.setup || 0} setup · ${counts.watch || 0} watch`,
+    },
+    {
+      key: "risk",
+      filter: "risk",
+      label: "RISK",
+      count: (counts.exit || 0) + (counts.avoid || 0),
+      detail: `${counts.exit || 0} exit · ${counts.avoid || 0} avoid`,
+    },
+  ];
 }
 
 const COMPANY_PROFILE_FALLBACKS = {
@@ -1803,10 +1817,11 @@ function renderMobileWatchlistSummary(row) {
 
 function renderCards(counts) {
   const cards = document.querySelector("#cards");
-  cards.innerHTML = summaryCards().map(([kind, label]) => `
-    <button class="card tone-${kind} ${state.filter === kind ? "active" : ""}" type="button" data-filter="${kind}">
-      <span>${label}</span>
-      <strong>${counts[kind] || 0}</strong>
+  cards.innerHTML = executionQueues(counts).map((queue) => `
+    <button class="card execution-queue tone-${queue.key} ${state.filter === queue.filter ? "active" : ""}" type="button" data-filter="${queue.filter}">
+      <span>${escapeHtml(queue.label)}</span>
+      <strong>${queue.count}</strong>
+      <small>${escapeHtml(queue.detail)}</small>
     </button>
   `).join("");
   cards.querySelectorAll("[data-filter]").forEach((card) => {
@@ -2148,7 +2163,12 @@ function renderWatchlist() {
   const [sortKey, direction] = state.sort.split("-");
   const multiplier = direction === "asc" ? 1 : -1;
   state.visibleRows = state.rows
-    .filter((row) => state.filter === "all" || actionKind(row.action) === state.filter)
+    .filter((row) => {
+      const kind = actionKind(row.action);
+      if (state.filter === "building") return ["continue", "setup", "watch"].includes(kind);
+      if (state.filter === "risk") return ["exit", "avoid"].includes(kind);
+      return state.filter === "all" || kind === state.filter;
+    })
     .filter((row) => rowMatchesSearch(row, state.query, exactTickerNeedle))
     .sort((a, b) => {
       if (sortKey === "ticker") return a.ticker.localeCompare(b.ticker) * multiplier;
@@ -2214,6 +2234,7 @@ function initTabNavigation() {
       const target = hash ? document.querySelector(hash) : null;
       if (!target) return;
       event.preventDefault();
+      if (target instanceof HTMLDetailsElement) target.open = true;
       setActive(hash);
       const stickyOffset = window.matchMedia("(max-width: 960px)").matches ? 150 : 24;
       const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY - stickyOffset);

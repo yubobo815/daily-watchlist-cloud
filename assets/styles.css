@@ -673,14 +673,14 @@ body[data-page="watchlist"] .meta {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 12px 0;
 }
 
 .card {
-  min-height: 76px;
-  padding: 12px;
+  min-height: 100px;
+  padding: 13px 14px;
   text-align: left;
   border: 1px solid var(--line-soft);
   border-top: 4px solid var(--tone-avoid);
@@ -704,7 +704,7 @@ body[data-page="watchlist"] .meta {
 
 .card span {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   font-size: 11px;
 }
 
@@ -713,6 +713,41 @@ body[data-page="watchlist"] .meta {
   font-family: var(--font-data);
   font-size: clamp(24px, 3vw, 30px);
   line-height: 1;
+}
+
+.execution-queue {
+  position: relative;
+  overflow: hidden;
+}
+
+.execution-queue::after {
+  content: "";
+  position: absolute;
+  right: -18px;
+  bottom: -26px;
+  width: 96px;
+  height: 96px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.12;
+}
+
+.execution-queue small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.card.tone-building {
+  border-top-color: var(--tone-setup);
+}
+
+.card.tone-risk {
+  border-top-color: var(--tone-exit);
 }
 
 .tone-buy,
