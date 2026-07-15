@@ -32,7 +32,6 @@ const UI_LABELS = {
     stop_est: "Stop",
     risk_pct_to_stop: "Risk",
     trade_context: "Signal rationale",
-    action_rail: "Action"
   },
   text: {
     watchlist: "Watchlist",
@@ -61,7 +60,7 @@ const UI_LABELS = {
   }
 };
 
-const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "score", "entry_est", "stop_est", "risk_pct_to_stop", "trade_context", "action_rail"];
+const WATCHLIST_COLUMN_KEYS = ["ticker", "action", "score", "entry_est", "stop_est", "risk_pct_to_stop", "trade_context"];
 const ACTION_LABELS = UI_LABELS.actions;
 const SETUP_LABELS = UI_LABELS.setup;
 const KIND_LABELS = UI_LABELS.kinds;
@@ -1434,7 +1433,7 @@ function renderMarketRail(runInfo, rows = []) {
   const coverage = total ? `${analyzed}/${total} analysed` : `${analyzed} analysed`;
   const dataDate = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "Unavailable";
   if (rail) rail.innerHTML = `
-    <span class="rail-brand">Daily Trading <b>Copilot</b></span>
+    <span class="rail-brand">Daily Trade <b>Copilot</b></span>
     <span>US close <strong>${escapeHtml(dataDate)}</strong></span>
     <span>Coverage <strong>${escapeHtml(coverage)}</strong></span>
     <span class="rail-health tone-${health.tone}">${escapeHtml(health.label)}</span>
@@ -1667,7 +1666,6 @@ function renderWatchlistCell(row, key) {
     return renderDecisionSummary(row);
   }
   if (key === "price_summary") return renderPriceSummary(row);
-  if (key === "action_rail") return `<button class="action-rail action-${actionKind(row.action)}" type="button" data-select-ticker="${escapeHtml(row.ticker)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</button>`;
   if (key === "trade_context") return renderTradeContext(row);
   if (key === "risk_summary") return renderRiskSummary(row);
   if (key === "setup") {
