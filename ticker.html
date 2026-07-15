@@ -9,17 +9,18 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=editorial-workspace-20260716">
-    <script defer src="./assets/app.js?v=editorial-workspace-20260716"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=unified-workspace-20260716">
+    <script defer src="./assets/app.js?v=unified-workspace-20260716"></script>
   </head>
-  <body data-page="history">
+  <body data-page="history" class="ticker-page">
     <main class="shell">
-      <section class="hero"><div>
-        <a class="brand" href="./" aria-label="Daily Trade Copilot home"><span class="brand-mark" aria-hidden="true"><img src="./assets/brand/concept-c-app-icon.svg" alt=""></span><span class="brand-copy"><span class="brand-name">Daily Trade Copilot</span><span class="brand-subtitle">Detail</span></span></a>
+      <section id="market-rail" class="market-rail ticker-rail" aria-label="Data freshness"></section>
+      <section class="hero editorial-hero ticker-hero"><div>
+        <a class="brand" href="./" aria-label="Daily Trade Copilot home"><span class="brand-mark" aria-hidden="true"><img src="./assets/brand/concept-c-app-icon.svg" alt=""></span><span class="brand-copy"><span class="brand-name">Daily Trading Copilot</span><span class="brand-subtitle">Ticker detail</span></span></a>
         <h1 id="history-title">Oracle</h1><div id="ticker-name" class="subtle ticker-name"></div><p id="status" class="subtle meta">Loading ticker history...</p><div id="run-status" class="status bad">No history loaded</div><p id="app-disclaimer" class="app-disclaimer"></p>
-      </div></section>
+      </div><div id="hero-brief" class="hero-brief ticker-hero-brief" aria-live="polite"></div></section>
       <section class="history-grid">
-        <aside id="snapshot" class="panel block-current-read"><h2>Current Read</h2><form id="ticker-form"><label class="subtle" for="ticker">Ticker</label><input id="ticker" class="ticker-input" autocomplete="off"><button class="button primary" type="submit">Show History</button></form><div id="latest-panel" class="timeline"></div></aside>
+        <aside id="snapshot" class="panel block-current-read"><div class="panel-heading"><span class="eyebrow">Execution plan</span><h2>Current Read</h2></div><form id="ticker-form"><label class="subtle" for="ticker">Ticker</label><input id="ticker" class="ticker-input" placeholder="Ticker symbol" autocomplete="off"><button class="button primary" type="submit">View</button></form><div id="latest-panel" class="timeline"></div></aside>
         <section id="behavior" class="panel block-behavior-journey"><h2>Behavior Journey</h2><div id="history-visual" class="history-visual"><div class="empty">Loading visual history...</div></div><div id="timeline" class="timeline"><div class="empty">Loading history...</div></div></section>
         <section id="company-context" class="panel block-company-context"><h2>Company Context</h2><div class="company-context-empty subtle">Loading company context...</div></section>
       </section>

@@ -84,7 +84,9 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker execution panel");
   assert(appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must retain the Pine confirmation boundary");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
-  assert(tickerSource.includes("editorial-workspace-20260716"), "ticker detail must load the current shared application bundle");
+  assert(tickerSource.includes("unified-workspace-20260716"), "ticker detail must load the current shared application bundle");
+  assert(pageSource.includes('data-mobile-filter="building"'), "mobile Building filter must use the aggregate queue");
+  assert(pageSource.includes('data-mobile-filter="risk"'), "mobile Risk filter must use the aggregate queue");
   assert(!appSource.includes('if (state.query.trim()) state.filter = "all"'), "search must preserve the selected decision queue");
   return { executionQueues: 3, activityTarget: "market-activity" };
 }

@@ -27,7 +27,7 @@ const UI_LABELS = {
   columns: {
     ticker: "Ticker",
     action: "Signal",
-    score: "Score",
+    score: "Quality",
     entry_est: "Entry zone",
     stop_est: "Stop",
     risk_pct_to_stop: "Risk",
@@ -1435,15 +1435,15 @@ function renderMarketRail(runInfo, rows = []) {
   const dataDate = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "Unavailable";
   if (rail) rail.innerHTML = `
     <span class="rail-brand">Daily Trading <b>Copilot</b></span>
-    <span>Data date <strong>${escapeHtml(dataDate)}</strong></span>
+    <span>US close <strong>${escapeHtml(dataDate)}</strong></span>
     <span>Coverage <strong>${escapeHtml(coverage)}</strong></span>
     <span class="rail-health tone-${health.tone}">${escapeHtml(health.label)}</span>
   `;
   if (heroBrief) heroBrief.innerHTML = `
-    <div><span class="eyebrow">Daily brief</span><p>${escapeHtml(health.detail || "No current data summary available.")}</p></div>
+    <div><span class="eyebrow">Scanner status</span><p>${escapeHtml(health.detail || "No current data summary available.")}</p></div>
     <dl>
       <div><dt>Coverage</dt><dd>${escapeHtml(coverage)}</dd></div>
-      <div><dt>Data date</dt><dd>${escapeHtml(dataDate)}</dd></div>
+      <div><dt>US close</dt><dd>${escapeHtml(dataDate)}</dd></div>
       <div><dt>Execution</dt><dd class="tone-${health.tone}">${escapeHtml(health.label)}</dd></div>
     </dl>
   `;
@@ -1863,6 +1863,16 @@ function selectedRow() {
   return state.rows.find((row) => row.ticker === state.selectedTicker) || state.visibleRows[0] || state.rows[0] || null;
 }
 
+function validationSummary(row) {
+  const items = [
+    ["Market", payloadValue(row, "market_permission")],
+    ["Risk", payloadValue(row, "risk_permission")],
+    ["Ticker", payloadValue(row, "ticker_permission")],
+    ["Walk-forward", payloadValue(row, "walk_forward_permission")],
+  ].filter(([, value]) => value && String(value).toUpperCase() !== "ALLOW");
+  return items.length ? items.map(([label, value]) => `${label}: ${String(value).replaceAll("_", " ")}`).join(" · ") : "All available validation gates allow";
+}
+
 function renderTickerDetailPanel() {
   const panel = document.querySelector("#ticker-detail-panel");
   if (!panel) return;
@@ -1881,10 +1891,10 @@ function renderTickerDetailPanel() {
       <div><dt>Entry zone</dt><dd>${escapeHtml(formatEntryZone(row) || "Unavailable")}</dd></div>
       <div><dt>Stop</dt><dd>${escapeHtml(fmtNumber(row.stop_est, 2) || "Unavailable")}</dd></div>
       <div><dt>Risk</dt><dd class="risk-value">${risk ? `-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%` : "Unavailable"}</dd></div>
-      <div><dt>Target estimate</dt><dd>${escapeHtml(target ? fmtNumber(target, 2) : "Unavailable")}</dd></div>
-      <div><dt>Operator state</dt><dd>${escapeHtml(operator)}</dd></div>
+      <div><dt>Validation</dt><dd>${escapeHtml(validationSummary(row))}</dd></div>
     </dl>
-    <section class="detail-rationale"><span class="eyebrow">Signal rationale</span><p>${escapeHtml(behaviorDetail(row))}</p></section>
+    <section class="detail-rationale"><span class="eyebrow">Why this state</span><p>${escapeHtml(whyThisMatters(row).slice(0, 2).join(" · ") || behaviorDetail(row))}</p></section>
+    ${target ? `<details class="detail-diagnostics"><summary>More context</summary><p>Target estimate ${escapeHtml(fmtNumber(target, 2))} · Operator state ${escapeHtml(operator)}</p></details>` : ""}
     <p class="detail-confirm">Confirm any BUY on the TradingView Pine chart before acting.</p>
   `;
 }
@@ -2434,15 +2444,13 @@ function renderLatestHistoryPanel(latest) {
       </div>
       <div class="latest-metrics">
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
-        <div><span>Trend Quality</span><strong>${escapeHtml(strengthLabel(latest))}</strong></div>
-        <div><span>Pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
         <div><span>Entry Zone</span><strong>${escapeHtml(formatEntryZone(latest) || "Unavailable")}</strong></div>
         <div><span>Stop</span><strong>${fmtNumber(latest.stop_est, 2) || "-"}</strong></div>
         <div><span>Risk</span><strong>${payloadNumeric(latest, "risk_pct_to_stop") ? `-${fmtNumber(Math.abs(payloadNumeric(latest, "risk_pct_to_stop")), 1)}%` : "Unavailable"}</strong></div>
-        <div><span>Target Estimate</span><strong>${fmtNumber(latest.target_est, 2) || "Unavailable"}</strong></div>
+        <div><span>Validation</span><strong>${escapeHtml(validationSummary(latest))}</strong></div>
       </div>
-      ${renderScoreBreakdown(latest)}
-      ${latest.notes ? `<p class="subtle">${escapeHtml(latest.notes)}</p>` : ""}
+      <p class="latest-rationale">${escapeHtml(whyThisMatters(latest).slice(0, 2).join(" · ") || behaviorDetail(latest))}</p>
+      <details class="detail-diagnostics"><summary>Diagnostics</summary>${renderScoreBreakdown(latest)}<p>${escapeHtml(`Pattern ${setupLabel(latest.setup)} · Trend quality ${fmtConviction(latest)} / 100`)}</p></details>
       <p class="pine-confirmation">Confirm a BUY on the TradingView Pine chart before acting.</p>
     </div>
   `;
@@ -2583,7 +2591,7 @@ function renderHistoryRows() {
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previousByDate.get(row.history_date))}</div>
           <p class="subtle">Close: ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Trend Quality: ${escapeHtml(strengthLabel(row))} · Pattern: ${escapeHtml(setupLabel(row.setup))}</p>
-          ${row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
+          ${index === 0 && row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
         </div>
       </div>
     `).join("")}
