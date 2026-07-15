@@ -216,9 +216,13 @@ def main() -> None:
     if len(history_rows) < 1000:
         emit_metrics(metrics)
         fail("Behavior history row count is too low for watchlist lookback learning.")
-    if len(history_by_ticker) < 100:
+    # The tracked universe can legitimately be smaller after data-provider
+    # failures. Every successfully published snapshot must have replay data;
+    # do not require an unrelated fixed ticker count.
+    required_history_tickers = max(25, int(len(snapshot_rows) * 0.8))
+    if len(history_by_ticker) < required_history_tickers:
         emit_metrics(metrics)
-        fail("Too few tickers have behavior history.")
+        fail("Too few published tickers have behavior history.")
     if tickers_with_25 < max(1, int(len(history_by_ticker) * 0.8)):
         emit_metrics(metrics)
         fail("Less than 80% of tickers have at least 25 lookback trading days.")

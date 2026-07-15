@@ -110,20 +110,15 @@ jobs:
           MARKET_DATA_TIMEOUT_SECONDS: "12"
         run: python daily_watchlist_overview.py --refresh --skip-profiles --years 1 --history-days 30 --learning-lookback-days 30
 
-      - name: Audit Supabase learning health
-        if: steps.time_gate.outputs.run == 'true'
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/supabase_learning_health.py
-
-      - name: Report Supabase storage
+      - name: Reclaim Supabase replay storage
         if: steps.time_gate.outputs.run == 'true'
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         shell: bash
         run: |
+          # REST deletes are constrained by PostgREST statement timeouts. This
+          # runs after a successful refresh and retains the current canonical replay.
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where run_date < (select max(run_date) from public.watchlist_behavior_history)"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
           if [ "${{ inputs.reclaim_database_space }}" = "true" ]; then
             echo "Reclaiming database space after retention cleanup."
@@ -131,6 +126,14 @@ jobs:
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_behavior_history"
           fi
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select pg_size_pretty(pg_database_size(current_database())) as database_size, pg_size_pretty(pg_total_relation_size('public.watchlist_behavior_history')) as behavior_history_total, count(*) as behavior_history_rows from public.watchlist_behavior_history"
+
+      - name: Audit Supabase learning health
+        if: steps.time_gate.outputs.run == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/supabase_learning_health.py
 
       - name: Prepare Pages artifact
         if: steps.time_gate.outputs.run == 'true'
