@@ -1502,7 +1502,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     if run_metadata:
         try:
             supabase_upsert_refresh_run([clean_record(run_metadata)])
-        except RuntimeError as exc:
+        except Exception as exc:
             print(f"Supabase run-health sync skipped: {exc}")
 
     snapshot_synced = 0
@@ -1511,30 +1511,32 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     try:
         supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
         snapshot_synced = len(report_records)
-    except RuntimeError as exc:
+    except Exception as exc:
         print(f"Supabase snapshot sync skipped: {exc}")
     try:
         supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
         history_synced = len(history_records)
-    except RuntimeError as exc:
+    except Exception as exc:
         print(f"Supabase behavior-history sync skipped: {exc}")
     try:
-        supabase_upsert("watchlist_signal_outcomes", outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
+        # Outcomes can grow well beyond normal snapshot batches. Keep this
+        # non-critical archive write bounded so it cannot block publishing.
+        supabase_upsert_batches("watchlist_signal_outcomes", outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
         outcome_synced = len(outcome_records)
-    except RuntimeError as exc:
+    except Exception as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
     if snapshot_synced == len(report_records) and history_synced == len(history_records):
         try:
             cleanup_supabase_run_replacement(run_date, report_records, history_records)
-        except RuntimeError as exc:
+        except Exception as exc:
             print(f"Supabase replacement cleanup skipped: {exc}")
         try:
             cleanup_supabase_obsolete_history(run_date, history_records)
-        except RuntimeError as exc:
+        except Exception as exc:
             print(f"Supabase obsolete-history cleanup skipped: {exc}")
     try:
         cleanup_supabase_failed_tickers(run_date, run_metadata)
-    except RuntimeError as exc:
+    except Exception as exc:
         print(f"Supabase failed-ticker cleanup skipped: {exc}")
     print(
         f"Synced {snapshot_synced}/{len(report_records)} snapshot rows, "
@@ -1543,7 +1545,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     )
     try:
         cleanup_supabase_retention(run_date)
-    except RuntimeError as exc:
+    except Exception as exc:
         print(f"Supabase retention cleanup skipped: {exc}")
 
 
