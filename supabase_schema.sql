@@ -1,3 +1,22 @@
+-- Raw OHLCV is intentionally compact: one canonical row per ticker/session.
+-- Indicators and signal payloads are derived at runtime and never stored here.
+create table if not exists public.watchlist_ohlcv (
+  ticker text not null,
+  data_date date not null,
+  open double precision not null,
+  high double precision not null,
+  low double precision not null,
+  close double precision not null,
+  adjclose double precision,
+  volume double precision not null,
+  data_provider text,
+  updated_at timestamptz not null default now(),
+  primary key (ticker, data_date)
+);
+
+create index if not exists watchlist_ohlcv_data_date_idx
+  on public.watchlist_ohlcv (data_date);
+
 create table if not exists public.watchlist_snapshots (
   run_date date not null,
   ticker text not null,

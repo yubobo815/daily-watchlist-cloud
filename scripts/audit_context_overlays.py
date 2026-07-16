@@ -535,6 +535,37 @@ def audit_replay_gate_cache_is_bounded_and_historical():
     assert_true(calls["walk_forward"] >= 2, "replay must refresh cached gates during a multi-session replay")
 
 
+def audit_ohlcv_cache_reuses_persistent_history():
+    stored = synthetic_price_frame(100, 0.2, periods=dwo.OHLCV_RETENTION_BARS)
+    live = synthetic_price_frame(140, 0.25, periods=252)
+    live["date"] = pd.bdate_range(stored["date"].iloc[-252], periods=252)
+    calls = {"years": None, "persisted": 0}
+    original_load = dwo.load_ohlcv_from_supabase
+    original_fetch = dwo.fetch_chart
+    original_persist = dwo.persist_ohlcv_to_supabase
+    dwo.load_ohlcv_from_supabase = lambda ticker: stored.copy()
+
+    def fetch_recent(ticker, years, refresh):
+        calls["years"] = years
+        return live.copy()
+
+    def persist(ticker, frame):
+        calls["persisted"] = len(frame)
+
+    dwo.fetch_chart = fetch_recent
+    dwo.persist_ohlcv_to_supabase = persist
+    try:
+        combined = dwo.load_or_refresh_ohlcv("TEST", years=2, refresh=True)
+    finally:
+        dwo.load_ohlcv_from_supabase = original_load
+        dwo.fetch_chart = original_fetch
+        dwo.persist_ohlcv_to_supabase = original_persist
+
+    assert_true(calls["years"] == 1, "seeded OHLCV cache must request only the short live refresh window")
+    assert_true(len(combined) == dwo.OHLCV_RETENTION_BARS, "OHLCV cache must enforce the fixed retention cap")
+    assert_true(calls["persisted"] == dwo.OHLCV_RETENTION_BARS, "merged OHLCV cache must be persisted at the fixed cap")
+
+
 def audit_risk_off_or_missing_replay_cannot_seed_bullish_learning():
     ticker = synthetic_price_frame(100, 0.35)
     risk_off_benchmarks = {symbol: synthetic_price_frame(180, -0.25) for symbol in ("SPY", "QQQ", "SMH")}
@@ -664,12 +695,13 @@ def main():
     audit_learning_promotion_requires_all_execution_gates()
     audit_replay_market_gate_matches_live_context()
     audit_replay_gate_cache_is_bounded_and_historical()
+    audit_ohlcv_cache_reuses_persistent_history()
     audit_risk_off_or_missing_replay_cannot_seed_bullish_learning()
     audit_personality_setup_governor_blocks_range_chase()
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 35,
+        "cases": 36,
     })
 
 

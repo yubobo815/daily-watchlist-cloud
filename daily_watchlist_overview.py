@@ -972,6 +972,10 @@ SUPABASE_OUTCOME_RETENTION_DAYS = int(os.getenv("SUPABASE_OUTCOME_RETENTION_DAYS
 SUPABASE_REFRESH_RUN_RETENTION_DAYS = int(os.getenv("SUPABASE_REFRESH_RUN_RETENTION_DAYS", "60"))
 SUPABASE_UPSERT_BATCH_SIZE = int(os.getenv("SUPABASE_UPSERT_BATCH_SIZE", "100"))
 ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().lower() in {"1", "true", "yes"}
+# 400 sessions covers indicator warm-up plus the 60-session learning replay,
+# while keeping the persistent raw-data layer well below the database budget.
+OHLCV_RETENTION_BARS = int(os.getenv("OHLCV_RETENTION_BARS", "400"))
+OHLCV_MIN_READY_BARS = int(os.getenv("OHLCV_MIN_READY_BARS", "300"))
 
 
 def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[bool, str]:
@@ -1003,6 +1007,66 @@ def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[
 def batched_records(records: list[dict], batch_size: int = SUPABASE_UPSERT_BATCH_SIZE) -> list[list[dict]]:
     size = max(1, int(batch_size or 100))
     return [records[index : index + size] for index in range(0, len(records), size)]
+
+
+def load_ohlcv_from_supabase(ticker: str) -> pd.DataFrame:
+    """Load the compact persistent price cache; failure falls back to live data."""
+    try:
+        rows = supabase_select(
+            "watchlist_ohlcv?select=data_date,open,high,low,close,adjclose,volume,data_provider"
+            f"&ticker=eq.{urllib.parse.quote(display_ticker(ticker))}"
+            "&order=data_date.asc"
+            f"&limit={OHLCV_RETENTION_BARS}"
+        )
+    except RuntimeError as exc:
+        print(f"OHLCV cache unavailable for {display_ticker(ticker)}: {exc}")
+        return pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows).rename(columns={"data_date": "date"})
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    for column in ("open", "high", "low", "close", "adjclose", "volume"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    return frame.dropna(subset=["date", "open", "high", "low", "close", "volume"]).reset_index(drop=True)
+
+
+def persist_ohlcv_to_supabase(ticker: str, frame: pd.DataFrame) -> None:
+    if frame.empty:
+        return
+    records = []
+    for item in frame.tail(OHLCV_RETENTION_BARS).to_dict(orient="records"):
+        records.append(
+            {
+                "ticker": display_ticker(ticker),
+                "data_date": str(pd.Timestamp(item["date"]).date()),
+                "open": numeric_or_none(item.get("open")),
+                "high": numeric_or_none(item.get("high")),
+                "low": numeric_or_none(item.get("low")),
+                "close": numeric_or_none(item.get("close")),
+                "adjclose": numeric_or_none(item.get("adjclose")),
+                "volume": numeric_or_none(item.get("volume")),
+                "data_provider": item.get("data_provider"),
+            }
+        )
+    supabase_upsert_batches("watchlist_ohlcv", records, ["ticker", "data_date"])
+
+
+def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool) -> pd.DataFrame:
+    """Use durable OHLCV locally, fetching a full seed only when it is absent."""
+    stored = load_ohlcv_from_supabase(ticker) if refresh else pd.DataFrame()
+    needs_seed = len(stored) < OHLCV_MIN_READY_BARS
+    if not refresh and not stored.empty:
+        return stored.tail(OHLCV_RETENTION_BARS).reset_index(drop=True)
+
+    # A one-year live window is enough to overwrite recent sessions after the
+    # persistent cache has been seeded. It avoids re-downloading two years daily.
+    live = fetch_chart(ticker, years=years if needs_seed else 1, refresh=refresh)
+    combined = pd.concat([stored, live], ignore_index=True, sort=False)
+    combined["date"] = pd.to_datetime(combined["date"], errors="coerce")
+    combined = combined.dropna(subset=["date", "open", "high", "low", "close", "volume"])
+    combined = combined.sort_values("date").drop_duplicates("date", keep="last").tail(OHLCV_RETENTION_BARS).reset_index(drop=True)
+    persist_ohlcv_to_supabase(ticker, combined)
+    return combined
 
 
 def supabase_upsert_batches(table: str, records: list[dict], conflict_columns: list[str]) -> None:
@@ -5809,7 +5873,7 @@ def main() -> None:
             if args.cache_only or (args.refresh and not live_access_ok):
                 benchmark_frames[benchmark] = cached_chart(benchmark, years=args.years)
             else:
-                benchmark_frames[benchmark] = fetch_chart(benchmark, years=args.years, refresh=args.refresh)
+                benchmark_frames[benchmark] = load_or_refresh_ohlcv(benchmark, years=args.years, refresh=args.refresh)
         except Exception as exc:
             print(f"Benchmark context unavailable for {benchmark}: {exc}")
     market_permission = market_permission_from_frames(benchmark_frames)
@@ -5824,7 +5888,7 @@ def main() -> None:
                         {"ticker": display_ticker(ticker), "error": live_access_message}
                     )
             else:
-                df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
+                df = load_or_refresh_ohlcv(ticker, years=args.years, refresh=args.refresh)
             row = classify_and_score(ticker, df, market_permission=market_permission)
             row = apply_data_provider_context(row, df)
             # Replay once at the longest required horizon. The displayed

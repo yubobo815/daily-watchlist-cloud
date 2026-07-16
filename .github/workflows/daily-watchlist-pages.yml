@@ -132,19 +132,23 @@ jobs:
           # REST deletes are constrained by PostgREST statement timeouts. This
           # runs after a successful refresh and retains the current canonical replay.
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where run_date <> date '$current_run_date'"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_ohlcv where (ticker, data_date) in (select ticker, data_date from (select ticker, data_date, row_number() over (partition by ticker order by data_date desc) as row_number from public.watchlist_ohlcv) retained where row_number > 400)"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_signal_outcomes where (signal_run_date, evaluation_run_date, ticker) in (select signal_run_date, evaluation_run_date, ticker from public.watchlist_signal_outcomes order by evaluation_run_date desc, signal_run_date desc offset ${outcome_row_cap})"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_snapshots where run_date < date '$current_run_date' - ${snapshot_retention_days}"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_refresh_runs where run_date < date '$current_run_date' - ${run_retention_days}"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_snapshots"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_signal_outcomes"
           database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
           if [ "${{ inputs.reclaim_database_space }}" = "true" ] || [ "$database_bytes" -gt "$storage_soft_limit_bytes" ]; then
             echo "Reclaiming physical storage (database_bytes=$database_bytes)."
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_behavior_history"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_ohlcv"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_snapshots"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_signal_outcomes"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_behavior_history"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_ohlcv"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_snapshots"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_signal_outcomes"
           fi
