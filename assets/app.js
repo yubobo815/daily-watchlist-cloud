@@ -849,6 +849,50 @@ function fmtRawScore(row) {
   return fmtNumber(numericValue(row, "score"), 1);
 }
 
+function operatorNarrative(value) {
+  const state = String(value || "").toUpperCase();
+  if (state.includes("ACCUMULATION") || state.includes("ABSORPTION")) return "buyers are absorbing available supply";
+  if (state.includes("MARKUP") || state.includes("DEMAND CONTROL")) return "demand is still in control";
+  if (state.includes("BEAR_TRAP") || state.includes("SQUEEZE")) return "selling pressure has been rejected, but follow-through still matters";
+  if (state.includes("BULL_TRAP")) return "the recent strength may be a failed breakout";
+  if (state.includes("DISTRIBUTION") || state.includes("SHORT")) return "sellers are taking control";
+  return "buyers and sellers are currently balanced";
+}
+
+function naturalActionSentence(row) {
+  const kind = actionKind(row.action);
+  const pattern = setupLabel(row.setup);
+  if (kind === "buy") return `${pattern} conditions are in place; wait for price to trade within the planned entry zone.`;
+  if (kind === "continue") return "The existing trend remains constructive, but a new entry should avoid chasing strength.";
+  if (kind === "setup") return `${pattern} is taking shape, but it still needs confirmation before it becomes a buy.`;
+  if (kind === "watch") return "There is no clean entry yet; wait for either a stronger breakout or a controlled pullback.";
+  if (kind === "exit") return "The trend is under pressure; protect capital rather than looking for a new entry.";
+  return "There is no favourable setup at the moment.";
+}
+
+function contextSummary(row) {
+  const entry = formatEntryZone(row);
+  const stop = numericValue(row, "stop_est");
+  const target = numericValue(row, "target_est");
+  const operator = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure");
+  const validation = validationSummary(row);
+  const parts = [naturalActionSentence(row), `The tape suggests ${operatorNarrative(operator)}.`];
+  if (entry) parts.push(`The preferred entry area is ${entry}${stop ? `, with a stop near ${fmtNumber(stop, 2)}` : ""}.`);
+  if (target) parts.push(`The scanner's reference target is ${fmtNumber(target, 2)}; it is a planning level, not a forecast.`);
+  if (validation !== "All available validation gates allow") parts.push(`Current constraint: ${validation}.`);
+  return parts.join(" ");
+}
+
+function recentBehaviorSummary(row, previous) {
+  const close = numericValue(row, "close");
+  const move = numericValue(row, "day_change_pct");
+  const moveText = Number.isFinite(move) ? `${move >= 0 ? "up" : "down"} ${fmtNumber(Math.abs(move), 1)}%` : "little changed";
+  const signal = ACTION_LABELS[row.action] || row.action;
+  const priorSignal = previous ? (ACTION_LABELS[previous.action] || previous.action) : "";
+  const change = priorSignal && priorSignal !== signal ? ` The scanner moved from ${priorSignal} to ${signal}.` : "";
+  return `Closed at ${fmtNumber(close, 2)}, ${moveText} on the day. ${naturalActionSentence(row)}${change}`;
+}
+
 function behaviorDetail(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
@@ -1969,7 +2013,16 @@ function validationSummary(row) {
     ["Ticker", payloadValue(row, "ticker_permission")],
     ["Walk-forward", payloadValue(row, "walk_forward_permission")],
   ].filter(([, value]) => value && String(value).toUpperCase() !== "ALLOW");
-  return items.length ? items.map(([label, value]) => `${label}: ${String(value).replaceAll("_", " ")}`).join(" · ") : "All available validation gates allow";
+  const validationWord = (value) => {
+    const state = String(value || "").replaceAll("_", " ").toLowerCase();
+    if (state === "block") return "not supportive";
+    if (state === "caution") return "mixed";
+    if (state === "insufficient" || state === "none") return "not yet proven";
+    return state || "not available";
+  };
+  return items.length
+    ? items.map(([label, value]) => `${label.toLowerCase()} evidence is ${validationWord(value)}`).join("; ")
+    : "Market, ticker, risk and historical checks are clear";
 }
 
 function renderTickerDetailPanel() {
@@ -1981,7 +2034,6 @@ function renderTickerDetailPanel() {
   const kind = actionKind(row.action);
   const risk = payloadNumeric(row, "risk_pct_to_stop");
   const target = numericValue(row, "target_est");
-  const operator = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "Unavailable";
   panel.innerHTML = `
     <div class="detail-panel-head"><div><span class="eyebrow">Selected plan</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open</a></div>
     <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
@@ -1993,7 +2045,7 @@ function renderTickerDetailPanel() {
       <div><dt>Validation</dt><dd>${escapeHtml(validationSummary(row))}</dd></div>
     </dl>
     <section class="detail-rationale"><span class="eyebrow">Why this state</span><p>${escapeHtml(whyThisMatters(row).slice(0, 2).join(" · ") || behaviorDetail(row))}</p></section>
-    ${target ? `<details class="detail-diagnostics"><summary>More context</summary><p>Target estimate ${escapeHtml(fmtNumber(target, 2))} · Operator state ${escapeHtml(operator)}</p></details>` : ""}
+    <details class="detail-diagnostics"><summary>Context &amp; evidence</summary><p>${escapeHtml(contextSummary(row))}</p></details>
   `;
 }
 
@@ -2687,8 +2739,8 @@ function renderHistoryRows() {
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
           <div class="change-chips">${renderHistoryChangeChips(row, previousByDate.get(row.history_date))}</div>
-          <p class="subtle">Close: ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)} · Trend Quality: ${escapeHtml(strengthLabel(row))} · Pattern: ${escapeHtml(setupLabel(row.setup))}</p>
-          ${index === 0 && row.notes ? `<p class="subtle">${escapeHtml(row.notes)}</p>` : ""}
+          <p class="subtle">${escapeHtml(recentBehaviorSummary(row, previousByDate.get(row.history_date)))}</p>
+          ${index === 0 && row.notes ? `<p class="subtle">${escapeHtml(behaviorDetail(row))}</p>` : ""}
         </div>
       </div>
     `).join("")}

@@ -108,6 +108,10 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("target.open = true"), "Activity navigation must open the details drawer before scrolling");
   assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker scanner review panel");
   assert(!appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must not repeat the removed Pine confirmation copy");
+  assert(appSource.includes("function contextSummary(row)"), "ticker context must be summarized in natural language");
+  assert(appSource.includes("function recentBehaviorSummary(row, previous)"), "recent behavior must be summarized in natural language");
+  assert(appSource.includes("Context &amp; evidence"), "ticker panel must use the reader-facing context label");
+  assert(!appSource.includes("<summary>More context</summary>"), "ticker panel must not expose the old machine-context label");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
   assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
   assert(!pageSource.includes("Execution tier first"), "watchlist must not retain execution-tier sorting copy");
