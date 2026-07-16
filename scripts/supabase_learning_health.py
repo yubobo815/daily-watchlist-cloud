@@ -240,7 +240,12 @@ def main() -> None:
         metrics["ticker_leaking_learning_key_examples"] = ticker_leaking_keys[:5]
         emit_metrics(metrics)
         fail("Learning keys must describe behavior patterns, not ticker identity.")
-    if learning_ready < max(50, int(len(snapshot_rows) * 0.35)):
+    # A hard-gated model deliberately leaves rows without settled, exact-pattern
+    # evidence in reporting-only mode. Require meaningful coverage, but do not
+    # fail a healthy v3 cold-start simply because it refuses broad promotion.
+    required_learning_rows = max(25, int(len(snapshot_rows) * 0.20))
+    metrics["required_snapshots_with_learning_samples"] = required_learning_rows
+    if learning_ready < required_learning_rows:
         emit_metrics(metrics)
         fail("Too few latest snapshots have learning samples attached.")
 
