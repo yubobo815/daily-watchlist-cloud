@@ -1,8 +1,10 @@
 const {
+  committedPublicationMatches,
   encodeFilterValue,
   HISTORY_FIELDS,
   isValidTicker,
   normalizeTicker,
+  recentRunDates,
   rowDto,
   runInfo,
   selectList,
@@ -44,11 +46,19 @@ async function handler(request, response) {
 
   try {
     // The list page is snapshot-led, so detail must use the identical current run.
-    const runRows = await supabaseSelect("watchlist_snapshots?select=run_date&order=run_date.desc&limit=1");
-    const latest = runRows[0]?.run_date;
-    if (!latest) {
-      response.status(404).json({ error: `No 30-day history found for ${ticker}.` });
+    const [latest] = await recentRunDates(1);
+    const published = await publishedTickerPayload(ticker, {});
+    if (
+      published.runInfo?.status === "published_fallback"
+      && published.latest
+      && (!latest || String(published.latest) > String(latest))
+    ) {
+      response.setHeader("Cache-Control", "public, max-age=0, s-maxage=15, stale-while-revalidate=30");
+      response.status(200).json(published);
       return;
+    }
+    if (!latest) {
+      throw new Error("No complete Supabase run is available.");
     }
 
     const [snapshotRows, historyRows, latestRunInfo, profile] = await Promise.all([
@@ -57,6 +67,11 @@ async function handler(request, response) {
       runInfo(latest),
       withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {}),
     ]);
+    if (!committedPublicationMatches(latestRunInfo, [...snapshotRows, ...historyRows])) {
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json(published);
+      return;
+    }
 
     const snapshot = snapshotRows[0] ? rowDto(snapshotRows[0]) : null;
     const rows = historyRows.map((row) => rowDto(row, { historical: true }));

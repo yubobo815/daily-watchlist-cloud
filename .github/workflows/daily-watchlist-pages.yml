@@ -116,6 +116,17 @@ jobs:
         # days plus a capped compact outcome table.
         run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60
 
+      - name: Audit Supabase learning health
+        if: steps.time_gate.outputs.run == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          python scripts/supabase_learning_health.py
+
       - name: Reclaim Supabase replay storage
         if: steps.time_gate.outputs.run == 'true'
         env:
@@ -127,7 +138,11 @@ jobs:
           outcome_row_cap=25000
           snapshot_retention_days=14
           run_retention_days=60
-          current_run_date="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select max(run_date) from public.watchlist_snapshots")"
+          current_run_date="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select max(run_date) from public.watchlist_refresh_runs where status in ('ok', 'degraded') and coalesce(payload->>'sync_state', '') = 'complete'")"
+          if [ -z "$current_run_date" ]; then
+            echo "No complete Supabase run is available for retention cleanup."
+            exit 1
+          fi
 
           # REST deletes are constrained by PostgREST statement timeouts. This
           # runs after a successful refresh and retains the current canonical replay.
@@ -158,14 +173,6 @@ jobs:
             exit 1
           fi
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select pg_size_pretty(pg_database_size(current_database())) as database_size, pg_size_pretty(pg_total_relation_size('public.watchlist_behavior_history')) as behavior_history_total, count(*) as behavior_history_rows from public.watchlist_behavior_history"
-
-      - name: Audit Supabase learning health
-        if: steps.time_gate.outputs.run == 'true'
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/supabase_learning_health.py
 
       - name: Prepare Pages artifact
         if: steps.time_gate.outputs.run == 'true'

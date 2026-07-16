@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -302,13 +303,14 @@ def learning_confirmed_setup_row(**overrides):
         "freshness_block": "NO",
         "risk_permission": "ALLOW",
         "market_permission": "ALLOW",
-        "learning_sample_count": 8,
+        "learning_sample_count": 30,
         "learning_working_rate": 0.75,
         "learning_failed_rate": 0.125,
         "learning_adjustment": 5.0,
         "learning_scope": "exact signal personality",
-        "learning_distinct_ticker_count": 4,
-        "learning_evaluation_date_count": 4,
+        "learning_distinct_ticker_count": 8,
+        "learning_evaluation_date_count": 10,
+        "learning_promotion_eligible": True,
         "personality_setup_allowed": "YES",
         "signal_quality": "NEXT-DAY BUILDING",
     })
@@ -452,13 +454,22 @@ def outcome_rows(count, learning_key, *, model_version=dwo.LEARNING_MODEL_VERSIO
             "prior_setup": "PULLBACK BUY",
             "ticker": f"{ticker_prefix}{index}",
             "evaluation_run_date": f"2026-06-{index + 1:02d}",
+            "signal_run_date": f"2026-05-{index + 20:02d}",
             "entry_model_version": model_version,
             "outcome_learnable": True,
+            "forecast_learnable": True,
             "outcome_label": "WORKING",
             "outcome_score": 1.0,
             "close_return_pct": 2.5,
             "label_horizon_sessions": dwo.LEARNING_HORIZON_SESSIONS,
             "path_status": "SETTLED",
+            "prior_prediction_upside_probability": 0.70,
+            "prior_prediction_downside_probability": 0.15,
+            "prior_prediction_no_edge_probability": 0.15,
+            "prior_prediction_confidence": 0.50,
+            "prior_prediction_state": "WALK_FORWARD",
+            "prior_prediction_key": learning_key,
+            "prior_prediction_scope": "exact signal personality",
         }
         for index in range(count)
     ]
@@ -472,8 +483,181 @@ def audit_learning_excludes_unversioned_outcomes():
 
 def audit_learning_requires_explicit_learnable_outcome():
     rows = pd.DataFrame(outcome_rows(6, "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"))
-    rows = rows.drop(columns=["outcome_learnable"])
+    rows = rows.drop(columns=["outcome_learnable", "forecast_learnable"])
     assert_true(not dwo.build_learning_stats(rows), "outcome aggregation must require an explicit learnable flag")
+
+
+def audit_missing_boolean_is_never_affirmative():
+    assert_true(not dwo.is_affirmative(float("nan")), "NaN must never serialize as an affirmative execution or learning flag")
+    assert_true(not dwo.is_affirmative(None), "missing boolean must remain false")
+
+
+def audit_gated_setup_calibrates_forecast_without_becoming_executable():
+    prior = executable_prior(
+        action="SETUP FORMING",
+        setup="PULLBACK BUY",
+        market_permission="BLOCK",
+    )
+    bars = [
+        executable_current(date=f"2026-06-0{day}", open=100, high=104, low=99, close=103)
+        for day in range(2, 2 + dwo.LEARNING_HORIZON_SESSIONS)
+    ]
+    outcome = dwo.score_signal_horizon(prior, bars)
+    assert_true(outcome["outcome_label"] == "WORKING", "settled OHLC path must retain its technical forecast result")
+    assert_true(outcome["entry_eligible"] is False, "market-blocked setup must never become executable")
+    assert_true(outcome["outcome_learnable"] is False, "blocked setup must stay excluded from execution learning")
+    assert_true(outcome["forecast_learnable"] is True, "settled path should calibrate forecast quality")
+    assert_true(bool(dwo.build_learning_stats(pd.DataFrame([outcome]))), "settled forecast evidence must reach calibration stats")
+
+
+def audit_counterfactual_forecasts_cannot_promote_execution():
+    current = learning_confirmed_setup_row()
+    key = dwo.learning_key_for(current)
+    outcomes = pd.DataFrame(outcome_rows(8, key))
+    outcomes["outcome_learnable"] = False
+    stats = dwo.build_learning_stats(outcomes)
+    dwo.apply_learning_adjustments([current], stats)
+    assert_true(current["learning_execution_sample_count"] == 0, "counterfactual paths must not become execution evidence")
+    assert_true(current["learning_adjustment"] == 0.0, "counterfactual paths must not adjust the live score")
+    assert_true(not current["learning_promotion_eligible"], "counterfactual paths must not authorize promotion")
+
+
+def audit_invalid_probabilities_are_excluded_from_calibration():
+    key = "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"
+    rows = pd.DataFrame(outcome_rows(8, key))
+    rows["prior_prediction_upside_probability"] = 1.1
+    rows["prior_prediction_downside_probability"] = 0.0
+    rows["prior_prediction_no_edge_probability"] = 0.0
+    stats = dwo.build_learning_stats(rows)
+    assert_true(stats[key]["calibration_sample_count"] == 0, "out-of-range probabilities must not enter Brier calibration")
+    assert_true(stats[key]["brier_score"] is None, "invalid probabilities must not create a passing Brier score")
+
+
+def audit_same_bar_entry_target_order_is_ambiguous():
+    prior = executable_prior(target_est=103)
+    bars = [executable_current(open=105, high=106, low=100, close=104)] * dwo.LEARNING_HORIZON_SESSIONS
+    outcome = dwo.score_signal_horizon(prior, bars)
+    assert_true(outcome["path_status"] == "AMBIGUOUS", "daily OHLC cannot order a target touch before versus after a pullback entry")
+    assert_true(not outcome["forecast_learnable"], "intrabar-order ambiguity must not calibrate the forecast")
+
+
+def audit_learning_uses_displayed_target_when_available():
+    prior = executable_prior(target_est=110)
+    bars = [executable_current(open=100, high=104, low=99, close=103)] * dwo.LEARNING_HORIZON_SESSIONS
+    outcome = dwo.score_signal_horizon(prior, bars)
+    assert_true(outcome["outcome_label"] == "STALE", "a 1R move below the displayed target must not be learned as target success")
+
+
+def audit_exit_pressure_has_risk_first_action_precedence():
+    action, rank = dwo.select_signal_action(
+        filters_ok=True,
+        continuation_ok=True,
+        setup_forming=True,
+        exit_pressure=True,
+        seller_control=True,
+        trend_damage=True,
+        mode="POWER TREND",
+    )
+    assert_true(action == "EXIT PRESSURE" and rank == 20, "hard exit evidence must override simultaneous BUY/BUILDING conditions")
+
+
+def audit_signal_outcome_history_is_paginated():
+    calls = []
+    original_select = dwo.supabase_select
+    original_local = dwo.load_local_signal_outcomes
+
+    def fake_select(path):
+        calls.append(path)
+        offset = 1000 if "offset=1000" in path else 0
+        count = 500 if offset else 1000
+        return [
+            {
+                "ticker": f"T{offset + index}",
+                "signal_run_date": "2026-07-07",
+                "evaluation_run_date": "2026-07-14",
+                "outcome_label": "WORKING",
+                "learning_key": "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE",
+                "entry_model_version": dwo.LEARNING_MODEL_VERSION,
+                "forecast_learnable": True,
+            }
+            for index in range(count)
+        ]
+
+    dwo.supabase_select = fake_select
+    dwo.load_local_signal_outcomes = lambda run_date: pd.DataFrame()
+    try:
+        history = dwo.fetch_signal_outcome_history("2026-07-15")
+    finally:
+        dwo.supabase_select = original_select
+        dwo.load_local_signal_outcomes = original_local
+    assert_true(len(history) == 1500, "learning history must not stop at the first PostgREST page")
+    assert_true(any("offset=1000" in path for path in calls), "learning history must request subsequent pages")
+
+
+def audit_missing_optional_outcome_metrics_do_not_crash_learning():
+    rows = pd.DataFrame(outcome_rows(3, "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"))
+    rows = rows.drop(columns=["outcome_score", "close_return_pct"])
+    stats = dwo.build_learning_stats(rows)
+    assert_true(bool(stats), "missing optional score/return fields must not crash probability aggregation")
+
+
+def directional_sample_rows(count):
+    feature_count = len(dwo.DIRECTIONAL_NUMERIC_FEATURES) + len(dwo.DIRECTIONAL_PERSONALITIES)
+    rows = []
+    start = pd.Timestamp("2025-01-02")
+    for index in range(count):
+        signal_date = start + pd.offsets.BDay(index)
+        rows.append({
+            "ticker": f"T{index % 20}",
+            "signal_run_date": signal_date.date().isoformat(),
+            "evaluation_run_date": (signal_date + pd.offsets.BDay(dwo.LEARNING_HORIZON_SESSIONS)).date().isoformat(),
+            "features": pd.Series([(index % 11) / 10 + column * 0.01 for column in range(feature_count)]).to_numpy(),
+            "label": dwo.DIRECTIONAL_LABELS[index % len(dwo.DIRECTIONAL_LABELS)],
+            "personality_type": dwo.DIRECTIONAL_PERSONALITIES[index % len(dwo.DIRECTIONAL_PERSONALITIES)],
+            "forward_return_pct": 0.0,
+            "move_threshold_pct": 1.0,
+        })
+    return pd.DataFrame(rows)
+
+
+def audit_directional_walk_forward_is_future_invariant():
+    base = dwo.directional_walk_forward_predictions(directional_sample_rows(240))
+    extended = dwo.directional_walk_forward_predictions(directional_sample_rows(260)).iloc[:240]
+    compared = 0
+    for index in base.index:
+        first = base.at[index, "prediction"]
+        second = extended.at[index, "prediction"]
+        if isinstance(first, np.ndarray):
+            assert_true(isinstance(second, np.ndarray), "existing walk-forward prediction must remain available after future rows append")
+            assert_true(np.allclose(first, second), "future outcomes must not change a frozen directional prediction")
+            assert_true(abs(float(first.sum()) - 1.0) < 1e-9, "directional probabilities must sum to one")
+            compared += 1
+    assert_true(compared > 0, "fixture must produce post-warmup walk-forward predictions")
+
+
+def audit_directional_model_requires_sample_out_evidence():
+    metrics = dwo.directional_validation_metrics(dwo.directional_walk_forward_predictions(directional_sample_rows(50)))
+    assert_true(not metrics["passed"], "small in-sample feature history must never validate the directional model")
+
+
+def audit_directional_veto_cannot_be_reupgraded_by_buy_tier():
+    current = learning_confirmed_setup_row(
+        learning_promotion_eligible=False,
+        learning_adjustment=0.0,
+        reason_codes=["directional_model_not_confirmed"],
+    )
+    assert_true(not dwo.learning_confirms_setup_upgrade(current), "directional rejection must block the legacy learning upgrade path")
+    tier, _, _ = dwo.buy_tier_for(current, 0)
+    assert_true(tier == "SETUP ONLY", "buy-tier calculation must preserve the directional veto")
+
+
+def audit_categorical_promotion_requires_thirty_executable_samples():
+    current = learning_confirmed_setup_row()
+    key = dwo.learning_key_for(current)
+    stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(29, key)))
+    dwo.apply_learning_adjustments([current], stats)
+    assert_true(current["learning_adjustment"] == 0.0, "29 correlated execution samples must remain below the promotion threshold")
+    assert_true(not current["learning_promotion_eligible"], "undersized execution evidence must remain reporting-only")
 
 
 def audit_learning_window_uses_recent_evaluation_sessions_only():
@@ -593,7 +777,7 @@ def audit_exact_learning_requires_diverse_evidence_for_promotion():
     current = learning_confirmed_setup_row()
     current["adjusted_score"] = 78
     key = dwo.learning_key_for(current)
-    narrow = pd.DataFrame(outcome_rows(6, key, ticker_prefix="ONE"))
+    narrow = pd.DataFrame(outcome_rows(30, key, ticker_prefix="ONE"))
     narrow["ticker"] = "ONE"
     stats = dwo.build_learning_stats(narrow)
     dwo.apply_learning_adjustments([current], stats)
@@ -601,10 +785,10 @@ def audit_exact_learning_requires_diverse_evidence_for_promotion():
 
     diverse_current = learning_confirmed_setup_row()
     diverse_current["adjusted_score"] = 78
-    diverse_stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, key)))
+    diverse_stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(30, key)))
     dwo.apply_learning_adjustments([diverse_current], diverse_stats)
     assert_true(diverse_current["learning_adjustment"] > 0, "diverse exact evidence may promote score")
-    assert_true(diverse_current["learning_distinct_ticker_count"] >= 4, "promotion must expose distinct-ticker evidence")
+    assert_true(diverse_current["learning_distinct_ticker_count"] >= 8, "promotion must expose distinct-ticker evidence")
 
 
 def audit_prediction_probabilities_are_smoothed_and_complete():
@@ -622,6 +806,38 @@ def audit_prediction_probabilities_are_smoothed_and_complete():
     )
     assert_true(abs(probability_sum - 1.0) < 0.002, "smoothed prediction probabilities must sum to one")
     assert_true(current["prediction_horizon_sessions"] == dwo.LEARNING_HORIZON_SESSIONS, "prediction must disclose its horizon")
+
+
+def audit_walk_forward_prediction_has_no_future_leakage():
+    key = "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"
+    rows = pd.DataFrame(outcome_rows(8, key))
+    rows["signal_run_date"] = [f"2026-06-{index + 2:02d}" for index in range(8)]
+    rows["evaluation_run_date"] = [f"2026-06-{index + 1:02d}" for index in range(8)]
+    for column in (
+        "prior_prediction_upside_probability",
+        "prior_prediction_downside_probability",
+        "prior_prediction_no_edge_probability",
+    ):
+        rows[column] = float("nan")
+    predicted = dwo.attach_walk_forward_predictions(rows)
+    assert_true(predicted.iloc[0]["prior_prediction_state"] == "INSUFFICIENT_EVIDENCE", "first signal cannot learn from future outcomes")
+    assert_true(pd.isna(predicted.iloc[0]["prior_prediction_upside_probability"]), "insufficient evidence must clear stale probabilities")
+    assert_true(predicted.iloc[-1]["prior_prediction_state"] == "WALK_FORWARD", "later signals should learn from already-settled outcomes")
+
+
+def audit_bad_walk_forward_calibration_blocks_promotion():
+    current = learning_confirmed_setup_row()
+    current["adjusted_score"] = 78
+    key = dwo.learning_key_for(current)
+    outcomes = pd.DataFrame(outcome_rows(8, key))
+    outcomes["prior_prediction_upside_probability"] = 0.05
+    outcomes["prior_prediction_downside_probability"] = 0.90
+    outcomes["prior_prediction_no_edge_probability"] = 0.05
+    stats = dwo.build_learning_stats(outcomes)
+    dwo.apply_learning_adjustments([current], stats)
+    assert_true(current["learning_brier_score"] > dwo.LEARNING_CALIBRATION_MAX_BRIER, "fixture must fail calibration")
+    assert_true(current["learning_adjustment"] == 0.0, "poor sample-out calibration must block positive promotion")
+    assert_true(current["learning_reporting_only"], "poor calibration must remain reporting-only")
 
 
 def audit_outcome_freezes_original_prediction():
@@ -642,7 +858,7 @@ def audit_outcome_freezes_original_prediction():
 
 def audit_learning_promotion_requires_all_execution_gates():
     key = dwo.learning_key_for(learning_confirmed_setup_row())
-    stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, key)))
+    stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(30, key)))
     blocked_gates = {
         "market_permission": "BLOCK",
         "ticker_permission": "BLOCK",
@@ -704,10 +920,25 @@ def main():
     audit_hard_gate_blocked_signal_cannot_work_or_learn()
     audit_learning_excludes_unversioned_outcomes()
     audit_learning_requires_explicit_learnable_outcome()
+    audit_missing_boolean_is_never_affirmative()
+    audit_gated_setup_calibrates_forecast_without_becoming_executable()
+    audit_counterfactual_forecasts_cannot_promote_execution()
+    audit_invalid_probabilities_are_excluded_from_calibration()
+    audit_same_bar_entry_target_order_is_ambiguous()
+    audit_learning_uses_displayed_target_when_available()
+    audit_exit_pressure_has_risk_first_action_precedence()
+    audit_signal_outcome_history_is_paginated()
+    audit_missing_optional_outcome_metrics_do_not_crash_learning()
+    audit_directional_walk_forward_is_future_invariant()
+    audit_directional_model_requires_sample_out_evidence()
+    audit_directional_veto_cannot_be_reupgraded_by_buy_tier()
+    audit_categorical_promotion_requires_thirty_executable_samples()
     audit_learning_window_uses_recent_evaluation_sessions_only()
     audit_broad_learning_cannot_promote_score()
     audit_exact_learning_requires_diverse_evidence_for_promotion()
     audit_prediction_probabilities_are_smoothed_and_complete()
+    audit_walk_forward_prediction_has_no_future_leakage()
+    audit_bad_walk_forward_calibration_blocks_promotion()
     audit_outcome_freezes_original_prediction()
     audit_learning_promotion_requires_all_execution_gates()
     audit_replay_market_gate_matches_live_context()
@@ -718,7 +949,7 @@ def main():
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 37,
+        "cases": 52,
     })
 
 

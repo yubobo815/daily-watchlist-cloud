@@ -1,4 +1,5 @@
 const {
+  committedPublicationMatches,
   encodeFilterValue,
   recentRunDates,
   rowDto,
@@ -12,7 +13,19 @@ const { publishedLatestPayload } = require("../_published_data");
 
 module.exports = async function handler(request, response) {
   try {
-    const [latest, previous] = await recentRunDates(2);
+    const [[latest, previous], published] = await Promise.all([
+      recentRunDates(2),
+      publishedLatestPayload(),
+    ]);
+    if (
+      published.runInfo?.status === "published_fallback"
+      && published.latest
+      && (!latest || String(published.latest) > String(latest))
+    ) {
+      response.setHeader("Cache-Control", "public, max-age=0, s-maxage=15, stale-while-revalidate=30");
+      response.status(200).json(published);
+      return;
+    }
     if (!latest) {
       response.setHeader("Cache-Control", "no-store");
       response.status(200).json({
@@ -34,6 +47,11 @@ module.exports = async function handler(request, response) {
       previousRowsPromise,
       runInfo(latest),
     ]);
+    if (!committedPublicationMatches(latestRunInfo, latestRows)) {
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json(published);
+      return;
+    }
 
     response.setHeader("Cache-Control", "public, max-age=0, s-maxage=15, stale-while-revalidate=30");
     response.status(200).json({

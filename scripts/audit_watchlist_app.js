@@ -1,6 +1,6 @@
 const { conservativeFallbackRow, staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
 const { publishedLatestPayload, publishedTickerPayload } = require("../api/_published_data");
-const { rowDto, runDto } = require("../api/_supabase");
+const { committedPublicationMatches, rowDto, runDto } = require("../api/_supabase");
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 const fs = require("fs");
 
@@ -182,6 +182,28 @@ function auditPartialRunStatus() {
   const scanner = fs.readFileSync("daily_watchlist_overview.py", "utf8");
   assert(scanner.includes("not live_access_ok or stale_cache_fallbacks or failures"), "partial ticker failures must mark a daily refresh degraded");
   return { partialFailures: "degraded" };
+}
+
+function auditAtomicPublicationContract() {
+  const scanner = fs.readFileSync("daily_watchlist_overview.py", "utf8");
+  const workflow = fs.readFileSync(".github/workflows/daily-watchlist-pages.yml", "utf8");
+  const supabaseApi = fs.readFileSync("api/_supabase.js", "utf8");
+  const tickerApi = fs.readFileSync("api/ticker/[ticker].js", "utf8");
+  const latestApi = fs.readFileSync("api/watchlist/latest.js", "utf8");
+  const healthAudit = fs.readFileSync("scripts/supabase_learning_health.py", "utf8");
+  assert(scanner.includes('final_metadata["status"] = "pending_audit"'), "scanner must keep a synced run hidden until database audit passes");
+  assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Reclaim Supabase replay storage"), "database health audit must precede destructive retention");
+  assert(supabaseApi.includes("status=in.(ok,degraded)"), "API must select only validated run states");
+  assert(supabaseApi.includes("committedPublicationMatches"), "API must verify immutable publication ids after fetching rows");
+  assert(supabaseApi.includes("return [];"), "status-query failures must fail closed instead of selecting raw snapshots");
+  assert(tickerApi.includes("recentRunDates(1)"), "ticker detail must share the validated run selector with the main list");
+  assert(tickerApi.includes("committedPublicationMatches") && latestApi.includes("committedPublicationMatches"), "list and detail APIs must reject mixed same-day reruns");
+  assert(healthAudit.includes('payload->>publication_id=eq.') && healthAudit.includes('status=eq.pending_audit'), "audit promotion must compare-and-set the exact pending publication");
+  const committedRun = { status: "ok", payload: { publication_id: "pub-1", sync_state: "complete" } };
+  assert(committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-1" } }]), "matching publication ids must be readable");
+  assert(!committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-2" } }]), "mixed same-day publication ids must fail closed");
+  assert(!committedPublicationMatches({ status: "pending_audit", payload: { publication_id: "pub-1", sync_state: "complete" } }, [{ payload: { publication_id: "pub-1" } }]), "pending audit runs must remain hidden");
+  return { pendingStatus: "pending_audit", validatedStatuses: ["ok", "degraded"] };
 }
 
 function auditStaticFallback() {
@@ -875,6 +897,7 @@ async function main() {
     learningReadoutUi: auditLearningReadoutUi(),
     storageGuard: auditStorageGuard(),
     partialRunStatus: auditPartialRunStatus(),
+    atomicPublication: auditAtomicPublicationContract(),
     runHealthProviders: auditRunHealthProviderPayload(),
     tickerDetailMerge: auditTickerDetailMerge(),
   };

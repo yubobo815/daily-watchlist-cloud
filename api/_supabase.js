@@ -141,6 +141,13 @@ const PAYLOAD_FIELDS = [
   "prediction_confidence",
   "prediction_model_version",
   "prediction_state",
+  "directional_model_version",
+  "directional_model_train_samples",
+  "directional_model_oos_samples",
+  "directional_model_brier_score",
+  "directional_model_baseline_brier",
+  "directional_model_brier_skill",
+  "directional_model_state",
   "data_provider",
   "data_provider_error",
   "data_provider_latency_ms",
@@ -648,6 +655,8 @@ function runDto(row) {
     stale_execution_blocks: Number(payload.stale_execution_blocks || 0),
     signal_outcomes: payload.signal_outcomes && typeof payload.signal_outcomes === "object" ? payload.signal_outcomes : {},
     max_execution_data_age_days: Number(payload.max_execution_data_age_days || 0),
+    publication_id: String(payload.publication_id || ""),
+    sync_state: String(payload.sync_state || ""),
   };
   return output;
 }
@@ -664,26 +673,35 @@ function sortRows(rows) {
   });
 }
 
+function committedPublicationMatches(run, rows) {
+  if (!run || !["ok", "degraded"].includes(String(run.status || ""))) return false;
+  if (String(run.payload?.sync_state || "") !== "complete") return false;
+  const publicationId = String(run.payload?.publication_id || "");
+  if (!publicationId || !Array.isArray(rows) || rows.length === 0) return false;
+  return rows.every((row) => String(row?.payload?.publication_id || "") === publicationId);
+}
+
 async function recentRunDates(limit = 2) {
   const dates = [];
   const addDate = (row) => {
     if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
   };
 
-  // Snapshot rows are the source of truth for a usable app state. A degraded
-  // refresh may write run health without snapshot rows, and that must not make
-  // the app select an empty latest date.
   const snapshotRows = await supabaseSelect("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
-  snapshotRows.forEach(addDate);
-  if (dates.length >= limit) return dates.slice(0, limit);
+  const snapshotDates = new Set(snapshotRows.map((row) => row.run_date).filter(Boolean));
 
   try {
-    const runRows = await supabaseSelect(`watchlist_refresh_runs?select=run_date&order=run_date.desc&limit=${limit}`);
-    runRows.forEach(addDate);
+    // A run is publishable only after scanner, snapshot, history, and outcome
+    // writes have all completed. Rows left in publishing/sync_failed state are
+    // intentionally invisible to the production API.
+    const runRows = await supabaseSelect(`watchlist_refresh_runs?select=run_date,status&status=in.(ok,degraded)&order=run_date.desc&limit=${Math.max(limit * 3, 6)}`);
+    runRows.filter((row) => snapshotDates.has(row.run_date)).forEach(addDate);
+    return dates.slice(0, limit);
   } catch {
-    // Older deployments may not have refresh run rows yet.
+    // Fail closed. Published Pages data is the only safe fallback when the
+    // commit-marker table cannot be read.
+    return [];
   }
-  return dates.slice(0, limit);
 }
 
 async function runInfo(runDate) {
@@ -702,6 +720,7 @@ async function runInfo(runDate) {
 }
 
 module.exports = {
+  committedPublicationMatches,
   encodeFilterValue,
   HISTORY_FIELDS,
   isValidTicker,

@@ -2,6 +2,7 @@ import argparse
 import base64
 import http.cookiejar
 import html
+import itertools
 import json
 import math
 import os
@@ -81,13 +82,25 @@ SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
 LEARNING_MIN_SAMPLES = int(os.getenv("LEARNING_MIN_SAMPLES", "3"))
 LEARNING_ADJUSTMENT_CAP = float(os.getenv("LEARNING_ADJUSTMENT_CAP", "10"))
-LEARNING_CONFIRM_MIN_SAMPLES = int(os.getenv("LEARNING_CONFIRM_MIN_SAMPLES", "6"))
+LEARNING_CONFIRM_MIN_SAMPLES = int(os.getenv("LEARNING_CONFIRM_MIN_SAMPLES", "30"))
 LEARNING_CONFIRM_MIN_WORKING_RATE = float(os.getenv("LEARNING_CONFIRM_MIN_WORKING_RATE", "0.60"))
 LEARNING_CONFIRM_MAX_FAILED_RATE = float(os.getenv("LEARNING_CONFIRM_MAX_FAILED_RATE", "0.25"))
 LEARNING_CONFIRM_MIN_ADJUSTMENT = float(os.getenv("LEARNING_CONFIRM_MIN_ADJUSTMENT", "2.0"))
 LEARNING_CONFIRM_MIN_SCORE = float(os.getenv("LEARNING_CONFIRM_MIN_SCORE", "78.0"))
-LEARNING_CONFIRM_MIN_DISTINCT_TICKERS = int(os.getenv("LEARNING_CONFIRM_MIN_DISTINCT_TICKERS", "4"))
-LEARNING_CONFIRM_MIN_EVALUATION_DATES = int(os.getenv("LEARNING_CONFIRM_MIN_EVALUATION_DATES", "4"))
+LEARNING_CONFIRM_MIN_DISTINCT_TICKERS = int(os.getenv("LEARNING_CONFIRM_MIN_DISTINCT_TICKERS", "8"))
+LEARNING_CONFIRM_MIN_EVALUATION_DATES = int(os.getenv("LEARNING_CONFIRM_MIN_EVALUATION_DATES", "10"))
+LEARNING_CALIBRATION_MIN_SAMPLES = int(os.getenv("LEARNING_CALIBRATION_MIN_SAMPLES", "30"))
+LEARNING_CALIBRATION_MAX_BRIER = float(os.getenv("LEARNING_CALIBRATION_MAX_BRIER", "0.62"))
+DIRECTIONAL_MODEL_VERSION = "ohlcv-ridge-v1"
+DIRECTIONAL_MODEL_MIN_TRAIN_SAMPLES = int(os.getenv("DIRECTIONAL_MODEL_MIN_TRAIN_SAMPLES", "200"))
+DIRECTIONAL_MODEL_MIN_OOS_SAMPLES = int(os.getenv("DIRECTIONAL_MODEL_MIN_OOS_SAMPLES", "1000"))
+DIRECTIONAL_MODEL_MIN_OOS_DATES = int(os.getenv("DIRECTIONAL_MODEL_MIN_OOS_DATES", "40"))
+DIRECTIONAL_MODEL_MIN_PERSONALITY_SAMPLES = int(os.getenv("DIRECTIONAL_MODEL_MIN_PERSONALITY_SAMPLES", "200"))
+DIRECTIONAL_MODEL_MIN_PERSONALITY_DATES = int(os.getenv("DIRECTIONAL_MODEL_MIN_PERSONALITY_DATES", "30"))
+DIRECTIONAL_MODEL_MIN_BRIER_SKILL = float(os.getenv("DIRECTIONAL_MODEL_MIN_BRIER_SKILL", "0.03"))
+DIRECTIONAL_MODEL_RIDGE = float(os.getenv("DIRECTIONAL_MODEL_RIDGE", "12.0"))
+DIRECTIONAL_RAW_LOOKBACK_DAYS = int(os.getenv("DIRECTIONAL_RAW_LOOKBACK_DAYS", "180"))
+DIRECTIONAL_REFIT_INTERVAL_DAYS = int(os.getenv("DIRECTIONAL_REFIT_INTERVAL_DAYS", "5"))
 POST_EXIT_COOLDOWN_BARS = int(os.getenv("POST_EXIT_COOLDOWN_BARS", "2"))
 POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
 POST_EXIT_RISK_PERSISTENCE_BARS = int(os.getenv("POST_EXIT_RISK_PERSISTENCE_BARS", "3"))
@@ -965,6 +978,12 @@ OPTIONAL_REFRESH_RUN_COLUMNS = {
     "learning_history_rows",
 }
 
+OPTIONAL_OUTCOME_COLUMNS = {
+    "forecast_learnable",
+    "prior_prediction_key",
+    "prior_prediction_scope",
+}
+
 # Each table has a different job. A single blanket retention window made the
 # replay table grow by every ticker x every replay day x every scanner run.
 SUPABASE_SNAPSHOT_RETENTION_DAYS = int(os.getenv("SUPABASE_SNAPSHOT_RETENTION_DAYS", "14"))
@@ -1097,6 +1116,23 @@ def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict]
         ]
         print(f"Supabase {table} optional signal columns unavailable; storing transition fields in payload only.")
         supabase_upsert_batches(table, stripped_records, conflict_columns)
+
+
+def supabase_upsert_with_optional_outcome_columns(records: list[dict], conflict_columns: list[str]) -> None:
+    try:
+        supabase_upsert_batches("watchlist_signal_outcomes", records, conflict_columns)
+        return
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        schema_cache_error = "could not find" in message or "schema cache" in message or "column" in message
+        if not schema_cache_error:
+            raise
+        stripped_records = [
+            {key: value for key, value in record.items() if key not in OPTIONAL_OUTCOME_COLUMNS}
+            for record in records
+        ]
+        print("Supabase outcome calibration columns unavailable; storing them in payload only.")
+        supabase_upsert_batches("watchlist_signal_outcomes", stripped_records, conflict_columns)
 
 
 def supabase_upsert_refresh_run(records: list[dict]) -> None:
@@ -1487,10 +1523,13 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
                     "prior_prediction_no_edge_probability": numeric_or_none(row.get("prior_prediction_no_edge_probability")),
                     "prior_prediction_confidence": numeric_or_none(row.get("prior_prediction_confidence")),
                     "prior_prediction_state": row.get("prior_prediction_state"),
+                    "prior_prediction_key": row.get("prior_prediction_key"),
+                    "prior_prediction_scope": row.get("prior_prediction_scope"),
                     "prior_close": numeric_or_none(row.get("prior_close")),
                     "entry_model_version": row.get("entry_model_version"),
-                    "entry_eligible": bool(row.get("entry_eligible")),
-                    "entry_filled": bool(row.get("entry_filled")),
+                    "entry_eligible": is_affirmative(row.get("entry_eligible")),
+                    "entry_filled": is_affirmative(row.get("entry_filled")),
+                    "forecast_learnable": is_affirmative(row.get("forecast_learnable")),
                     "entry_fill_est": numeric_or_none(row.get("entry_fill_est")),
                     "current_action": row.get("current_action"),
                     "current_operator_state": row.get("current_operator_state"),
@@ -1506,7 +1545,11 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
 
     if run_metadata:
         try:
-            supabase_upsert_refresh_run([clean_record(run_metadata)])
+            publishing_metadata = clean_record(run_metadata)
+            publishing_metadata["status"] = "publishing"
+            publishing_payload = publishing_metadata.get("payload") if isinstance(publishing_metadata.get("payload"), dict) else {}
+            publishing_metadata["payload"] = {**publishing_payload, "sync_state": "publishing"}
+            supabase_upsert_refresh_run([publishing_metadata])
         except Exception as exc:
             print(f"Supabase run-health sync skipped: {exc}")
 
@@ -1526,11 +1569,33 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     try:
         # Outcomes can grow well beyond normal snapshot batches. Keep this
         # non-critical archive write bounded so it cannot block publishing.
-        supabase_upsert_batches("watchlist_signal_outcomes", outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
+        supabase_upsert_with_optional_outcome_columns(outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
         outcome_synced = len(outcome_records)
     except Exception as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
-    if snapshot_synced == len(report_records) and history_synced == len(history_records):
+    sync_complete = (
+        snapshot_synced == len(report_records)
+        and history_synced == len(history_records)
+        and outcome_synced == len(outcome_records)
+    )
+    if run_metadata:
+        try:
+            final_metadata = clean_record(run_metadata)
+            final_payload = final_metadata.get("payload") if isinstance(final_metadata.get("payload"), dict) else {}
+            scanner_status = str(run_metadata.get("status") or "ok")
+            final_metadata["status"] = "pending_audit" if sync_complete else "sync_failed"
+            final_metadata["payload"] = {
+                **final_payload,
+                "scanner_status": scanner_status,
+                "sync_state": "complete" if sync_complete else "failed",
+                "synced_snapshot_rows": snapshot_synced,
+                "synced_history_rows": history_synced,
+                "synced_outcome_rows": outcome_synced,
+            }
+            supabase_upsert_refresh_run([final_metadata])
+        except Exception as exc:
+            print(f"Supabase final run-health sync skipped: {exc}")
+    if sync_complete:
         try:
             cleanup_supabase_run_replacement(run_date, report_records, history_records)
         except Exception as exc:
@@ -1539,19 +1604,17 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
             cleanup_supabase_obsolete_history(run_date, history_records)
         except Exception as exc:
             print(f"Supabase obsolete-history cleanup skipped: {exc}")
-    try:
-        cleanup_supabase_failed_tickers(run_date, run_metadata)
-    except Exception as exc:
-        print(f"Supabase failed-ticker cleanup skipped: {exc}")
+        try:
+            cleanup_supabase_failed_tickers(run_date, run_metadata)
+        except Exception as exc:
+            print(f"Supabase failed-ticker cleanup skipped: {exc}")
     print(
         f"Synced {snapshot_synced}/{len(report_records)} snapshot rows, "
         f"{history_synced}/{len(history_records)} history rows, and "
         f"{outcome_synced}/{len(outcome_records)} signal-outcome rows to Supabase."
     )
-    try:
-        cleanup_supabase_retention(run_date)
-    except Exception as exc:
-        print(f"Supabase retention cleanup skipped: {exc}")
+    if not sync_complete:
+        print("Supabase cleanup skipped because the publication is incomplete.")
 
 
 def ema(series: pd.Series, length: int) -> pd.Series:
@@ -1961,7 +2024,11 @@ def learning_confirms_setup_upgrade(row: dict) -> bool:
     learning_scope = str(row.get("learning_scope") or "").lower()
     distinct_tickers = int(numeric_or_none(row.get("learning_distinct_ticker_count")) or 0)
     evaluation_dates = int(numeric_or_none(row.get("learning_evaluation_date_count")) or 0)
+    promotion_eligible = row.get("learning_promotion_eligible") is True
+    directional_rejected = "directional_model_not_confirmed" in (row.get("reason_codes") or [])
 
+    if not promotion_eligible or directional_rejected:
+        return False
     if not personality_allowed or stale or anti_level != "NONE" or not risk_ok or not market_ok or not ticker_ok or not walk_forward_ok:
         return False
     if extension_state == "EXTENDED" or quality in {"STALE DATA", "EVENT RISK", "EXTENDED", "FEEDBACK FAILED", "FEEDBACK STALE"}:
@@ -2599,6 +2666,8 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
         "prior_prediction_no_edge_probability": numeric_or_none(prior.get("prediction_no_edge_probability")),
         "prior_prediction_confidence": numeric_or_none(prior.get("prediction_confidence")),
         "prior_prediction_state": prior.get("prediction_state"),
+        "prior_prediction_key": prior.get("learning_key_used"),
+        "prior_prediction_scope": prior.get("learning_scope"),
         "prior_close": round(float(prior_close), 2) if prior_close else "",
         "entry_model_version": LEARNING_MODEL_VERSION,
         "entry_eligible": entry_eligible,
@@ -2654,6 +2723,8 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_prediction_no_edge_probability": numeric_or_none(prior.get("prediction_no_edge_probability")),
         "prior_prediction_confidence": numeric_or_none(prior.get("prediction_confidence")),
         "prior_prediction_state": prior.get("prediction_state"),
+        "prior_prediction_key": prior.get("learning_key_used"),
+        "prior_prediction_scope": prior.get("learning_scope"),
         "prior_close": numeric_or_none(prior.get("close")) or "",
         "entry_model_version": LEARNING_MODEL_VERSION,
         "label_horizon_sessions": horizon,
@@ -2674,6 +2745,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "outcome_score": 0.0,
         "outcome_reason": "Awaiting a complete five-session evaluation window.",
         "outcome_learnable": False,
+        "forecast_learnable": False,
     }
     base["learning_key"] = "|".join([
         prior_action or "UNKNOWN", str(prior.get("setup") or "NONE"),
@@ -2693,12 +2765,10 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         })
         return base
     if not gates_allow:
-        base.update({
-            "path_status": "GATED",
-            "outcome_label": "NON_LEARNABLE",
-            "outcome_reason": f"Prior execution gate blocked ({', '.join(gate_blockers)}); excluded from learning.",
-        })
-        return base
+        base["outcome_reason"] = (
+            f"Execution was blocked ({', '.join(gate_blockers)}); "
+            "the OHLCV path is retained only for forecast calibration."
+        )
 
     zone_low = numeric_or_none(prior.get("entry_zone_low")) or numeric_or_none(prior.get("entry_est"))
     zone_high = numeric_or_none(prior.get("entry_zone_high")) or zone_low
@@ -2709,6 +2779,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
 
     entry = None
     target = None
+    entry_opened_above_zone = False
     highs: list[float] = []
     lows: list[float] = []
     for offset, bar in enumerate(future_rows[:horizon], start=1):
@@ -2726,14 +2797,18 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
             if float(low) <= float(stop):
                 base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both the entry area and stop; intraday order is unknown."})
                 return base
+            entry_opened_above_zone = float(open_) > float(zone_high)
             entry = float(open_) if float(zone_low) <= float(open_) <= float(zone_high) else float(zone_high)
-            target = entry + (entry - float(stop))
-            base.update({"entry_eligible": True, "entry_filled": True, "entry_fill_est": round(entry, 2)})
+            target = numeric_or_none(prior.get("target_est")) or entry + (entry - float(stop))
+            base.update({"entry_eligible": gates_allow, "entry_filled": True, "entry_fill_est": round(entry, 2)})
         highs.append(float(high))
         lows.append(float(low))
         hit_stop, hit_target = float(low) <= float(stop), float(high) >= float(target)
         if hit_stop and hit_target:
             base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both stop and target; intraday order is unknown."})
+            return base
+        if hit_target and entry_opened_above_zone and len(highs) == 1:
+            base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Entry zone and target were both touched after opening above the zone; intraday order is unknown."})
             return base
         if hit_target or hit_stop:
             mfe = (max(highs) / entry - 1) * 100
@@ -2743,7 +2818,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
                 "path_status": "SETTLED", "target_hit": hit_target, "stop_hit": hit_stop,
                 "evaluation_run_date": bar.get("date") or bar.get("history_date") or evaluation_date,
                 "mfe_pct": round(mfe, 2), "mae_pct": round(mae, 2), "close_return_pct": round(close_return, 2),
-                "current_close": round(float(close), 2), "outcome_learnable": True,
+                "current_close": round(float(close), 2), "outcome_learnable": gates_allow, "forecast_learnable": True,
                 "outcome_label": "WORKING" if hit_target else "FAILED", "outcome_score": 1.0 if hit_target else -1.0,
                 "outcome_reason": f"{'Target' if hit_target else 'Stop'} was reached first within {offset} session(s).",
             })
@@ -2754,7 +2829,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         return base
     final_close = numeric_or_none(future_rows[horizon - 1].get("close"))
     base.update({
-        "path_status": "SETTLED", "outcome_learnable": True, "outcome_label": "STALE", "outcome_score": 0.0,
+        "path_status": "SETTLED", "outcome_learnable": gates_allow, "forecast_learnable": True, "outcome_label": "STALE", "outcome_score": 0.0,
         "mfe_pct": round((max(highs) / entry - 1) * 100, 2), "mae_pct": round((min(lows) / entry - 1) * 100, 2),
         "close_return_pct": round((float(final_close) / entry - 1) * 100, 2) if final_close else "",
         "current_close": round(float(final_close), 2) if final_close else "",
@@ -2919,13 +2994,22 @@ def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
 
 def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
     try:
-        rows = supabase_select(
-            "watchlist_signal_outcomes?"
-            "select=*&"
-            f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
-            "outcome_label=neq.PENDING&"
-            "order=evaluation_run_date.desc&limit=5000"
-        )
+        run_timestamp = pd.Timestamp(run_date)
+        cutoff = (run_timestamp - pd.Timedelta(days=max(90, LEARNING_LOOKBACK_DAYS * 3))).date().isoformat()
+        rows: list[dict] = []
+        page_size = 1000
+        for offset in range(0, 25000, page_size):
+            page = supabase_select(
+                "watchlist_signal_outcomes?"
+                "select=*&"
+                f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
+                f"evaluation_run_date=gte.{urllib.parse.quote(cutoff)}&"
+                "outcome_label=neq.PENDING&"
+                f"order=evaluation_run_date.desc,signal_run_date.desc,ticker.asc&limit={page_size}&offset={offset}"
+            )
+            rows.extend(page)
+            if len(page) < page_size:
+                break
         if rows:
             return restrict_learning_outcomes_to_window(pd.DataFrame([merge_payload_row(row) for row in rows]), run_date)
     except RuntimeError as exc:
@@ -2943,12 +3027,13 @@ def build_learning_stats(
         outcome_history.empty
         or "learning_key" not in outcome_history.columns
         or "entry_model_version" not in outcome_history.columns
-        or "outcome_learnable" not in outcome_history.columns
+        or ("forecast_learnable" not in outcome_history.columns and "outcome_learnable" not in outcome_history.columns)
     ):
         return {}
+    learnable_column = "forecast_learnable" if "forecast_learnable" in outcome_history.columns else "outcome_learnable"
     usable = outcome_history[
         outcome_history["outcome_label"].astype(str).str.upper().isin({"WORKING", "FAILED", "TRAP_AVOIDED", "STALE"})
-        & outcome_history["outcome_learnable"].map(is_affirmative)
+        & outcome_history[learnable_column].map(is_affirmative)
     ].copy()
     # Every learning row must use the current executable entry model. Legacy
     # rows with no version are not comparable and must not influence weights.
@@ -2976,8 +3061,8 @@ def build_learning_stats(
     for column, scope in grouped_sources:
         for key, group in usable.groupby(column):
             labels = group["outcome_label"].astype(str).str.upper()
-            scores = pd.to_numeric(group.get("outcome_score"), errors="coerce").dropna()
-            returns = pd.to_numeric(group.get("close_return_pct"), errors="coerce").dropna()
+            scores = pd.to_numeric(group["outcome_score"], errors="coerce").dropna() if "outcome_score" in group.columns else pd.Series(dtype=float)
+            returns = pd.to_numeric(group["close_return_pct"], errors="coerce").dropna() if "close_return_pct" in group.columns else pd.Series(dtype=float)
             total = int(len(group))
             working = int((labels == "WORKING").sum())
             failed = int((labels == "FAILED").sum())
@@ -2988,6 +3073,63 @@ def build_learning_stats(
             evaluation_dates = int(evaluation_series.dt.normalize().nunique()) if not evaluation_series.empty else 0
             evaluation_date_min = evaluation_series.min().date().isoformat() if not evaluation_series.empty else ""
             evaluation_date_max = evaluation_series.max().date().isoformat() if not evaluation_series.empty else ""
+            execution = group[group["outcome_learnable"].map(is_affirmative)].copy() if "outcome_learnable" in group.columns else pd.DataFrame()
+            execution_labels = execution["outcome_label"].astype(str).str.upper() if not execution.empty else pd.Series(dtype=str)
+            execution_scores = pd.to_numeric(execution["outcome_score"], errors="coerce").dropna() if "outcome_score" in execution.columns else pd.Series(dtype=float)
+            execution_returns = pd.to_numeric(execution["close_return_pct"], errors="coerce").dropna() if "close_return_pct" in execution.columns else pd.Series(dtype=float)
+            execution_total = int(len(execution))
+            execution_tickers = int(execution["ticker"].dropna().astype(str).str.upper().nunique()) if "ticker" in execution.columns else 0
+            execution_dates_series = pd.to_datetime(execution["evaluation_run_date"], errors="coerce").dropna() if "evaluation_run_date" in execution.columns else pd.Series(dtype="datetime64[ns]")
+            execution_dates = int(execution_dates_series.dt.normalize().nunique()) if not execution_dates_series.empty else 0
+            calibration = group.dropna(
+                subset=[
+                    "prior_prediction_upside_probability",
+                    "prior_prediction_downside_probability",
+                    "prior_prediction_no_edge_probability",
+                ]
+            ) if all(
+                column in group.columns
+                for column in (
+                    "prior_prediction_upside_probability",
+                    "prior_prediction_downside_probability",
+                    "prior_prediction_no_edge_probability",
+                )
+            ) else pd.DataFrame()
+            if not calibration.empty:
+                valid_states = {"WALK_FORWARD", "REPORTING_ONLY", "CALIBRATED"}
+                calibration = calibration[
+                    calibration.get("prior_prediction_state", pd.Series(index=calibration.index, dtype=str)).astype(str).str.upper().isin(valid_states)
+                    & (calibration.get("prior_prediction_key", pd.Series(index=calibration.index, dtype=str)).astype(str) == str(key))
+                    & (calibration.get("prior_prediction_scope", pd.Series(index=calibration.index, dtype=str)).astype(str) == scope)
+                ]
+            brier_score = None
+            if not calibration.empty:
+                probability_columns = [
+                    "prior_prediction_upside_probability",
+                    "prior_prediction_downside_probability",
+                    "prior_prediction_no_edge_probability",
+                ]
+                probabilities = calibration[probability_columns].apply(pd.to_numeric, errors="coerce")
+                finite = pd.DataFrame(np.isfinite(probabilities), index=probabilities.index, columns=probabilities.columns).all(axis=1)
+                valid = (
+                    probabilities.notna().all(axis=1)
+                    & finite
+                    & probabilities.ge(0.0).all(axis=1)
+                    & probabilities.le(1.0).all(axis=1)
+                    & probabilities.sum(axis=1).sub(1.0).abs().le(1e-6)
+                )
+                calibration = calibration.loc[valid]
+                probabilities = probabilities.loc[valid]
+                if not calibration.empty:
+                    calibration_labels = calibration["outcome_label"].astype(str).str.upper()
+                    targets = np.column_stack(
+                        [
+                            (calibration_labels == "WORKING").astype(float),
+                            (calibration_labels == "FAILED").astype(float),
+                            calibration_labels.isin({"STALE", "TRAP_AVOIDED"}).astype(float),
+                        ]
+                    )
+                    brier_score = float(np.mean(np.sum((probabilities.to_numpy(dtype=float) - targets) ** 2, axis=1)))
             stats[str(key)] = {
                 "sample_count": total,
                 "working_rate": working / total if total else 0.0,
@@ -3000,14 +3142,327 @@ def build_learning_stats(
                 "no_edge_probability": (no_edge + trap_avoided + 1) / (total + 3),
                 "avg_score": float(scores.mean()) if not scores.empty else 0.0,
                 "avg_return_pct": float(returns.mean()) if not returns.empty else None,
+                "execution_sample_count": execution_total,
+                "execution_working_rate": float((execution_labels == "WORKING").sum()) / execution_total if execution_total else 0.0,
+                "execution_failed_rate": float((execution_labels == "FAILED").sum()) / execution_total if execution_total else 0.0,
+                "execution_trap_avoided_rate": float((execution_labels == "TRAP_AVOIDED").sum()) / execution_total if execution_total else 0.0,
+                "execution_avg_score": float(execution_scores.mean()) if not execution_scores.empty else 0.0,
+                "execution_avg_return_pct": float(execution_returns.mean()) if not execution_returns.empty else None,
+                "execution_distinct_ticker_count": execution_tickers,
+                "execution_evaluation_date_count": execution_dates,
                 "scope": scope,
                 "distinct_ticker_count": distinct_tickers,
                 "evaluation_date_count": evaluation_dates,
                 "evaluation_date_min": evaluation_date_min,
                 "evaluation_date_max": evaluation_date_max,
                 "model_version": LEARNING_MODEL_VERSION,
+                "calibration_sample_count": int(len(calibration)),
+                "brier_score": brier_score,
             }
     return stats
+
+
+def attach_walk_forward_predictions(outcomes: pd.DataFrame) -> pd.DataFrame:
+    """Freeze predictions using only outcomes settled before each signal date."""
+    if outcomes.empty or "signal_run_date" not in outcomes.columns or "evaluation_run_date" not in outcomes.columns:
+        return outcomes
+
+    result = outcomes.copy()
+    signal_dates = pd.to_datetime(result["signal_run_date"], errors="coerce")
+    evaluation_dates = pd.to_datetime(result["evaluation_run_date"], errors="coerce")
+    for signal_date in sorted(signal_dates.dropna().dt.normalize().unique()):
+        signal_timestamp = pd.Timestamp(signal_date)
+        prediction_indices = result.index[signal_dates.dt.normalize() == signal_timestamp]
+        training = result.loc[evaluation_dates.dt.normalize() < signal_timestamp].copy()
+        stats = build_learning_stats(training, signal_timestamp.date().isoformat(), LEARNING_LOOKBACK_DAYS)
+        for index in prediction_indices:
+            row = result.loc[index]
+            exact_key = str(row.get("learning_key") or "")
+            action_setup_key = learning_action_setup_key(row.get("prior_action"), row.get("prior_setup"))
+            action_key = learning_action_key(row.get("prior_action"))
+            selected = next((stats[key] for key in (exact_key, action_setup_key, action_key) if key in stats), None)
+            if not selected or int(selected.get("sample_count", 0)) < LEARNING_MIN_SAMPLES:
+                for column in (
+                    "prior_prediction_upside_probability",
+                    "prior_prediction_downside_probability",
+                    "prior_prediction_no_edge_probability",
+                    "prior_prediction_confidence",
+                    "prior_prediction_key",
+                    "prior_prediction_scope",
+                ):
+                    result.at[index, column] = np.nan
+                result.at[index, "prior_prediction_state"] = "INSUFFICIENT_EVIDENCE"
+                continue
+            result.at[index, "prior_prediction_upside_probability"] = selected["upside_probability"]
+            result.at[index, "prior_prediction_downside_probability"] = selected["downside_probability"]
+            result.at[index, "prior_prediction_no_edge_probability"] = selected["no_edge_probability"]
+            sample_count = int(selected.get("sample_count", 0))
+            result.at[index, "prior_prediction_confidence"] = min(0.90, sample_count / (sample_count + 12.0))
+            result.at[index, "prior_prediction_key"] = next(
+                key for key in (exact_key, action_setup_key, action_key) if key in stats and stats[key] is selected
+            )
+            result.at[index, "prior_prediction_scope"] = selected.get("scope")
+            result.at[index, "prior_prediction_state"] = "WALK_FORWARD"
+    return result
+
+
+DIRECTIONAL_NUMERIC_FEATURES = (
+    "day_change_pct",
+    "rsi",
+    "atr_pct",
+    "trend_efficiency",
+    "relative_volume",
+    "close_location",
+    "range_atr",
+    "signed_volume_pressure_5",
+    "demand_supply_balance_5",
+    "ema_fast_distance_pct",
+    "ema_slow_distance_pct",
+    "return_5d_pct",
+    "return_20d_pct",
+    "gap_pct",
+)
+DIRECTIONAL_PERSONALITIES = ("ETF", "COMPOUNDER", "BALANCED", "RANGE_BOUND", "HIGH_BETA")
+DIRECTIONAL_LABELS = ("UP", "DOWN", "NO_EDGE")
+
+
+def directional_feature_vector(row: dict) -> Optional[np.ndarray]:
+    values = [numeric_or_none(row.get(field)) for field in DIRECTIONAL_NUMERIC_FEATURES]
+    if any(value is None or not math.isfinite(float(value)) for value in values):
+        return None
+    personality = str(row.get("personality_type") or "BALANCED").upper()
+    one_hot = [1.0 if personality == label else 0.0 for label in DIRECTIONAL_PERSONALITIES]
+    return np.asarray([float(value) for value in values] + one_hot, dtype=float)
+
+
+def build_directional_raw_history(ticker: str, raw: pd.DataFrame, days: int = DIRECTIONAL_RAW_LOOKBACK_DAYS) -> list[dict]:
+    """Build compact direct OHLCV features without replaying the rule engine."""
+    d = prepare(raw)
+    if len(d) < 220:
+        return []
+    start = max(220, len(d) - max(1, days))
+    output: list[dict] = []
+    is_etf = ticker in ETF_HINTS
+    for index in range(start, len(d)):
+        row = d.iloc[index]
+        prev = d.iloc[index - 1]
+        close = float(row.close)
+        travel = d["close"].diff().abs().iloc[index - PERSONALITY_LOOKBACK_BARS + 1 : index + 1].sum()
+        trend_efficiency = abs(close - float(d.iloc[index - PERSONALITY_LOOKBACK_BARS].close)) / travel if travel > 0 else 0.0
+        personality = stock_personality_profile(d, index, is_etf, float(trend_efficiency))["personality_type"]
+        output.append({
+            "ticker": display_ticker(ticker),
+            "date": str(pd.to_datetime(row.date).date()),
+            "close": close,
+            "day_change_pct": (close / float(prev.close) - 1.0) * 100.0,
+            "rsi": float(row.rsi),
+            "atr_pct": float(row.atr_pct),
+            "trend_efficiency": float(trend_efficiency),
+            "relative_volume": float(row.relative_volume),
+            "close_location": float(row.close_loc),
+            "range_atr": float(row.range_atr),
+            "signed_volume_pressure_5": float(row.signed_volume_pressure_5),
+            "demand_supply_balance_5": float(row.demand_days_5 - row.supply_days_5),
+            "ema_fast_distance_pct": (close / float(row.ema_fast) - 1.0) * 100.0,
+            "ema_slow_distance_pct": (close / float(row.ema_slow) - 1.0) * 100.0,
+            "return_5d_pct": (close / float(d.iloc[index - 5].close) - 1.0) * 100.0,
+            "return_20d_pct": (close / float(d.iloc[index - 20].close) - 1.0) * 100.0,
+            "gap_pct": (float(row.open) / float(prev.close) - 1.0) * 100.0,
+            "personality_type": personality,
+            "volume_state": "NEUTRAL",
+        })
+    return output
+
+
+def build_directional_samples(history_rows: list[dict], horizon_sessions: int = LEARNING_HORIZON_SESSIONS) -> pd.DataFrame:
+    records: list[dict] = []
+    ordered = sorted(history_rows, key=lambda item: (str(item.get("ticker") or ""), str(item.get("date") or "")))
+    for _, ticker_rows in itertools.groupby(ordered, key=lambda item: str(item.get("ticker") or "")):
+        rows = list(ticker_rows)
+        for index in range(0, max(0, len(rows) - horizon_sessions)):
+            current = rows[index]
+            future = rows[index + horizon_sessions]
+            features = directional_feature_vector(current)
+            close = numeric_or_none(current.get("close"))
+            future_close = numeric_or_none(future.get("close"))
+            atr_pct = numeric_or_none(current.get("atr_pct"))
+            if features is None or close is None or future_close is None or close <= 0 or atr_pct is None:
+                continue
+            forward_return = (float(future_close) / float(close) - 1.0) * 100.0
+            move_threshold = max(1.0, min(4.0, float(atr_pct) * 0.60))
+            label = "UP" if forward_return >= move_threshold else "DOWN" if forward_return <= -move_threshold else "NO_EDGE"
+            ema_fast_distance = float(numeric_or_none(current.get("ema_fast_distance_pct")) or 0.0)
+            ema_slow_distance = float(numeric_or_none(current.get("ema_slow_distance_pct")) or 0.0)
+            return_20d = float(numeric_or_none(current.get("return_20d_pct")) or 0.0)
+            trend_bucket = "UPTREND" if ema_fast_distance > 0 and ema_slow_distance > 0 and return_20d > 0 else "DOWNTREND" if ema_fast_distance < 0 and ema_slow_distance < 0 and return_20d < 0 else "MIXED"
+            records.append({
+                "ticker": current.get("ticker"),
+                "signal_run_date": current.get("date"),
+                "evaluation_run_date": future.get("date"),
+                "features": features,
+                "label": label,
+                "forward_return_pct": round(forward_return, 4),
+                "move_threshold_pct": round(move_threshold, 4),
+                "personality_type": str(current.get("personality_type") or "BALANCED").upper(),
+                "trend_bucket": trend_bucket,
+                "volume_state": str(current.get("volume_state") or "NEUTRAL").upper(),
+            })
+    return pd.DataFrame(records)
+
+
+def fit_directional_ridge(samples: pd.DataFrame) -> Optional[dict]:
+    if len(samples) < DIRECTIONAL_MODEL_MIN_TRAIN_SAMPLES or "features" not in samples.columns:
+        return None
+    labels = samples["label"].astype(str)
+    class_counts = labels.value_counts()
+    if any(int(class_counts.get(label, 0)) < 10 for label in DIRECTIONAL_LABELS):
+        return None
+    matrix = np.vstack(samples["features"].to_list()).astype(float)
+    center = np.nanmedian(matrix, axis=0)
+    scale = np.nanpercentile(matrix, 75, axis=0) - np.nanpercentile(matrix, 25, axis=0)
+    scale = np.where(np.isfinite(scale) & (scale > 1e-6), scale, 1.0)
+    standardized = np.clip((matrix - center) / scale, -5.0, 5.0)
+    design = np.column_stack([np.ones(len(standardized)), standardized])
+    targets = np.column_stack([(labels == label).astype(float) for label in DIRECTIONAL_LABELS])
+    penalty = np.eye(design.shape[1]) * DIRECTIONAL_MODEL_RIDGE
+    penalty[0, 0] = 0.0
+    # Some NumPy/BLAS builds emit spurious matmul overflow warnings even for
+    # finite, clipped matrices. Validate the products explicitly before solve.
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        gram = design.T @ design
+        cross = design.T @ targets
+    if not np.isfinite(gram).all() or not np.isfinite(cross).all():
+        return None
+    coefficients = np.linalg.solve(gram + penalty, cross)
+    if not np.isfinite(coefficients).all():
+        return None
+    priors = (np.asarray([int(class_counts.get(label, 0)) for label in DIRECTIONAL_LABELS], dtype=float) + 1.0)
+    priors /= priors.sum()
+    return {"center": center, "scale": scale, "coefficients": coefficients, "priors": priors, "sample_count": len(samples)}
+
+
+def predict_directional_probabilities(model: dict, features: np.ndarray) -> np.ndarray:
+    standardized = np.clip((features - model["center"]) / model["scale"], -5.0, 5.0)
+    raw = np.concatenate([[1.0], standardized]) @ model["coefficients"]
+    clipped = np.clip(raw, 0.01, 0.98)
+    return clipped / clipped.sum()
+
+
+def directional_walk_forward_predictions(samples: pd.DataFrame) -> pd.DataFrame:
+    if samples.empty:
+        return samples.copy()
+    result = samples.copy()
+    result["prediction"] = None
+    result["baseline_prediction"] = None
+    signal_dates = pd.to_datetime(result["signal_run_date"], errors="coerce")
+    evaluation_dates = pd.to_datetime(result["evaluation_run_date"], errors="coerce")
+    model = None
+    for date_index, signal_date in enumerate(sorted(signal_dates.dropna().dt.normalize().unique())):
+        timestamp = pd.Timestamp(signal_date)
+        if date_index % max(1, DIRECTIONAL_REFIT_INTERVAL_DAYS) == 0 or model is None:
+            train = result.loc[evaluation_dates.dt.normalize() < timestamp]
+            model = fit_directional_ridge(train)
+        if model is None:
+            continue
+        for index in result.index[signal_dates.dt.normalize() == timestamp]:
+            result.at[index, "prediction"] = predict_directional_probabilities(model, result.at[index, "features"])
+            result.at[index, "baseline_prediction"] = model["priors"].copy()
+    return result
+
+
+def directional_validation_metrics(predictions: pd.DataFrame) -> dict:
+    if predictions.empty or "prediction" not in predictions.columns:
+        return {"sample_count": 0, "date_count": 0, "brier_score": None, "baseline_brier_score": None, "brier_skill_score": None, "validated_personalities": [], "passed": False}
+    valid = predictions[predictions["prediction"].map(lambda value: isinstance(value, np.ndarray))].copy()
+    if valid.empty:
+        return {"sample_count": 0, "date_count": 0, "brier_score": None, "baseline_brier_score": None, "brier_skill_score": None, "validated_personalities": [], "passed": False}
+    probabilities = np.vstack(valid["prediction"].to_list())
+    baseline_probabilities = np.vstack(valid["baseline_prediction"].to_list())
+    labels = valid["label"].astype(str)
+    targets = np.column_stack([(labels == label).astype(float) for label in DIRECTIONAL_LABELS])
+    brier = float(np.mean(np.sum((probabilities - targets) ** 2, axis=1)))
+    baseline_brier = float(np.mean(np.sum((baseline_probabilities - targets) ** 2, axis=1)))
+    skill = 1.0 - brier / baseline_brier if baseline_brier > 0 else None
+    date_count = int(pd.to_datetime(valid["signal_run_date"], errors="coerce").dt.normalize().nunique())
+    validated_personalities: list[str] = []
+    for personality, group in valid.groupby("personality_type"):
+        if len(group) < DIRECTIONAL_MODEL_MIN_PERSONALITY_SAMPLES:
+            continue
+        group_dates = int(pd.to_datetime(group["signal_run_date"], errors="coerce").dt.normalize().nunique())
+        if group_dates < DIRECTIONAL_MODEL_MIN_PERSONALITY_DATES:
+            continue
+        group_probabilities = np.vstack(group["prediction"].to_list())
+        group_baselines = np.vstack(group["baseline_prediction"].to_list())
+        group_labels = group["label"].astype(str)
+        group_targets = np.column_stack([(group_labels == label).astype(float) for label in DIRECTIONAL_LABELS])
+        group_brier = float(np.mean(np.sum((group_probabilities - group_targets) ** 2, axis=1)))
+        group_baseline_brier = float(np.mean(np.sum((group_baselines - group_targets) ** 2, axis=1)))
+        group_skill = 1.0 - group_brier / group_baseline_brier if group_baseline_brier > 0 else None
+        if group_skill is not None and group_skill >= DIRECTIONAL_MODEL_MIN_BRIER_SKILL:
+            validated_personalities.append(str(personality))
+    passed = (
+        len(valid) >= DIRECTIONAL_MODEL_MIN_OOS_SAMPLES
+        and date_count >= DIRECTIONAL_MODEL_MIN_OOS_DATES
+        and skill is not None
+        and skill >= DIRECTIONAL_MODEL_MIN_BRIER_SKILL
+        and bool(validated_personalities)
+    )
+    return {
+        "sample_count": int(len(valid)),
+        "date_count": date_count,
+        "brier_score": brier,
+        "baseline_brier_score": baseline_brier,
+        "brier_skill_score": skill,
+        "validated_personalities": validated_personalities,
+        "passed": bool(passed),
+    }
+
+
+def apply_directional_ohlcv_model(rows: list[dict], history_rows: list[dict]) -> dict:
+    samples = build_directional_samples(history_rows)
+    walk_forward = directional_walk_forward_predictions(samples)
+    metrics = directional_validation_metrics(walk_forward)
+    latest_signal_date = max((str(row.get("date") or "") for row in rows), default="")
+    settled = samples[pd.to_datetime(samples.get("evaluation_run_date"), errors="coerce") < pd.Timestamp(latest_signal_date)] if not samples.empty and latest_signal_date else pd.DataFrame()
+    model = fit_directional_ridge(settled)
+    validated_personalities = set(metrics.get("validated_personalities") or [])
+    globally_validated = bool(metrics.get("passed")) and model is not None
+    for row in rows:
+        row["directional_model_version"] = DIRECTIONAL_MODEL_VERSION
+        row["directional_model_train_samples"] = int(len(settled))
+        row["directional_model_oos_samples"] = int(metrics.get("sample_count") or 0)
+        row["directional_model_oos_dates"] = int(metrics.get("date_count") or 0)
+        row["directional_model_brier_score"] = round(float(metrics["brier_score"]), 4) if metrics.get("brier_score") is not None else ""
+        row["directional_model_baseline_brier"] = round(float(metrics["baseline_brier_score"]), 4) if metrics.get("baseline_brier_score") is not None else ""
+        row["directional_model_brier_skill"] = round(float(metrics["brier_skill_score"]), 4) if metrics.get("brier_skill_score") is not None else ""
+        row_validated = globally_validated and str(row.get("personality_type") or "BALANCED").upper() in validated_personalities
+        row["directional_model_state"] = "VALIDATED" if row_validated else "REPORTING_ONLY"
+        features = directional_feature_vector(row)
+        if not row_validated or features is None:
+            continue
+        probabilities = predict_directional_probabilities(model, features)
+        upside, downside, no_edge = (float(value) for value in probabilities)
+        row["prediction_horizon_sessions"] = LEARNING_HORIZON_SESSIONS
+        row["prediction_upside_probability"] = round(upside, 3)
+        row["prediction_downside_probability"] = round(downside, 3)
+        row["prediction_no_edge_probability"] = round(no_edge, 3)
+        row["prediction_confidence"] = round(max(probabilities) - min(probabilities), 3)
+        row["prediction_model_version"] = DIRECTIONAL_MODEL_VERSION
+        row["prediction_state"] = "DIRECT_OHLCV_WALK_FORWARD"
+        confidence = max(probabilities) - min(probabilities)
+        if str(row.get("action") or "") == "BUY CANDIDATE" and confidence >= 0.12 and (downside >= upside + 0.10 or no_edge >= upside + 0.15):
+            prior_adjustment = max(0.0, float(numeric_or_none(row.get("learning_adjustment")) or 0.0))
+            row["action"] = "SETUP FORMING"
+            row["signal_stage"] = signal_stage("SETUP FORMING")
+            current_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
+            row["adjusted_score"] = min(current_score - prior_adjustment, 79.0)
+            row["learning_adjustment"] = 0.0
+            row["learning_promotion_eligible"] = False
+            row["learning_reporting_only"] = True
+            row["learning_promotion_state"] = "PROMOTION_BLOCKED"
+            row["reason_codes"] = list(dict.fromkeys([*(row.get("reason_codes") or []), "directional_model_not_confirmed"]))
+            row["next_day_plan"] = "The validated OHLCV model does not confirm upside dominance; keep this as a setup, not an entry."
+    return metrics
 
 
 def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]) -> None:
@@ -3039,6 +3494,10 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
             row["learning_evaluation_date_count"] = int(report_stats.get("evaluation_date_count", 0)) if report_stats else 0
             row["learning_evaluation_date_min"] = report_stats.get("evaluation_date_min", "") if report_stats else ""
             row["learning_evaluation_date_max"] = report_stats.get("evaluation_date_max", "") if report_stats else ""
+            row["learning_calibration_sample_count"] = int(report_stats.get("calibration_sample_count", 0)) if report_stats else 0
+            row["learning_execution_sample_count"] = int(report_stats.get("execution_sample_count", 0)) if report_stats else 0
+            report_brier = report_stats.get("brier_score") if report_stats else None
+            row["learning_brier_score"] = round(float(report_brier), 4) if report_brier is not None else ""
             row["learning_window_start"] = row["learning_evaluation_date_min"]
             row["learning_window_end"] = row["learning_evaluation_date_max"]
             row["learning_model_version"] = str(report_stats.get("model_version") or LEARNING_MODEL_VERSION) if report_stats else LEARNING_MODEL_VERSION
@@ -3061,10 +3520,11 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
             row["prediction_state"] = "INSUFFICIENT_EVIDENCE"
             continue
 
-        avg_score = float(stats.get("avg_score", 0.0))
-        working_rate = float(stats.get("working_rate", 0.0))
-        failed_rate = float(stats.get("failed_rate", 0.0))
-        trap_rate = float(stats.get("trap_avoided_rate", 0.0))
+        avg_score = float(stats.get("execution_avg_score", 0.0))
+        working_rate = float(stats.get("execution_working_rate", 0.0))
+        failed_rate = float(stats.get("execution_failed_rate", 0.0))
+        trap_rate = float(stats.get("execution_trap_avoided_rate", 0.0))
+        execution_samples = int(stats.get("execution_sample_count", 0))
         adjustment = avg_score * 8.0 + (working_rate - failed_rate) * 4.0 + trap_rate * 2.0
         adjustment *= selected_weight
         adjustment = max(-LEARNING_ADJUSTMENT_CAP, min(LEARNING_ADJUSTMENT_CAP, adjustment))
@@ -3080,7 +3540,13 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
             and str(row.get("walk_forward_permission") or "").upper() == "ALLOW"
             and str(row.get("risk_permission") or "").upper() == "ALLOW"
         )
-        if stale:
+        if execution_samples < LEARNING_MIN_SAMPLES:
+            effective_adjustment = 0.0
+            plan = (
+                "Forecast calibration is reporting-only; score adjustment needs "
+                f"{LEARNING_MIN_SAMPLES} historically executable outcomes and currently has {execution_samples}."
+            )
+        elif stale:
             effective_adjustment = 0.0
             plan = f"Learning observed from {selected_scope}, but data is stale; no score adjustment applied."
         elif anti_level == "BLOCK":
@@ -3095,21 +3561,39 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
 
         distinct_tickers = int(stats.get("distinct_ticker_count", 0))
         evaluation_dates = int(stats.get("evaluation_date_count", 0))
+        execution_distinct_tickers = int(stats.get("execution_distinct_ticker_count", 0))
+        execution_evaluation_dates = int(stats.get("execution_evaluation_date_count", 0))
+        calibration_samples = int(stats.get("calibration_sample_count", 0))
+        brier_score = stats.get("brier_score")
+        calibration_ok = (
+            calibration_samples >= LEARNING_CALIBRATION_MIN_SAMPLES
+            and brier_score is not None
+            and float(brier_score) <= LEARNING_CALIBRATION_MAX_BRIER
+        )
         promotion_evidence_ok = (
             selected_scope == "exact signal personality"
-            and int(stats.get("sample_count", 0)) >= LEARNING_CONFIRM_MIN_SAMPLES
-            and distinct_tickers >= LEARNING_CONFIRM_MIN_DISTINCT_TICKERS
-            and evaluation_dates >= LEARNING_CONFIRM_MIN_EVALUATION_DATES
+            and execution_samples >= LEARNING_CONFIRM_MIN_SAMPLES
+            and execution_distinct_tickers >= LEARNING_CONFIRM_MIN_DISTINCT_TICKERS
+            and execution_evaluation_dates >= LEARNING_CONFIRM_MIN_EVALUATION_DATES
+            and calibration_ok
         )
         if effective_adjustment > 0 and not promotion_evidence_ok:
             effective_adjustment = 0.0
             if selected_scope != "exact signal personality":
                 plan = f"Broad {selected_scope} outcomes are reporting-only for positive learning; no promotion applied."
             else:
-                plan = (
-                    "Exact learning evidence is not diverse enough for promotion: "
-                    f"needs {LEARNING_CONFIRM_MIN_DISTINCT_TICKERS} tickers and {LEARNING_CONFIRM_MIN_EVALUATION_DATES} evaluation dates."
-                )
+                if not calibration_ok:
+                    brier_text = "pending" if brier_score is None else f"{float(brier_score):.3f}"
+                    plan = (
+                        "Exact learning remains reporting-only until walk-forward calibration passes: "
+                        f"{calibration_samples}/{LEARNING_CALIBRATION_MIN_SAMPLES} predictions, Brier {brier_text}."
+                    )
+                else:
+                    plan = (
+                        "Exact learning evidence is not diverse enough for promotion: "
+                        f"needs {LEARNING_CONFIRM_MIN_SAMPLES} executable outcomes across "
+                        f"{LEARNING_CONFIRM_MIN_DISTINCT_TICKERS} tickers and {LEARNING_CONFIRM_MIN_EVALUATION_DATES} evaluation dates."
+                    )
 
         if effective_adjustment > 0 and not execution_gates_allow:
             effective_adjustment = 0.0
@@ -3147,6 +3631,9 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         row["learning_evaluation_date_count"] = evaluation_dates
         row["learning_evaluation_date_min"] = stats.get("evaluation_date_min", "")
         row["learning_evaluation_date_max"] = stats.get("evaluation_date_max", "")
+        row["learning_calibration_sample_count"] = calibration_samples
+        row["learning_execution_sample_count"] = execution_samples
+        row["learning_brier_score"] = round(float(brier_score), 4) if brier_score is not None else ""
         row["learning_window_start"] = row["learning_evaluation_date_min"]
         row["learning_window_end"] = row["learning_evaluation_date_max"]
         row["learning_model_version"] = str(stats.get("model_version") or LEARNING_MODEL_VERSION)
@@ -3681,6 +4168,31 @@ def market_permission_for_replay_date(benchmarks: dict[str, pd.DataFrame], repla
         frame_dates = pd.to_datetime(frame["date"], errors="coerce")
         truncated[symbol] = frame.loc[frame_dates <= replay_day].copy()
     return market_permission_from_frames(truncated)
+
+
+def select_signal_action(
+    *,
+    filters_ok: bool,
+    continuation_ok: bool,
+    setup_forming: bool,
+    exit_pressure: bool,
+    seller_control: bool,
+    trend_damage: bool,
+    mode: str,
+) -> tuple[str, int]:
+    if exit_pressure or (seller_control and trend_damage):
+        return "EXIT PRESSURE", 20
+    if filters_ok:
+        return "BUY CANDIDATE", 100
+    if continuation_ok:
+        return "STRONG CONTINUATION", 85
+    if setup_forming:
+        return "SETUP FORMING", 70
+    if mode in {"POWER TREND", "STEADY TREND"}:
+        return "WATCH TREND", 50
+    if mode == "WAIT / AVOID":
+        return "WAIT / AVOID", 0
+    return "WAIT", 30
 
 
 def classify_and_score(
@@ -4433,27 +4945,15 @@ def classify_and_score(
         continuation_ok = continuation_ok and personality_setup_allowed and not profile_extended_from_zone and execution_safety_ok and next_day_constructive and not operator_blocks_buy
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
-    if filters_ok:
-        action = "BUY CANDIDATE"
-        rank = 100
-    elif continuation_ok:
-        action = "STRONG CONTINUATION"
-        rank = 85
-    elif setup_forming:
-        action = "SETUP FORMING"
-        rank = 70
-    elif exit_pressure:
-        action = "EXIT PRESSURE"
-        rank = 20
-    elif mode in {"POWER TREND", "STEADY TREND"}:
-        action = "WATCH TREND"
-        rank = 50
-    elif mode == "WAIT / AVOID":
-        action = "WAIT / AVOID"
-        rank = 0
-    else:
-        action = "WAIT"
-        rank = 30
+    action, rank = select_signal_action(
+        filters_ok=filters_ok,
+        continuation_ok=continuation_ok,
+        setup_forming=setup_forming,
+        exit_pressure=exit_pressure,
+        seller_control=seller_control,
+        trend_damage=trend_damage,
+        mode=mode,
+    )
 
     score = rank
     score += 4 if mode == "POWER TREND" else 3 if mode == "STEADY TREND" else 4 if mode == "MEAN REVERSION" else 0
@@ -4606,6 +5106,16 @@ def classify_and_score(
         "day_change_pct": round((close / prev.close - 1) * 100, 2),
         "rsi": round(float(row.rsi), 1),
         "atr_pct": round(float(row.atr_pct), 2),
+        "relative_volume": round(float(row.relative_volume), 3),
+        "close_location": round(float(row.close_loc), 3),
+        "range_atr": round(float(row.range_atr), 3),
+        "signed_volume_pressure_5": round(float(row.signed_volume_pressure_5), 3),
+        "demand_supply_balance_5": round(float(row.demand_days_5 - row.supply_days_5), 2),
+        "ema_fast_distance_pct": round((close / float(row.ema_fast) - 1) * 100, 3),
+        "ema_slow_distance_pct": round((close / float(row.ema_slow) - 1) * 100, 3),
+        "return_5d_pct": round((close / float(d.iloc[-6].close) - 1) * 100, 3),
+        "return_20d_pct": round((close / float(d.iloc[-21].close) - 1) * 100, 3),
+        "gap_pct": round((open_ / float(prev.close) - 1) * 100, 3),
         "setup_atr_limit": setup_max_atr,
         "trend_efficiency": round(float(trend_efficiency), 2),
         "personality_type": personality_profile["personality_type"],
@@ -5892,6 +6402,7 @@ def main() -> None:
     rows = []
     history_rows = []
     learning_history_rows = []
+    directional_history_by_ticker: dict[str, list[dict]] = {}
     failures = []
     stale_cache_fallbacks = []
     benchmark_frames: dict[str, pd.DataFrame] = {}
@@ -5933,6 +6444,7 @@ def main() -> None:
             rows.append(row)
             history_rows.extend(ticker_history)
             learning_history_rows.extend(ticker_learning_history)
+            directional_history_by_ticker[ticker] = build_directional_raw_history(ticker, df)
             if args.refresh:
                 record_stale_cache_fallback(stale_cache_fallbacks, ticker, df, live_access_message)
         except URLError as exc:
@@ -5956,6 +6468,7 @@ def main() -> None:
                 rows.append(row)
                 history_rows.extend(ticker_history)
                 learning_history_rows.extend(ticker_learning_history)
+                directional_history_by_ticker[ticker] = build_directional_raw_history(ticker, df)
                 stale_cache_fallbacks.append(
                     {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
                 )
@@ -5972,6 +6485,11 @@ def main() -> None:
     report = report.sort_values([sort_score_col, "score", "action", "ticker"], ascending=[False, False, True, True]).reset_index(drop=True)
 
     today = local_run_date()
+    publication_id = f"{today}-{int(time.time() * 1000)}-{os.getpid()}"
+    for item in rows:
+        item["publication_id"] = publication_id
+    for item in history_rows:
+        item["publication_id"] = publication_id
     csv_path = Path(f"daily_watchlist_overview_{today}.csv")
     html_path = Path(f"daily_watchlist_overview_{today}.html")
     data_dates = sorted(str(value) for value in pd.to_datetime(report["date"]).dt.date.unique())
@@ -5979,7 +6497,9 @@ def main() -> None:
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
-    backfilled_outcomes = build_backfilled_signal_outcomes(learning_history_rows)
+    backfilled_outcomes = attach_walk_forward_predictions(
+        build_backfilled_signal_outcomes(learning_history_rows)
+    )
     learning_history = restrict_learning_outcomes_to_window(
         combine_signal_outcomes(fetch_signal_outcome_history(today), backfilled_outcomes),
         today,
@@ -5987,6 +6507,12 @@ def main() -> None:
     )
     learning_stats = build_learning_stats(learning_history, today, args.learning_lookback_days)
     apply_learning_adjustments(rows, learning_stats)
+    directional_history_rows = [
+        item
+        for ticker_rows in directional_history_by_ticker.values()
+        for item in ticker_rows
+    ]
+    directional_metrics = apply_directional_ohlcv_model(rows, directional_history_rows)
     rows = sorted(
         rows,
         key=lambda item: (
@@ -6049,6 +6575,7 @@ def main() -> None:
         "scanner_version": SCANNER_VERSION,
         "notes": status_text,
         "payload": {
+            "publication_id": publication_id,
             "data_provider_priority": configured_data_providers(),
             "data_provider_counts": provider_counts if "data_provider" in report.columns else {},
             "failures": failures[:25],
@@ -6060,6 +6587,12 @@ def main() -> None:
             "learning_evaluation_date_min": learning_window.get("evaluation_date_min", ""),
             "learning_evaluation_date_max": learning_window.get("evaluation_date_max", ""),
             "learning_evaluation_session_count": learning_window.get("evaluation_session_count", 0),
+            "directional_model_version": DIRECTIONAL_MODEL_VERSION,
+            "directional_model_oos_samples": directional_metrics.get("sample_count", 0),
+            "directional_model_brier_score": directional_metrics.get("brier_score"),
+            "directional_model_baseline_brier": directional_metrics.get("baseline_brier_score"),
+            "directional_model_brier_skill": directional_metrics.get("brier_skill_score"),
+            "directional_model_validated": directional_metrics.get("passed", False),
             "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
         },
     }

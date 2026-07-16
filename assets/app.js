@@ -877,12 +877,16 @@ function predictionNarrative(row) {
   const confidence = Number(payloadValue(row, "prediction_confidence"));
   const horizon = Number(payloadValue(row, "prediction_horizon_sessions")) || 5;
   const state = String(payloadValue(row, "prediction_state") || "").toUpperCase();
+  const modelVersion = String(payloadValue(row, "prediction_model_version") || "").toLowerCase();
   if (![upside, downside, noEdge].every(Number.isFinite)) {
     return `The ${horizon}-session model is still collecting comparable, settled outcomes; it is not changing the recommendation.`;
   }
   const certainty = confidence >= 0.65 ? "moderate" : confidence >= 0.40 ? "limited" : "low";
-  const message = `Across comparable ${horizon}-session setups, the model estimates ${fmtNumber(upside * 100, 0)}% upside-first, ${fmtNumber(downside * 100, 0)}% downside-first, and ${fmtNumber(noEdge * 100, 0)}% without a clear outcome. Confidence is ${certainty}.`;
-  return state === "CALIBRATED" ? message : `${message} This remains reporting-only until the evidence and execution gates qualify.`;
+  if (modelVersion.startsWith("ohlcv-ridge")) {
+    return `Using the validated OHLCV model, the next ${horizon} sessions are estimated at ${fmtNumber(upside * 100, 0)}% for a meaningful rise, ${fmtNumber(downside * 100, 0)}% for a meaningful decline, and ${fmtNumber(noEdge * 100, 0)}% for no decisive move. Confidence is ${certainty}.`;
+  }
+  const message = `Among comparable filled ${horizon}-session trade plans, the model estimates ${fmtNumber(upside * 100, 0)}% target reached, ${fmtNumber(downside * 100, 0)}% stop reached, and ${fmtNumber(noEdge * 100, 0)}% unresolved. Confidence is ${certainty}.`;
+  return state === "CALIBRATED" ? message : `${message} This conditional history remains reporting-only until the evidence and execution gates qualify.`;
 }
 
 function contextSummary(row) {

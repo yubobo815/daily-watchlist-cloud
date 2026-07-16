@@ -59,6 +59,32 @@ def request_json(path: str, *, count: bool = False) -> tuple[list[dict], int | N
     return rows, total
 
 
+def mark_run_validated(run_date: str, status: str, publication_id: str) -> None:
+    url, key = credentials()
+    endpoint = (
+        f"{url}/rest/v1/watchlist_refresh_runs"
+        f"?run_date=eq.{urllib.parse.quote(run_date)}"
+        "&status=eq.pending_audit"
+        f"&payload->>publication_id=eq.{urllib.parse.quote(publication_id)}"
+    )
+    request_headers = headers(key)
+    request_headers.update({"Content-Type": "application/json", "Prefer": "return=representation"})
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps({"status": status}).encode("utf-8"),
+        headers=request_headers,
+        method="PATCH",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = resp.read().decode("utf-8")
+        updated = json.loads(body) if body else []
+        if resp.status != 200 or len(updated) != 1:
+            raise RuntimeError(f"Could not mark validated run; HTTP {resp.status}.")
+        updated_payload = updated[0].get("payload") if isinstance(updated[0].get("payload"), dict) else {}
+        if str(updated_payload.get("publication_id") or "") != publication_id:
+            raise RuntimeError("Validated publication changed during compare-and-set.")
+
+
 def add_query_param(path: str, key: str, value: str | int) -> str:
     separator = "&" if "?" in path else "?"
     return f"{path}{separator}{urllib.parse.quote(str(key))}={urllib.parse.quote(str(value))}"
@@ -116,13 +142,17 @@ def fail(message: str) -> None:
 
 
 def main() -> None:
-    run_date = latest_synced_run_date()
+    expected_run_date = os.getenv("EXPECTED_RUN_DATE", "").strip()
+    synced_run_date = latest_synced_run_date()
+    run_date = expected_run_date or synced_run_date
     if not run_date:
         fail("No synced watchlist run found in behavior history or snapshots.")
+    if expected_run_date and synced_run_date != expected_run_date:
+        fail(f"Expected synced run {expected_run_date}, but newest snapshot/history run is {synced_run_date or 'missing'}.")
 
     runs, _ = request_json(
         "watchlist_refresh_runs"
-        "?select=run_date,history_rows,snapshot_rows,symbols_analyzed,symbols_failed,payload"
+        "?select=run_date,status,history_rows,snapshot_rows,symbols_analyzed,symbols_failed,payload"
         f"&run_date=eq.{urllib.parse.quote(str(run_date))}&limit=1"
     )
     latest = runs[0] if runs else {"run_date": run_date}
@@ -158,7 +188,7 @@ def main() -> None:
     if history_dates:
         outcome_rows = request_all_json(
             "watchlist_signal_outcomes"
-            "?select=ticker,signal_run_date,evaluation_run_date,outcome_label,learning_key"
+            "?select=ticker,signal_run_date,evaluation_run_date,outcome_label,learning_key,entry_model_version,forecast_learnable,payload"
             f"&evaluation_run_date=in.({postgrest_in_list(history_dates)})"
             "&order=ticker.asc,signal_run_date.asc"
         )
@@ -178,6 +208,17 @@ def main() -> None:
             learning_scope_ready += 1
 
     outcome_counts = Counter(str(row.get("outcome_label") or "UNKNOWN") for row in outcome_rows)
+    valid_forecast_outcomes = []
+    for row in outcome_rows:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        merged = {**payload, **{key: value for key, value in row.items() if value is not None}}
+        if (
+            merged.get("forecast_learnable") is True
+            and str(merged.get("entry_model_version") or "") == "zone-v2"
+            and int(merged.get("label_horizon_sessions") or 0) == 5
+            and str(merged.get("path_status") or "").upper() == "SETTLED"
+        ):
+            valid_forecast_outcomes.append(merged)
     missing_ohlc_history_rows = [
         row for row in history_rows
         if any(row.get(field) in (None, "") for field in ("open", "high", "low", "close"))
@@ -206,6 +247,7 @@ def main() -> None:
         "tickers_with_30_plus_days": tickers_with_30,
         "signal_outcome_rows_for_run": len(outcome_rows),
         "signal_outcome_labels": dict(outcome_counts),
+        "valid_forecast_outcomes": len(valid_forecast_outcomes),
         "history_rows_missing_ohlc": len(missing_ohlc_history_rows),
         "snapshot_rows_missing_ohlc": len(missing_ohlc_snapshot_rows),
         "ticker_leaking_learning_keys": len(ticker_leaking_keys),
@@ -216,6 +258,25 @@ def main() -> None:
     if len(history_rows) < 1000:
         emit_metrics(metrics)
         fail("Behavior history row count is too low for watchlist lookback learning.")
+    latest_payload = latest.get("payload") if isinstance(latest.get("payload"), dict) else {}
+    if str(latest.get("status") or "") not in {"pending_audit", "ok", "degraded"} or latest_payload.get("sync_state") != "complete":
+        emit_metrics(metrics)
+        fail("Expected run is not marked as a complete Supabase publication.")
+    if int(latest_payload.get("synced_snapshot_rows") or 0) != len(snapshot_rows):
+        emit_metrics(metrics)
+        fail("Snapshot sync count does not match the expected run.")
+    if int(latest_payload.get("synced_history_rows") or 0) != len(history_rows):
+        emit_metrics(metrics)
+        fail("Behavior-history sync count does not match the expected run.")
+    publication_id = str(latest_payload.get("publication_id") or "")
+    if not publication_id:
+        emit_metrics(metrics)
+        fail("Expected run is missing its immutable publication id.")
+    mixed_snapshot_rows = [row for row in snapshot_rows if str((row.get("payload") or {}).get("publication_id") or "") != publication_id]
+    mixed_history_rows = [row for row in history_rows if str((row.get("payload") or {}).get("publication_id") or "") != publication_id]
+    if mixed_snapshot_rows or mixed_history_rows:
+        emit_metrics(metrics)
+        fail("Snapshot/history rows do not belong to one atomic publication.")
     # The tracked universe can legitimately be smaller after data-provider
     # failures. Every successfully published snapshot must have replay data;
     # do not require an unrelated fixed ticker count.
@@ -229,6 +290,9 @@ def main() -> None:
     if len(outcome_rows) < 500:
         emit_metrics(metrics)
         fail("Signal outcome rows are too low; ML/self-learning has insufficient samples.")
+    if len(valid_forecast_outcomes) < 100:
+        emit_metrics(metrics)
+        fail("Too few current-model settled forecast outcomes are available for calibration.")
     if missing_ohlc_history_rows or missing_ohlc_snapshot_rows:
         metrics["missing_ohlc_examples"] = {
             "history": missing_ohlc_history_rows[:5],
@@ -249,6 +313,12 @@ def main() -> None:
         emit_metrics(metrics)
         fail("Too few latest snapshots have learning samples attached.")
 
+    scanner_status = str(latest_payload.get("scanner_status") or "")
+    if scanner_status not in {"ok", "degraded"}:
+        emit_metrics(metrics)
+        fail("Scanner status is not publishable after database validation.")
+    if str(latest.get("status") or "") == "pending_audit":
+        mark_run_validated(run_date, scanner_status, publication_id)
     print("SUPABASE_LEARNING_HEALTH=OK")
     emit_metrics(metrics)
 
