@@ -107,7 +107,9 @@ jobs:
           MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          DATA_PROVIDER_PRIORITY: yahoo,polygon,twelvedata,stooq
+          # Massive/Polygon is the configured paid primary feed. Keeping Yahoo
+          # as fallback avoids a slow, serial public-feed scan on every run.
+          DATA_PROVIDER_PRIORITY: polygon,twelvedata,stooq,yahoo
           MARKET_DATA_TIMEOUT_SECONDS: "12"
         # Two years of source OHLCV leaves enough post-warmup bars for the
         # 60-session learning replay. Supabase still retains only 30 display
