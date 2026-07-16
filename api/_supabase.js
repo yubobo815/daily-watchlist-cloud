@@ -117,12 +117,22 @@ const PAYLOAD_FIELDS = [
   "last_outcome_score",
   "learning_adjustment",
   "learning_avg_score",
+  "learning_distinct_ticker_count",
+  "learning_evaluation_date_count",
+  "learning_evaluation_date_min",
+  "learning_evaluation_date_max",
   "learning_failed_rate",
   "learning_key_used",
+  "learning_model_version",
   "learning_plan",
+  "learning_promotion_eligible",
+  "learning_promotion_state",
+  "learning_reporting_only",
   "learning_sample_count",
   "learning_scope",
   "learning_trap_avoided_rate",
+  "learning_window_end",
+  "learning_window_start",
   "learning_working_rate",
   "data_provider",
   "data_provider_error",
@@ -192,9 +202,15 @@ const PAYLOAD_FIELDS = [
   "position_value_1k_risk",
 ];
 
-const AUDIT_GATE_FIELDS = ["market_permission", "risk_permission"];
+const AUDIT_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
+const AUDIT_GATE_VALUES = {
+  market_permission: new Set(["ALLOW", "BLOCK"]),
+  ticker_permission: new Set(["ALLOW", "CAUTION", "BLOCK", "INSUFFICIENT"]),
+  walk_forward_permission: new Set(["ALLOW", "BLOCK", "INSUFFICIENT", "NONE"]),
+  risk_permission: new Set(["ALLOW", "BLOCK"]),
+};
+const BUY_LIKE_ACTIONS = new Set(["BUY CANDIDATE", "STRONG CONTINUATION"]);
 const UNGATED_SCORE_CAP = 49;
-const MAX_EXECUTION_DATA_AGE_DAYS = Number(process.env.MAX_EXECUTION_DATA_AGE_DAYS || 3);
 
 function assertSupabaseConfig() {
   if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.apiKey) {
@@ -314,22 +330,66 @@ function appendReasonCode(payload, code) {
   payload.reason_codes = codes.filter(Boolean);
 }
 
-function hasKnownAuditGate(value) {
-  const text = String(value || "").toUpperCase();
-  return Boolean(text) && text !== "UNKNOWN";
+function normalizeAuditGate(value) {
+  return String(value ?? "").trim().toUpperCase();
 }
 
-function applyAuditGateFallback(output) {
+function auditGateState(source, field) {
+  const topLevel = normalizeAuditGate(source?.[field]);
+  const nested = normalizeAuditGate(source?.payload?.[field]);
+  const value = topLevel || nested;
+  return {
+    field,
+    value,
+    contradictory: Boolean(topLevel && nested && topLevel !== nested),
+    valid: AUDIT_GATE_VALUES[field].has(value),
+  };
+}
+
+function applyPersonalitySetupGate(output, source) {
+  if (!BUY_LIKE_ACTIONS.has(output.action)) return output;
+
+  const topLevel = normalizeAuditGate(source?.personality_setup_allowed);
+  const nested = normalizeAuditGate(source?.payload?.personality_setup_allowed);
+  // A conflicting YES cannot override a NO from either producer row shape.
+  if (topLevel !== "NO" && nested !== "NO") return output;
+
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
-  const hasAllGates = AUDIT_GATE_FIELDS.every((field) => hasKnownAuditGate(output[field] || payload[field]));
+  payload.personality_setup_allowed = "NO";
+  payload.audit_gate_status = "BLOCKED";
+  payload.signal_quality = "PERSONALITY SETUP BLOCKED";
+  payload.transition_label = "Personality Setup Blocked";
+  payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -25, -25);
+  payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
+  output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
+  output.score = capScore(output.score);
+  payload.buy_tier = "SETUP ONLY";
+  payload.execution_priority = Math.max(Number(payload.execution_priority || 4), 4);
+  payload.execution_plan = "Personality setup gate is NO; keep this as a setup and do not promote it to BUY.";
+  appendReasonCode(payload, "personality_setup_not_allowed");
+  if (topLevel && nested && topLevel !== nested) appendReasonCode(payload, "personality_setup_allowed_contradictory");
+  output.action = "SETUP FORMING";
+  payload.signal_stage = "SETUP";
+  output.notes = [output.notes, "Personality setup gate blocks BUY promotion"].filter(Boolean).join("; ");
+  output.payload = payload;
+  return output;
+}
+
+function applyAuditGateFallback(output, source) {
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  const gates = AUDIT_GATE_FIELDS.map((field) => auditGateState(source, field));
+  const hasAllGates = gates.every((gate) => !gate.contradictory && gate.valid && gate.value === "ALLOW");
   if (hasAllGates) {
     output.payload = payload;
     return output;
   }
 
-  payload.market_permission = payload.market_permission || output.market_permission || "UNKNOWN";
-  payload.risk_permission = payload.risk_permission || output.risk_permission || "UNKNOWN";
-  payload.audit_gate_status = "MISSING";
+  // A current execution recommendation needs unambiguous ALLOW evidence for
+  // every execution gate. Do not expose a permissive value from a conflicting row.
+  gates.forEach((gate) => {
+    payload[gate.field] = gate.contradictory || !gate.valid ? "UNKNOWN" : gate.value;
+  });
+  payload.audit_gate_status = "BLOCKED";
   payload.signal_quality = "NEEDS EXECUTION PROOF";
   payload.transition_label = "Needs Execution Proof";
   payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -25, -25);
@@ -337,6 +397,10 @@ function applyAuditGateFallback(output) {
   output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
   output.score = capScore(output.score);
   appendReasonCode(payload, "missing_execution_proof");
+  gates.forEach((gate) => {
+    if (gate.contradictory) appendReasonCode(payload, `${gate.field}_contradictory`);
+    else if (!gate.valid || gate.value !== "ALLOW") appendReasonCode(payload, `${gate.field}_not_allowed`);
+  });
   output.notes = [output.notes, "Live row lacks current market/risk execution proof"].filter(Boolean).join("; ");
   if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
     output.action = "SETUP FORMING";
@@ -348,20 +412,32 @@ function applyAuditGateFallback(output) {
 
 function applyFreshnessFallback(output) {
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
-  const age = Number(payload.data_age_days ?? dataAgeDays(output.data_date || output.history_date || output.date));
+  const rawAge = payload.data_age_days;
+  const suppliedAge = rawAge === "" || rawAge === null || rawAge === undefined ? null : Number(rawAge);
+  const dataDate = output.data_date || output.history_date || output.date;
+  const dateAge = dataAgeDays(dataDate);
+  const claimedCurrentDateConflict = suppliedAge === 0 && Number.isFinite(dateAge) && dateAge !== 0;
+  const age = claimedCurrentDateConflict
+    ? dateAge
+    : (Number.isFinite(suppliedAge) ? suppliedAge : dateAge);
   const hasAge = Number.isFinite(age);
-  const stale = !hasAge || age > MAX_EXECUTION_DATA_AGE_DAYS;
+  // The producer treats only current-session data (age 0) as executable.
+  // Future and malformed ages are also fail-closed rather than assumed fresh.
+  const stale = !hasAge || age !== 0 || claimedCurrentDateConflict;
   payload.data_age_days = hasAge ? age : "";
-  payload.freshness_block = payload.freshness_block || (stale ? "YES" : "NO");
-  payload.freshness_status = payload.freshness_status || (stale ? "STALE_BLOCK" : "LIVE_OR_CURRENT");
-  payload.freshness_plan = payload.freshness_plan || (
-    stale
-      ? `Execution blocked: market data is ${hasAge ? age : "unknown"} day(s) old; refresh live data before acting.`
-      : "Data freshness is acceptable for scanner use."
-  );
+  // Producer freshness is fail-closed: an objectively stale age wins over any
+  // contradictory freshness flag carried by an older or malformed payload.
+  payload.freshness_block = stale ? "YES" : (payload.freshness_block || "NO");
+  payload.freshness_status = stale ? "STALE_BLOCK" : (payload.freshness_status || "LIVE_OR_CURRENT");
+  payload.freshness_plan = stale
+    ? (claimedCurrentDateConflict
+      ? `Execution blocked: data_date ${isoDateOnly(dataDate)} contradicts claimed data_age_days=0; refresh live data before acting.`
+      : `Execution blocked: market data is ${hasAge ? age : "unknown"} day(s) old; refresh live data before acting.`)
+    : (payload.freshness_plan || "Data freshness is acceptable for scanner use.");
 
   if (stale) {
     appendReasonCode(payload, "data_stale_block");
+    if (claimedCurrentDateConflict) appendReasonCode(payload, "data_age_date_contradiction");
     if (output.action === "BUY CANDIDATE" || output.action === "STRONG CONTINUATION") {
       output.action = "SETUP FORMING";
       payload.signal_stage = "SETUP";
@@ -540,7 +616,7 @@ function rowDto(row, options = {}) {
     );
   }
   return promotePayloadFields(
-    applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(output)))))
+    applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(applyPersonalitySetupGate(output, row), row)))))
   );
 }
 

@@ -2102,6 +2102,9 @@ body[data-page="history"] .company-brief {
   font-variant-numeric: tabular-nums;
 }
 
+.scanner-legend { margin: 8px 0 12px; padding: 7px 10px; border: 1px solid var(--line-soft); border-left: 3px solid var(--tone-buy); color: var(--muted); background: var(--panel-strong); font-size: 11px; line-height: 1.4; }
+body.ticker-page .scanner-legend { margin: 10px 0 14px; }
+
 .score-explainer {
   display: grid;
   gap: 9px;
@@ -3688,7 +3691,7 @@ body.ticker-page .latest-card {
   .watchlist-workspace th,
   .watchlist-workspace td { padding: 12px 10px; border-bottom-color: var(--line-soft); vertical-align: middle; }
   .watchlist-workspace th:first-child { position: sticky; left: 0; z-index: 5; min-width: 0; width: 154px; background: var(--panel-strong); color: var(--ink); }
-  .watchlist-workspace td:first-child { position: sticky; left: 0; z-index: 3; min-width: 0; width: 154px; background: var(--panel); color: var(--ink); }
+  .watchlist-workspace td:first-child { position: sticky; left: 0; z-index: 3; min-width: 0; width: 154px; text-align: left; background: var(--panel); color: var(--ink); }
   .watchlist-workspace th:nth-child(2), .watchlist-workspace td:nth-child(2) { min-width: 0; width: 116px; }
   .watchlist-workspace th:nth-child(3), .watchlist-workspace td:nth-child(3) { min-width: 0; width: 74px; text-align: center; }
   .watchlist-workspace th:nth-child(4), .watchlist-workspace td:nth-child(4) { min-width: 0; width: 132px; text-align: right; }
@@ -3701,8 +3704,9 @@ body.ticker-page .latest-card {
   .watchlist-workspace #watchlist-body tr:hover td:first-child { background: #f3f5ef; }
   .watchlist-workspace #watchlist-body tr.selected td { background: #e6ede5; }
   .watchlist-workspace #watchlist-body tr.selected td:first-child { background: #e6ede5; }
-  .watchlist-workspace .ticker-cell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  .watchlist-workspace .ticker-copy { gap: 3px; }
+  .watchlist-workspace .ticker-cell { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 3px; text-align: left; }
+  .watchlist-workspace .ticker-copy { justify-items: start; gap: 3px; text-align: left; }
+  .watchlist-workspace .ticker-link { text-align: left; }
   .watchlist-workspace .ticker-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .watchlist-workspace .table-score { display: inline-grid; min-width: 32px; place-items: center; }
 }

@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import daily_watchlist_overview as dwo
@@ -30,6 +32,11 @@ def row(date, action, close, **overrides):
         "demand_control_score": overrides.pop("demand_control_score", 0),
         "absorption_score": overrides.pop("absorption_score", 0),
         "buyer_score": overrides.pop("buyer_score", 50),
+        "market_permission": overrides.pop("market_permission", "ALLOW"),
+        "ticker_permission": overrides.pop("ticker_permission", "ALLOW"),
+        "risk_permission": overrides.pop("risk_permission", "ALLOW"),
+        "walk_forward_permission": overrides.pop("walk_forward_permission", "ALLOW"),
+        "personality_setup_allowed": overrides.pop("personality_setup_allowed", "YES"),
     }
     base.update(overrides)
     return base
@@ -165,7 +172,7 @@ def audit_volatile_hold_has_consistent_score():
 
 def audit_behavior_history_seeds_learning():
     history_rows = [
-        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101), "ticker": "MU"},
+        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101, stop_est=97), "ticker": "MU"},
         {**row("2026-06-02", "WATCH TREND", 104, setup="NONE", open=100, low=99.5, high=105), "ticker": "MU"},
         {**row("2026-06-03", "SETUP FORMING", 103, setup="PULLBACK BUY"), "ticker": "MU"},
     ]
@@ -182,7 +189,7 @@ def audit_behavior_history_seeds_learning():
 
 def audit_unfilled_buy_is_excluded_from_learning():
     history_rows = [
-        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101), "ticker": "MU"},
+        {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101, stop_est=97), "ticker": "MU"},
         {**row("2026-06-02", "WATCH TREND", 108, setup="NONE", open=107, low=106, high=109), "ticker": "MU"},
     ]
     outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
@@ -273,6 +280,10 @@ def learning_confirmed_setup_row(**overrides):
         "learning_working_rate": 0.75,
         "learning_failed_rate": 0.125,
         "learning_adjustment": 5.0,
+        "learning_scope": "exact signal personality",
+        "learning_distinct_ticker_count": 4,
+        "learning_evaluation_date_count": 4,
+        "personality_setup_allowed": "YES",
         "signal_quality": "NEXT-DAY BUILDING",
     })
     current.update(overrides)
@@ -298,6 +309,233 @@ def audit_learning_upgrade_respects_anti_signals():
     tier, priority, _ = dwo.buy_tier_for(trapped, 0)
     assert_true(tier == "SETUP ONLY", "anti-signal block must prevent learning-confirmed upgrade")
     assert_true(priority == 4, "blocked learning setup must stay low execution priority")
+
+
+def audit_learning_upgrade_respects_personality_gate():
+    blocked = learning_confirmed_setup_row(personality_setup_allowed="NO")
+    tier, priority, _ = dwo.buy_tier_for(blocked, 0)
+    assert_true(tier == "SETUP ONLY", "personality-blocked setup must not receive a learning BUY upgrade")
+    assert_true(priority == 3, "personality-blocked setup must retain ordinary setup priority")
+    dwo.apply_buy_tiers([blocked])
+    assert_true("learning_confirmed_setup" not in blocked["reason_codes"], "blocked setup must not record a learning promotion")
+
+
+def executable_prior(**overrides):
+    prior = row(
+        "2026-06-01",
+        "BUY CANDIDATE",
+        100,
+        setup="MOMENTUM BUY",
+        ticker="MU",
+        entry_zone_low=99,
+        entry_zone_high=101,
+        stop_est=97,
+    )
+    prior.update(overrides)
+    return prior
+
+
+def executable_current(**overrides):
+    current = row("2026-06-02", "WATCH TREND", 103, ticker="MU", open=100, high=104, low=99)
+    current.update(overrides)
+    return current
+
+
+def synthetic_price_frame(start_price, daily_change, periods=240):
+    closes = [start_price + daily_change * index for index in range(periods)]
+    return pd.DataFrame({
+        "date": pd.bdate_range("2025-07-01", periods=periods),
+        "open": [close - 0.2 for close in closes],
+        "high": [close + 0.6 for close in closes],
+        "low": [close - 0.7 for close in closes],
+        "close": closes,
+        "adjclose": closes,
+        "volume": [1_000_000 + index * 1000 for index in range(periods)],
+    })
+
+
+def audit_stop_breach_cannot_be_working():
+    outcome = dwo.self_score_prior_signal(
+        executable_prior(),
+        executable_current(close=104, low=96),
+        "2026-06-02",
+    )
+    assert_true(outcome["outcome_label"] == "FAILED", "next-bar stop breach must never be recorded as WORKING")
+    assert_true(outcome["stop_hit"] is True, "stop-aware outcome must record the next-bar stop breach")
+
+
+def audit_stale_stop_breach_is_not_learnable():
+    outcome = dwo.self_score_prior_signal(
+        executable_prior(),
+        executable_current(close=104, low=96, freshness_block="YES"),
+        "2026-06-02",
+    )
+    assert_true(outcome["outcome_label"] == "PENDING", "stale comparison must short-circuit before a stop-breach label")
+    assert_true(outcome["stop_hit"] is False, "stale OHLC must not record a stop hit")
+    assert_true(outcome["outcome_learnable"] is False, "stale stop scenario must be excluded from learning")
+
+
+def audit_gap_through_entry_stop_is_non_learnable():
+    outcome = dwo.self_score_prior_signal(
+        executable_prior(),
+        executable_current(open=98, high=103, low=96, close=102),
+        "2026-06-02",
+    )
+    assert_true(outcome["outcome_label"] == "NON_LEARNABLE", "gap below entry zone must not infer a valid fill from OHLC")
+    assert_true(outcome["outcome_learnable"] is False, "gap-through scenario must be excluded from learning")
+
+
+def audit_outcome_does_not_depend_on_current_action():
+    prior = executable_prior()
+    working_ohlc = executable_current(close=104)
+    changed_action = {**working_ohlc, "action": "EXIT PRESSURE", "operator_state": "DISTRIBUTION"}
+    first = dwo.self_score_prior_signal(prior, working_ohlc, "2026-06-02")
+    second = dwo.self_score_prior_signal(prior, changed_action, "2026-06-02")
+    assert_true(first["outcome_label"] == second["outcome_label"] == "WORKING", "unchanged OHLC must keep the same outcome regardless of current action")
+    assert_true(first["outcome_score"] == second["outcome_score"], "current action must not alter the OHLC outcome score")
+
+
+def audit_hard_gate_blocked_signal_cannot_work_or_learn():
+    gate_blocks = {
+        "personality_setup_allowed": "NO",
+        "market_permission": "BLOCK",
+        "ticker_permission": "CAUTION",
+        "risk_permission": "BLOCK",
+        "walk_forward_permission": "INSUFFICIENT",
+    }
+    for gate, value in gate_blocks.items():
+        outcome = dwo.self_score_prior_signal(
+            executable_prior(**{gate: value}),
+            executable_current(close=104),
+            "2026-06-02",
+        )
+        assert_true(outcome["entry_eligible"] is False, f"{gate} block must make the prior signal entry-ineligible")
+        assert_true(outcome["outcome_label"] != "WORKING", f"{gate} block must not produce WORKING")
+        assert_true(outcome["outcome_learnable"] is False, f"{gate} block must exclude the outcome from learning")
+        assert_true(
+            not dwo.build_learning_stats(pd.DataFrame([outcome])),
+            f"{gate} block must not contribute to learning stats",
+        )
+
+
+def outcome_rows(count, learning_key, *, model_version=dwo.LEARNING_MODEL_VERSION, ticker_prefix="T"):
+    return [
+        {
+            "learning_key": learning_key,
+            "prior_action": "SETUP FORMING",
+            "prior_setup": "PULLBACK BUY",
+            "ticker": f"{ticker_prefix}{index}",
+            "evaluation_run_date": f"2026-06-{index + 1:02d}",
+            "entry_model_version": model_version,
+            "outcome_learnable": True,
+            "outcome_label": "WORKING",
+            "outcome_score": 1.0,
+            "close_return_pct": 2.5,
+        }
+        for index in range(count)
+    ]
+
+
+def audit_learning_excludes_unversioned_outcomes():
+    legacy = pd.DataFrame(outcome_rows(6, "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"))
+    legacy = legacy.drop(columns=["entry_model_version"])
+    assert_true(not dwo.build_learning_stats(legacy), "outcomes without the current entry-model version must be excluded")
+
+
+def audit_learning_requires_explicit_learnable_outcome():
+    rows = pd.DataFrame(outcome_rows(6, "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"))
+    rows = rows.drop(columns=["outcome_learnable"])
+    assert_true(not dwo.build_learning_stats(rows), "outcome aggregation must require an explicit learnable flag")
+
+
+def audit_learning_window_uses_recent_evaluation_sessions_only():
+    key = "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"
+    rows = outcome_rows(1, key, ticker_prefix="OLD") + outcome_rows(3, key, ticker_prefix="NEW")
+    rows[0]["evaluation_run_date"] = "2026-01-02"
+    rows[0]["outcome_label"] = "WORKING"
+    rows[1]["evaluation_run_date"] = "2026-07-10"
+    rows[1]["outcome_label"] = "FAILED"
+    rows[2]["evaluation_run_date"] = "2026-07-11"
+    rows[2]["outcome_label"] = "FAILED"
+    rows[3]["evaluation_run_date"] = "2026-07-14"
+    rows[3]["outcome_label"] = "FAILED"
+    history = pd.DataFrame(rows)
+    filtered = dwo.restrict_learning_outcomes_to_window(history, "2026-07-15", lookback_days=3)
+    stats = dwo.build_learning_stats(history, "2026-07-15", lookback_days=3)
+    assert_true(len(filtered) == 3, "learning loader window must retain exactly the latest evaluation sessions")
+    assert_true(filtered.attrs["learning_window"]["evaluation_date_min"] == "2026-07-10", "window must expose its oldest evaluation date")
+    assert_true(stats[key]["sample_count"] == 3, "old current-model outcomes must not affect learning stats")
+    assert_true(stats[key]["working_rate"] == 0.0, "in-window outcomes must determine learning rates")
+
+
+def audit_replay_market_gate_matches_live_context():
+    ticker = synthetic_price_frame(100, 0.35)
+    benchmarks = {symbol: synthetic_price_frame(100, 0.2) for symbol in ("SPY", "QQQ", "SMH")}
+    replay = dwo.build_behavior_history("TEST", ticker, days=1, benchmark_frames=benchmarks)
+    live_gate = dwo.market_permission_from_frames(benchmarks)
+    assert_true(len(replay) == 1, "replay fixture should produce one date-aligned snapshot")
+    assert_true(replay[0]["market_permission"] == live_gate["market_permission"] == "ALLOW", "replay market gate must match the live benchmark gate on the same date")
+
+
+def audit_risk_off_or_missing_replay_cannot_seed_bullish_learning():
+    ticker = synthetic_price_frame(100, 0.35)
+    risk_off_benchmarks = {symbol: synthetic_price_frame(180, -0.25) for symbol in ("SPY", "QQQ", "SMH")}
+    replay = dwo.build_behavior_history("TEST", ticker, days=3, benchmark_frames=risk_off_benchmarks)
+    missing_replay = dwo.build_behavior_history("TEST", ticker, days=1, benchmark_frames={})
+    assert_true(replay and all(item["market_permission"] == "BLOCK" for item in replay), "risk-off replay must retain date-aligned market blocks")
+    assert_true(missing_replay and missing_replay[0]["market_permission"] == "BLOCK", "missing benchmark history must block replay execution")
+    risk_off_outcome = dwo.self_score_prior_signal(executable_prior(market_permission=replay[-1]["market_permission"]), executable_current(close=104), "2026-06-02")
+    missing_market_outcome = dwo.self_score_prior_signal(executable_prior(market_permission="UNKNOWN"), executable_current(close=104), "2026-06-02")
+    assert_true(risk_off_outcome["outcome_label"] == "NON_LEARNABLE", "risk-off replay must not seed a learnable bullish outcome")
+    assert_true(missing_market_outcome["outcome_learnable"] is False, "missing benchmark history must be non-promotable")
+
+
+def audit_broad_learning_cannot_promote_score():
+    current = learning_confirmed_setup_row()
+    current["adjusted_score"] = 78
+    stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, "OTHER|KEY")))
+    dwo.apply_learning_adjustments([current], stats)
+    assert_true(current["learning_scope"] == "action/setup family", "broad family evidence should remain visible")
+    assert_true(current["learning_adjustment"] == 0.0, "broad positive evidence must not promote score")
+    assert_true(current["adjusted_score"] == 78.0, "broad positive evidence must not change adjusted score")
+
+
+def audit_exact_learning_requires_diverse_evidence_for_promotion():
+    current = learning_confirmed_setup_row()
+    current["adjusted_score"] = 78
+    key = dwo.learning_key_for(current)
+    narrow = pd.DataFrame(outcome_rows(6, key, ticker_prefix="ONE"))
+    narrow["ticker"] = "ONE"
+    stats = dwo.build_learning_stats(narrow)
+    dwo.apply_learning_adjustments([current], stats)
+    assert_true(current["learning_adjustment"] == 0.0, "single-ticker exact evidence must not promote score")
+
+    diverse_current = learning_confirmed_setup_row()
+    diverse_current["adjusted_score"] = 78
+    diverse_stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, key)))
+    dwo.apply_learning_adjustments([diverse_current], diverse_stats)
+    assert_true(diverse_current["learning_adjustment"] > 0, "diverse exact evidence may promote score")
+    assert_true(diverse_current["learning_distinct_ticker_count"] >= 4, "promotion must expose distinct-ticker evidence")
+
+
+def audit_learning_promotion_requires_all_execution_gates():
+    key = dwo.learning_key_for(learning_confirmed_setup_row())
+    stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, key)))
+    blocked_gates = {
+        "market_permission": "BLOCK",
+        "ticker_permission": "BLOCK",
+        "walk_forward_permission": "BLOCK",
+        "risk_permission": "BLOCK",
+        "personality_setup_allowed": "NO",
+    }
+    for gate, blocked_value in blocked_gates.items():
+        current = learning_confirmed_setup_row(**{gate: blocked_value})
+        current["adjusted_score"] = 78
+        dwo.apply_learning_adjustments([current], stats)
+        assert_true(current["learning_adjustment"] == 0.0, f"{gate} must suppress positive learning adjustment")
+        assert_true(current["adjusted_score"] == 78.0, f"{gate} must preserve the pre-learning score")
+        assert_true(not current["learning_promotion_eligible"], f"{gate} must block learning promotion eligibility")
+        assert_true(current["learning_reporting_only"], f"{gate} must keep learning reporting-only")
 
 
 def audit_personality_setup_governor_blocks_range_chase():
@@ -334,11 +572,25 @@ def main():
     audit_action_display_labels_match_product_ui()
     audit_learning_can_upgrade_building_execution_tier()
     audit_learning_upgrade_respects_anti_signals()
+    audit_learning_upgrade_respects_personality_gate()
+    audit_stop_breach_cannot_be_working()
+    audit_stale_stop_breach_is_not_learnable()
+    audit_gap_through_entry_stop_is_non_learnable()
+    audit_outcome_does_not_depend_on_current_action()
+    audit_hard_gate_blocked_signal_cannot_work_or_learn()
+    audit_learning_excludes_unversioned_outcomes()
+    audit_learning_requires_explicit_learnable_outcome()
+    audit_learning_window_uses_recent_evaluation_sessions_only()
+    audit_broad_learning_cannot_promote_score()
+    audit_exact_learning_requires_diverse_evidence_for_promotion()
+    audit_learning_promotion_requires_all_execution_gates()
+    audit_replay_market_gate_matches_live_context()
+    audit_risk_off_or_missing_replay_cannot_seed_bullish_learning()
     audit_personality_setup_governor_blocks_range_chase()
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 16,
+        "cases": 31,
     })
 
 

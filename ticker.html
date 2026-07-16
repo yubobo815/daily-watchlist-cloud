@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Ticker Detail</title>
-    <meta name="description" content="Current execution plan and 30-day watchlist behavior by ticker.">
+    <meta name="description" content="Current scanner review and 30-day watchlist behavior by ticker.">
     <meta name="theme-color" content="#070a0f">
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
@@ -20,7 +20,7 @@
         <h1 id="history-title">Oracle</h1><div id="ticker-name" class="subtle ticker-name"></div><p id="status" class="subtle meta">Loading ticker history...</p><div id="run-status" class="status bad">No history loaded</div><p id="app-disclaimer" class="app-disclaimer"></p>
       </div><div id="hero-brief" class="hero-brief ticker-hero-brief" aria-live="polite"></div></section>
       <section class="history-grid">
-        <aside id="snapshot" class="panel block-current-read"><div class="panel-heading"><span class="eyebrow">Execution plan</span><h2>Current Read</h2></div><form id="ticker-form"><label class="subtle" for="ticker">Ticker</label><input id="ticker" class="ticker-input" placeholder="Ticker symbol" autocomplete="off"><button class="button primary" type="submit">View</button></form><div id="latest-panel" class="timeline"></div></aside>
+        <aside id="snapshot" class="panel block-current-read"><div class="panel-heading"><span class="eyebrow">Scanner review</span><h2>Current Read</h2></div><p class="scanner-legend">Buy = scanner candidate; chart confirmation required; not trade execution.</p><form id="ticker-form"><label class="subtle" for="ticker">Ticker</label><input id="ticker" class="ticker-input" placeholder="Ticker symbol" autocomplete="off"><button class="button primary" type="submit">View</button></form><div id="latest-panel" class="timeline"></div></aside>
         <section id="behavior" class="panel block-behavior-journey"><h2>Behavior Journey</h2><div id="history-visual" class="history-visual"><div class="empty">Loading visual history...</div></div><div id="timeline" class="timeline"><div class="empty">Loading history...</div></div></section>
         <section id="company-context" class="panel block-company-context"><h2>Company Context</h2><div class="company-context-empty subtle">Loading company context...</div></section>
       </section>

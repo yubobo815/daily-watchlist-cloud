@@ -67,6 +67,16 @@ create table if not exists public.watchlist_snapshots (
   learning_scope text,
   learning_key_used text,
   learning_plan text,
+  learning_model_version text,
+  learning_distinct_ticker_count integer,
+  learning_evaluation_date_count integer,
+  learning_evaluation_date_min date,
+  learning_evaluation_date_max date,
+  learning_window_start date,
+  learning_window_end date,
+  learning_promotion_eligible boolean,
+  learning_reporting_only boolean,
+  learning_promotion_state text,
   data_provider text,
   data_provider_status text,
   data_provider_latency_ms numeric,
@@ -159,6 +169,16 @@ create table if not exists public.watchlist_behavior_history (
   learning_scope text,
   learning_key_used text,
   learning_plan text,
+  learning_model_version text,
+  learning_distinct_ticker_count integer,
+  learning_evaluation_date_count integer,
+  learning_evaluation_date_min date,
+  learning_evaluation_date_max date,
+  learning_window_start date,
+  learning_window_end date,
+  learning_promotion_eligible boolean,
+  learning_reporting_only boolean,
+  learning_promotion_state text,
   data_provider text,
   data_provider_status text,
   data_provider_latency_ms numeric,
@@ -317,6 +337,16 @@ alter table public.watchlist_snapshots add column if not exists learning_adjustm
 alter table public.watchlist_snapshots add column if not exists learning_scope text;
 alter table public.watchlist_snapshots add column if not exists learning_key_used text;
 alter table public.watchlist_snapshots add column if not exists learning_plan text;
+alter table public.watchlist_snapshots add column if not exists learning_model_version text;
+alter table public.watchlist_snapshots add column if not exists learning_distinct_ticker_count integer;
+alter table public.watchlist_snapshots add column if not exists learning_evaluation_date_count integer;
+alter table public.watchlist_snapshots add column if not exists learning_evaluation_date_min date;
+alter table public.watchlist_snapshots add column if not exists learning_evaluation_date_max date;
+alter table public.watchlist_snapshots add column if not exists learning_window_start date;
+alter table public.watchlist_snapshots add column if not exists learning_window_end date;
+alter table public.watchlist_snapshots add column if not exists learning_promotion_eligible boolean;
+alter table public.watchlist_snapshots add column if not exists learning_reporting_only boolean;
+alter table public.watchlist_snapshots add column if not exists learning_promotion_state text;
 alter table public.watchlist_snapshots add column if not exists contextual_overlay text;
 alter table public.watchlist_snapshots add column if not exists contextual_score_adjustment numeric;
 alter table public.watchlist_snapshots add column if not exists contextual_plan text;
@@ -393,6 +423,16 @@ alter table public.watchlist_behavior_history add column if not exists learning_
 alter table public.watchlist_behavior_history add column if not exists learning_scope text;
 alter table public.watchlist_behavior_history add column if not exists learning_key_used text;
 alter table public.watchlist_behavior_history add column if not exists learning_plan text;
+alter table public.watchlist_behavior_history add column if not exists learning_model_version text;
+alter table public.watchlist_behavior_history add column if not exists learning_distinct_ticker_count integer;
+alter table public.watchlist_behavior_history add column if not exists learning_evaluation_date_count integer;
+alter table public.watchlist_behavior_history add column if not exists learning_evaluation_date_min date;
+alter table public.watchlist_behavior_history add column if not exists learning_evaluation_date_max date;
+alter table public.watchlist_behavior_history add column if not exists learning_window_start date;
+alter table public.watchlist_behavior_history add column if not exists learning_window_end date;
+alter table public.watchlist_behavior_history add column if not exists learning_promotion_eligible boolean;
+alter table public.watchlist_behavior_history add column if not exists learning_reporting_only boolean;
+alter table public.watchlist_behavior_history add column if not exists learning_promotion_state text;
 alter table public.watchlist_behavior_history add column if not exists contextual_overlay text;
 alter table public.watchlist_behavior_history add column if not exists contextual_score_adjustment numeric;
 alter table public.watchlist_behavior_history add column if not exists contextual_plan text;

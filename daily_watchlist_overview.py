@@ -39,7 +39,7 @@ RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
 SCANNER_VERSION = "2026.07.15-executable-learning"
-LEARNING_MODEL_VERSION = "next-session-zone-v1"
+LEARNING_MODEL_VERSION = "next-session-zone-v3-hard-gate-boundary"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -60,7 +60,8 @@ WALK_FORWARD_MIN_TEST_TRADES = 3
 MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
-DEFAULT_LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "30"))
+LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "30"))
+DEFAULT_LEARNING_LOOKBACK_DAYS = LEARNING_LOOKBACK_DAYS
 MARKET_DATA_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12"))
 SELF_SCORE_ACTIONS = {
     "BUY CANDIDATE",
@@ -81,6 +82,8 @@ LEARNING_CONFIRM_MIN_WORKING_RATE = float(os.getenv("LEARNING_CONFIRM_MIN_WORKIN
 LEARNING_CONFIRM_MAX_FAILED_RATE = float(os.getenv("LEARNING_CONFIRM_MAX_FAILED_RATE", "0.25"))
 LEARNING_CONFIRM_MIN_ADJUSTMENT = float(os.getenv("LEARNING_CONFIRM_MIN_ADJUSTMENT", "2.0"))
 LEARNING_CONFIRM_MIN_SCORE = float(os.getenv("LEARNING_CONFIRM_MIN_SCORE", "78.0"))
+LEARNING_CONFIRM_MIN_DISTINCT_TICKERS = int(os.getenv("LEARNING_CONFIRM_MIN_DISTINCT_TICKERS", "4"))
+LEARNING_CONFIRM_MIN_EVALUATION_DATES = int(os.getenv("LEARNING_CONFIRM_MIN_EVALUATION_DATES", "4"))
 POST_EXIT_COOLDOWN_BARS = int(os.getenv("POST_EXIT_COOLDOWN_BARS", "2"))
 POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
 POST_EXIT_RISK_PERSISTENCE_BARS = int(os.getenv("POST_EXIT_RISK_PERSISTENCE_BARS", "3"))
@@ -767,6 +770,10 @@ def numeric_or_none(value):
     return value
 
 
+def is_affirmative(value: object) -> bool:
+    return value is True or str(value or "").strip().upper() in {"YES", "TRUE", "1"}
+
+
 def supabase_credentials() -> tuple[str, str]:
     url = os.getenv("SUPABASE_URL", "").rstrip("/")
     key = (
@@ -909,6 +916,16 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "learning_scope",
     "learning_key_used",
     "learning_plan",
+    "learning_model_version",
+    "learning_distinct_ticker_count",
+    "learning_evaluation_date_count",
+    "learning_evaluation_date_min",
+    "learning_evaluation_date_max",
+    "learning_window_start",
+    "learning_window_end",
+    "learning_promotion_eligible",
+    "learning_reporting_only",
+    "learning_promotion_state",
     "contextual_overlay",
     "contextual_score_adjustment",
     "contextual_plan",
@@ -1246,6 +1263,16 @@ def optional_signal_values(row: dict) -> dict:
         "learning_scope": row.get("learning_scope"),
         "learning_key_used": row.get("learning_key_used"),
         "learning_plan": row.get("learning_plan"),
+        "learning_model_version": row.get("learning_model_version"),
+        "learning_distinct_ticker_count": numeric_or_none(row.get("learning_distinct_ticker_count")),
+        "learning_evaluation_date_count": numeric_or_none(row.get("learning_evaluation_date_count")),
+        "learning_evaluation_date_min": row.get("learning_evaluation_date_min") or None,
+        "learning_evaluation_date_max": row.get("learning_evaluation_date_max") or None,
+        "learning_window_start": row.get("learning_window_start") or None,
+        "learning_window_end": row.get("learning_window_end") or None,
+        "learning_promotion_eligible": row.get("learning_promotion_eligible"),
+        "learning_reporting_only": row.get("learning_reporting_only"),
+        "learning_promotion_state": row.get("learning_promotion_state"),
         "contextual_overlay": row.get("contextual_overlay"),
         "contextual_score_adjustment": numeric_or_none(row.get("contextual_score_adjustment")),
         "contextual_plan": row.get("contextual_plan"),
@@ -1503,8 +1530,8 @@ SIGNAL_STAGE_ORDER = {
 }
 
 SIGNAL_STAGE_LABELS = {
-    "WAIT": "WAIT",
-    "WAIT / AVOID": "WAIT",
+    "WAIT": "AVOID",
+    "WAIT / AVOID": "AVOID",
     "WATCH TREND": "WATCH",
     "SETUP FORMING": "BUILDING",
     "BUY CANDIDATE": "BUY",
@@ -1763,7 +1790,10 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
     score = float(numeric_or_none(row.get("score")) or 0)
     fresh = row.get("freshness_block") != "YES"
     risk_ok = row.get("risk_permission") == "ALLOW"
-    market_ok = row.get("market_permission") != "BLOCK"
+    market_ok = row.get("market_permission") == "ALLOW"
+    ticker_ok = row.get("ticker_permission") == "ALLOW"
+    walk_forward_ok = row.get("walk_forward_permission") == "ALLOW"
+    personality_ok = is_affirmative(row.get("personality_setup_allowed"))
     absorption_or_neutral = (
         operator_state in {"", "NEUTRAL", "ACCUMULATION", "MARKUP / DEMAND CONTROL", "BEAR_TRAP / SQUEEZE WATCH"}
         or operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
@@ -1773,9 +1803,9 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
         return "SETUP ONLY", 4, anti_plan or "Anti-signal block; do not execute directly."
     if anti_level == "CAUTION" and action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
         return "SETUP ONLY", 3, anti_plan or "Anti-signal caution; wait for a cleaner reset."
-    if action == "BUY CANDIDATE" and fresh and risk_ok and market_ok and next_day == "BULLISH CONFIRM" and absorption_or_neutral and adjusted_score >= 92 and rank_index < TOP_BUY_TIER_LIMIT:
+    if action == "BUY CANDIDATE" and fresh and risk_ok and market_ok and ticker_ok and walk_forward_ok and personality_ok and next_day == "BULLISH CONFIRM" and absorption_or_neutral and adjusted_score >= 92 and rank_index < TOP_BUY_TIER_LIMIT:
         return "A+ BUY", 1, "Highest execution tier; still confirm on Pine before acting."
-    if action == "BUY CANDIDATE" and fresh and next_day == "BULLISH CONFIRM" and adjusted_score >= 78 and rank_index < BUY_WATCH_TIER_LIMIT:
+    if action == "BUY CANDIDATE" and fresh and risk_ok and market_ok and ticker_ok and walk_forward_ok and personality_ok and next_day == "BULLISH CONFIRM" and adjusted_score >= 78 and rank_index < BUY_WATCH_TIER_LIMIT:
         return "BUY WATCH", 2, "Qualified buy watch; prefer reference-zone entry and Pine confirmation."
     if action == "SETUP FORMING" and learning_confirms_setup_upgrade(row) and rank_index < BUY_WATCH_TIER_LIMIT:
         return "BUY WATCH", 2, "Learning-confirmed BUILDING setup; use reference-zone entry and Pine confirmation, not a chase."
@@ -1795,6 +1825,7 @@ def learning_confirms_setup_upgrade(row: dict) -> bool:
     if action != "SETUP FORMING":
         return False
 
+    personality_allowed = is_affirmative(row.get("personality_setup_allowed"))
     anti_level = str(row.get("anti_signal_level") or "NONE").upper()
     operator_state = str(row.get("operator_state") or "").upper()
     operator_pressure = str(row.get("operator_pressure") or "").upper()
@@ -1803,14 +1834,19 @@ def learning_confirms_setup_upgrade(row: dict) -> bool:
     extension_state = str(row.get("extension_state") or "").upper()
     stale = str(row.get("freshness_block") or "").upper() == "YES"
     risk_ok = row.get("risk_permission") == "ALLOW"
-    market_ok = row.get("market_permission") != "BLOCK"
+    market_ok = row.get("market_permission") == "ALLOW"
+    ticker_ok = row.get("ticker_permission") == "ALLOW"
+    walk_forward_ok = row.get("walk_forward_permission") == "ALLOW"
     adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
     samples = int(numeric_or_none(row.get("learning_sample_count")) or 0)
     working_rate = float(numeric_or_none(row.get("learning_working_rate")) or 0)
     failed_rate = float(numeric_or_none(row.get("learning_failed_rate")) or 0)
     adjustment = float(numeric_or_none(row.get("learning_adjustment")) or 0)
+    learning_scope = str(row.get("learning_scope") or "").lower()
+    distinct_tickers = int(numeric_or_none(row.get("learning_distinct_ticker_count")) or 0)
+    evaluation_dates = int(numeric_or_none(row.get("learning_evaluation_date_count")) or 0)
 
-    if stale or anti_level != "NONE" or not risk_ok or not market_ok:
+    if not personality_allowed or stale or anti_level != "NONE" or not risk_ok or not market_ok or not ticker_ok or not walk_forward_ok:
         return False
     if extension_state == "EXTENDED" or quality in {"STALE DATA", "EVENT RISK", "EXTENDED", "FEEDBACK FAILED", "FEEDBACK STALE"}:
         return False
@@ -1824,6 +1860,9 @@ def learning_confirms_setup_upgrade(row: dict) -> bool:
         and failed_rate <= LEARNING_CONFIRM_MAX_FAILED_RATE
         and adjustment >= LEARNING_CONFIRM_MIN_ADJUSTMENT
         and adjusted_score >= LEARNING_CONFIRM_MIN_SCORE
+        and learning_scope == "exact signal personality"
+        and distinct_tickers >= LEARNING_CONFIRM_MIN_DISTINCT_TICKERS
+        and evaluation_dates >= LEARNING_CONFIRM_MIN_EVALUATION_DATES
     )
 
 
@@ -2231,12 +2270,33 @@ def load_previous_local_report(run_date: str) -> list[dict]:
         return []
 
 
+def prior_signal_hard_gate_status(prior: dict, prior_action: str) -> tuple[bool, list[str]]:
+    """Require the stored signal to satisfy the same execution boundary as live rows."""
+    gates = {
+        "market": prior.get("market_permission"),
+        "ticker": prior.get("ticker_permission"),
+        "risk": prior.get("risk_permission"),
+        "walk-forward": prior.get("walk_forward_permission"),
+    }
+    blocked = [name for name, value in gates.items() if str(value or "UNKNOWN").upper() != "ALLOW"]
+    if prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"} and not is_affirmative(
+        prior.get("personality_setup_allowed")
+    ):
+        blocked.append("personality setup")
+    return not blocked, blocked
+
+
 def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str) -> dict:
     prior_action = prior.get("action", "")
     prior_close = numeric_or_none(prior.get("close"))
     current_close = numeric_or_none(current.get("close"))
-    current_stale = str(current.get("freshness_block") or "").upper() == "YES"
+    comparison_stale = (
+        str(prior.get("freshness_block") or "").upper() == "YES"
+        or str(current.get("freshness_block") or "").upper() == "YES"
+    )
     executable_action = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    hard_gates_allow, hard_gate_blockers = prior_signal_hard_gate_status(prior, prior_action)
+    entry_eligible = executable_action and hard_gates_allow
     zone_low = numeric_or_none(prior.get("entry_zone_low"))
     zone_high = numeric_or_none(prior.get("entry_zone_high"))
     entry_est = numeric_or_none(prior.get("entry_est"))
@@ -2248,126 +2308,155 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
     current_open = numeric_or_none(current.get("open"))
     entry_filled = False
     entry_fill_est = None
-    if executable_action and zone_low is not None and zone_high is not None and current_low is not None and current_high is not None:
-        entry_filled = float(current_low) <= float(zone_high) and float(current_high) >= float(zone_low)
-        if entry_filled:
-            candidate_open = float(current_open) if current_open is not None else float(zone_high)
-            entry_fill_est = min(max(candidate_open, float(zone_low)), float(zone_high))
+    stop_est = numeric_or_none(prior.get("stop_est"))
+    stop_hit = False
+    outcome_learnable = hard_gates_allow
 
-    # A close-only result promotes signals that could not have been entered.
-    # For entry-capable signals, require the next session to touch the zone.
-    if executable_action and not entry_filled:
+    # Executable outcomes require a complete next-session OHLC bar. A close
+    # alone cannot tell whether the planned zone filled before the stop.
+    if not hard_gates_allow:
         return_pct = ""
-        outcome = "NOT_FILLED"
+        outcome = "NON_LEARNABLE"
         score = 0.0
-        reason = "Next session did not touch the planned entry zone; excluded from learning."
-    elif entry_filled and entry_fill_est and current_close:
-        return_pct = (float(current_close) / float(entry_fill_est) - 1) * 100
-        outcome = "PENDING"
-        score = 0.0
-        reason = "Executable entry filled; evaluating next-session follow-through."
+        reason = f"Prior execution gate blocked ({', '.join(hard_gate_blockers)}); excluded from learning."
+    elif executable_action:
+        valid_ohlc = all(value is not None for value in (current_open, current_high, current_low, current_close))
+        valid_plan = (
+            zone_low is not None
+            and zone_high is not None
+            and stop_est is not None
+            and float(zone_low) <= float(zone_high)
+            and float(stop_est) < float(zone_low)
+        )
+        # Stale data is never allowed to turn an intraday low into a stop
+        # outcome. It is excluded before any fill or stop inference.
+        if comparison_stale:
+            return_pct = ""
+            outcome = "PENDING"
+            score = 0.0
+            reason = "Signal comparison contains stale market data; excluded before entry and stop evaluation."
+            outcome_learnable = False
+        elif not valid_ohlc or not valid_plan:
+            return_pct = ""
+            outcome = "NON_LEARNABLE"
+            score = 0.0
+            reason = "Missing complete OHLC or a valid entry-zone/stop plan; excluded from learning."
+            outcome_learnable = False
+        elif float(current_open) <= float(stop_est):
+            return_pct = ""
+            outcome = "NON_LEARNABLE"
+            score = 0.0
+            reason = "Next session gapped through the planned stop before a valid entry; excluded from learning."
+            outcome_learnable = False
+        elif float(current_open) < float(zone_low):
+            return_pct = ""
+            outcome = "NON_LEARNABLE"
+            score = 0.0
+            reason = "Next session opened below the entry zone; intraday reclaim sequence is not learnable from OHLC alone."
+            outcome_learnable = False
+        elif float(current_open) <= float(zone_high):
+            entry_filled = True
+            entry_fill_est = float(current_open)
+        elif float(current_low) <= float(zone_high) and float(current_high) >= float(zone_low):
+            entry_filled = True
+            entry_fill_est = float(zone_high)
+        else:
+            return_pct = ""
+            outcome = "NOT_FILLED"
+            score = 0.0
+            reason = "Next session did not touch the planned entry zone; excluded from learning."
+            outcome_learnable = False
+
+        if entry_filled:
+            stop_hit = float(current_low) <= float(stop_est)
+            return_pct = (float(current_close) / float(entry_fill_est) - 1) * 100
+            if stop_hit:
+                outcome = "FAILED"
+                score = -1.0
+                reason = "Next-session low breached the planned stop after entry."
+            elif prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+                if return_pct >= SELF_SCORE_WORKING_RETURN_PCT:
+                    outcome = "WORKING"
+                    score = 1.0
+                    reason = "Filled BUY met the next-session return threshold without a stop breach."
+                elif return_pct <= SELF_SCORE_FAILED_RETURN_PCT:
+                    outcome = "FAILED"
+                    score = -1.0
+                    reason = "Filled BUY failed its next-session return threshold."
+                else:
+                    outcome = "STALE"
+                    score = 0.0
+                    reason = "Filled BUY did not progress enough without breaching its stop."
+            else:
+                if return_pct >= 1.0:
+                    outcome = "WORKING"
+                    score = 1.0
+                    reason = "Filled BUILDING setup met the next-session return threshold without a stop breach."
+                elif return_pct <= -2.5:
+                    outcome = "FAILED"
+                    score = -1.0
+                    reason = "Filled BUILDING setup failed its next-session return threshold."
+                else:
+                    outcome = "STALE"
+                    score = 0.0
+                    reason = "Filled BUILDING setup remains unresolved without a stop breach."
     elif not prior_close or not current_close or float(prior_close) <= 0:
         return_pct = ""
         outcome = "PENDING"
         score = 0.0
-        reason = "No valid price result yet."
+        reason = "No valid close result yet."
+        outcome_learnable = False
     else:
         return_pct = (float(current_close) / float(prior_close) - 1) * 100
-        outcome = "PENDING"
-        score = 0.0
-        reason = "Evaluating directional follow-through."
-    if outcome != "NOT_FILLED" and return_pct != "":
-        current_action = current.get("action", "")
-        prior_anti = str(prior.get("anti_signal_level") or "NONE").upper()
-        prior_operator = str(prior.get("operator_state") or "").upper()
-        current_operator = str(current.get("operator_state") or "").upper()
-        current_risk = current_action == "EXIT PRESSURE" or current_operator in {"BULL_TRAP", "DISTRIBUTION"}
-        prior_trap_warning = prior_anti in {"BLOCK", "CAUTION"} or prior_operator in {"BULL_TRAP", "DISTRIBUTION"}
-
-        if current_stale:
+        if comparison_stale:
             outcome = "PENDING"
             score = 0.0
-            reason = "Current market data is stale; do not learn from this comparison."
-        elif prior_trap_warning and prior_action in {"SETUP FORMING", "WATCH TREND", "EXIT PRESSURE"} and return_pct <= 1.0 and current_action != "BUY CANDIDATE":
-            outcome = "TRAP_AVOIDED"
-            score = 1.0
-            reason = "Prior risk warning avoided a low-quality chase."
-        elif prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            reason = "Signal comparison contains stale market data; excluded from learning."
+            outcome_learnable = False
+        elif prior_action == "WATCH TREND":
             if return_pct >= SELF_SCORE_WORKING_RETURN_PCT:
                 outcome = "WORKING"
-                score = 1.0
-                reason = "BUY followed through close-to-close."
-            elif return_pct <= SELF_SCORE_FAILED_RETURN_PCT or current_risk:
-                outcome = "FAILED"
-                score = -1.0
-                reason = "BUY failed or moved into risk pressure."
-            else:
-                outcome = "STALE"
-                score = 0.0
-                reason = "BUY did not progress enough yet."
-        elif prior_action == "SETUP FORMING":
-            if current_action in {"BUY CANDIDATE", "STRONG CONTINUATION"} and return_pct >= 1.0:
-                outcome = "WORKING"
-                score = 1.0
-                reason = "SETUP upgraded with positive follow-through."
-            elif return_pct <= -2.5 or current_risk:
-                outcome = "FAILED"
-                score = -1.0
-                reason = "SETUP broke down instead of improving."
-            else:
-                outcome = "STALE"
-                score = 0.0
-                reason = "SETUP remains unresolved."
-        elif prior_action == "WATCH TREND":
-            if return_pct >= SELF_SCORE_WORKING_RETURN_PCT or current_action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"}:
-                outcome = "WORKING"
                 score = 0.7
-                reason = "WATCH trend improved or upgraded."
-            elif return_pct <= -3.0 or current_risk:
+                reason = "WATCH trend met the next-session return threshold."
+            elif return_pct <= -3.0:
                 outcome = "FAILED"
                 score = -0.7
-                reason = "WATCH trend deteriorated."
+                reason = "WATCH trend deteriorated beyond its next-session threshold."
             else:
                 outcome = "STALE"
                 score = 0.0
-                reason = "WATCH trend stayed neutral."
+                reason = "WATCH trend stayed within its neutral next-session range."
         elif prior_action == "EXIT PRESSURE":
-            if return_pct <= SELF_SCORE_EXIT_AVOIDED_RETURN_PCT or current_action in {"EXIT PRESSURE", "WAIT", "WAIT / AVOID"}:
+            if return_pct <= SELF_SCORE_EXIT_AVOIDED_RETURN_PCT:
                 outcome = "TRAP_AVOIDED"
                 score = 1.0
-                reason = "EXIT pressure warning helped avoid weak follow-through."
-            elif return_pct >= 2.5 and current_action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"}:
+                reason = "EXIT pressure correctly warned of weak next-session follow-through."
+            elif return_pct >= 2.5:
                 outcome = "FAILED"
                 score = -0.7
-                reason = "EXIT pressure was too defensive."
+                reason = "EXIT pressure was too defensive before a strong next session."
             else:
                 outcome = "STALE"
                 score = 0.0
-                reason = "EXIT pressure remains unresolved."
+                reason = "EXIT pressure remains unresolved by next-session price action."
         elif prior_action in {"WAIT", "WAIT / AVOID"}:
-            too_defensive = current_action in {"BUY CANDIDATE", "SETUP FORMING", "STRONG CONTINUATION"} and return_pct >= 2.5
-            avoided_weakness = return_pct <= (-1.0 if prior_action == "WAIT" else 0.5) or current_risk
-            stayed_defensive = current_action in {"WAIT", "WAIT / AVOID", "EXIT PRESSURE"}
-            if avoided_weakness:
+            if return_pct <= (-1.0 if prior_action == "WAIT" else 0.5):
                 outcome = "TRAP_AVOIDED"
                 score = 0.7
-                reason = "WAIT avoided weak follow-through or risk pressure."
-            elif too_defensive:
+                reason = "WAIT correctly avoided weak next-session follow-through."
+            elif return_pct >= 2.5:
                 outcome = "FAILED"
                 score = -0.5
-                reason = "WAIT was too defensive before a constructive upgrade."
-            elif stayed_defensive:
-                outcome = "STALE"
-                score = 0.0
-                reason = "WAIT stayed defensive without enough price evidence."
+                reason = "WAIT was too defensive before a strong next session."
             else:
                 outcome = "STALE"
                 score = 0.0
-                reason = "WAIT remains unresolved."
+                reason = "WAIT remains unresolved by next-session price action."
         else:
             outcome = "PENDING"
             score = 0.0
             reason = "Prior row was not a scored signal type."
+            outcome_learnable = False
 
     learning_key = "|".join(
         [
@@ -2389,9 +2478,11 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
         "prior_anti_signal_level": prior.get("anti_signal_level"),
         "prior_close": round(float(prior_close), 2) if prior_close else "",
         "entry_model_version": LEARNING_MODEL_VERSION,
-        "entry_eligible": executable_action,
+        "entry_eligible": entry_eligible,
         "entry_filled": entry_filled,
         "entry_fill_est": round(float(entry_fill_est), 2) if entry_fill_est else "",
+        "stop_hit": stop_hit,
+        "outcome_learnable": outcome_learnable,
         "current_action": current.get("action"),
         "current_operator_state": current.get("operator_state"),
         "current_close": round(float(current_close), 2) if current_close else "",
@@ -2526,6 +2617,37 @@ def learning_key_candidates_for(row: dict) -> list[tuple[str, str, float]]:
     ]
 
 
+def restrict_learning_outcomes_to_window(
+    outcomes: pd.DataFrame,
+    run_date: Optional[str] = None,
+    lookback_days: int = LEARNING_LOOKBACK_DAYS,
+) -> pd.DataFrame:
+    """Keep one trailing window of settled evaluation trading sessions."""
+    if outcomes is None or outcomes.empty or "evaluation_run_date" not in outcomes.columns:
+        return pd.DataFrame() if outcomes is None else outcomes.copy()
+
+    parsed_dates = pd.to_datetime(outcomes["evaluation_run_date"], errors="coerce").dt.normalize()
+    eligible = parsed_dates.notna()
+    if run_date:
+        cutoff_day = pd.to_datetime(run_date, errors="coerce")
+        if pd.isna(cutoff_day):
+            return outcomes.iloc[0:0].copy()
+        eligible &= parsed_dates < cutoff_day.normalize()
+
+    sessions = sorted(parsed_dates.loc[eligible].dropna().unique())
+    if not sessions:
+        return outcomes.iloc[0:0].copy()
+    selected_sessions = sessions[-max(1, int(lookback_days)):]
+    selected = outcomes.loc[eligible & parsed_dates.isin(selected_sessions)].copy()
+    selected.attrs["learning_window"] = {
+        "lookback_days": max(1, int(lookback_days)),
+        "evaluation_date_min": pd.Timestamp(selected_sessions[0]).date().isoformat(),
+        "evaluation_date_max": pd.Timestamp(selected_sessions[-1]).date().isoformat(),
+        "evaluation_session_count": len(selected_sessions),
+    }
+    return selected
+
+
 def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
     frames = []
     for path in sorted(Path(".").glob("daily_signal_outcomes_*.csv")):
@@ -2538,7 +2660,7 @@ def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
             print(f"Local signal-outcome history load skipped ({path}): {exc}")
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    return restrict_learning_outcomes_to_window(pd.concat(frames, ignore_index=True), run_date)
 
 
 def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
@@ -2551,20 +2673,32 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
             "order=evaluation_run_date.desc&limit=5000"
         )
         if rows:
-            return pd.DataFrame([merge_payload_row(row) for row in rows])
+            return restrict_learning_outcomes_to_window(pd.DataFrame([merge_payload_row(row) for row in rows]), run_date)
     except RuntimeError as exc:
         print(f"Signal-outcome history fetch skipped: {exc}")
     return load_local_signal_outcomes(run_date)
 
 
-def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
-    if outcome_history.empty or "learning_key" not in outcome_history.columns:
+def build_learning_stats(
+    outcome_history: pd.DataFrame,
+    run_date: Optional[str] = None,
+    lookback_days: int = LEARNING_LOOKBACK_DAYS,
+) -> dict[str, dict]:
+    outcome_history = restrict_learning_outcomes_to_window(outcome_history, run_date, lookback_days)
+    if (
+        outcome_history.empty
+        or "learning_key" not in outcome_history.columns
+        or "entry_model_version" not in outcome_history.columns
+        or "outcome_learnable" not in outcome_history.columns
+    ):
         return {}
-    usable = outcome_history[outcome_history["outcome_label"].astype(str).str.upper().isin({"WORKING", "FAILED", "TRAP_AVOIDED", "STALE"})].copy()
-    # Legacy close-to-close rows have no execution model. Do not blend them
-    # into the new adaptive weights once executable samples exist.
-    if "entry_model_version" in usable.columns:
-        usable = usable[usable["entry_model_version"].astype(str) == LEARNING_MODEL_VERSION]
+    usable = outcome_history[
+        outcome_history["outcome_label"].astype(str).str.upper().isin({"WORKING", "FAILED", "TRAP_AVOIDED", "STALE"})
+        & outcome_history["outcome_learnable"].map(is_affirmative)
+    ].copy()
+    # Every learning row must use the current executable entry model. Legacy
+    # rows with no version are not comparable and must not influence weights.
+    usable = usable[usable["entry_model_version"].astype(str) == LEARNING_MODEL_VERSION]
     if usable.empty:
         return {}
 
@@ -2590,6 +2724,11 @@ def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
             working = int((labels == "WORKING").sum())
             failed = int((labels == "FAILED").sum())
             trap_avoided = int((labels == "TRAP_AVOIDED").sum())
+            distinct_tickers = int(group["ticker"].dropna().astype(str).str.upper().nunique()) if "ticker" in group.columns else 0
+            evaluation_series = pd.to_datetime(group["evaluation_run_date"], errors="coerce").dropna() if "evaluation_run_date" in group.columns else pd.Series(dtype="datetime64[ns]")
+            evaluation_dates = int(evaluation_series.dt.normalize().nunique()) if not evaluation_series.empty else 0
+            evaluation_date_min = evaluation_series.min().date().isoformat() if not evaluation_series.empty else ""
+            evaluation_date_max = evaluation_series.max().date().isoformat() if not evaluation_series.empty else ""
             stats[str(key)] = {
                 "sample_count": total,
                 "working_rate": working / total if total else 0.0,
@@ -2598,6 +2737,11 @@ def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
                 "avg_score": float(scores.mean()) if not scores.empty else 0.0,
                 "avg_return_pct": float(returns.mean()) if not returns.empty else None,
                 "scope": scope,
+                "distinct_ticker_count": distinct_tickers,
+                "evaluation_date_count": evaluation_dates,
+                "evaluation_date_min": evaluation_date_min,
+                "evaluation_date_max": evaluation_date_max,
+                "model_version": LEARNING_MODEL_VERSION,
             }
     return stats
 
@@ -2605,33 +2749,41 @@ def build_learning_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
 def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]) -> None:
     for row in rows:
         candidates = learning_key_candidates_for(row)
-        selected_key = ""
-        selected_scope = ""
+        exact_key, exact_scope, _ = candidates[0]
+        exact_stats = learning_stats.get(exact_key)
+        fallback = next(((key, scope, weight, learning_stats[key]) for key, scope, weight in candidates[1:] if key in learning_stats), None)
+        report_key = exact_key if exact_stats else (fallback[0] if fallback else "")
+        report_scope = str((exact_stats or (fallback[3] if fallback else {})).get("scope") or (exact_scope if exact_stats else (fallback[1] if fallback else "none")))
+        report_stats = exact_stats or (fallback[3] if fallback else None)
+
+        # Exact behavior evidence is the only source that can promote a score.
+        # Broad pools remain visible and can apply negative caution only.
+        selected_key = exact_key
+        selected_scope = exact_scope
         selected_weight = 1.0
-        stats = None
-        fallback_stats = None
-        fallback_scope = ""
-        for key, scope, weight in candidates:
-            candidate_stats = learning_stats.get(key)
-            if not candidate_stats:
-                continue
-            if fallback_stats is None:
-                fallback_stats = candidate_stats
-                fallback_scope = str(candidate_stats.get("scope") or scope)
-            if int(candidate_stats.get("sample_count", 0)) >= LEARNING_MIN_SAMPLES:
-                selected_key = key
-                selected_scope = str(candidate_stats.get("scope") or scope)
-                selected_weight = weight
-                stats = candidate_stats
-                break
+        stats = exact_stats
+        if (not stats or int(stats.get("sample_count", 0)) < LEARNING_MIN_SAMPLES) and fallback:
+            selected_key, selected_scope, selected_weight, stats = fallback
+
         if not stats or int(stats.get("sample_count", 0)) < LEARNING_MIN_SAMPLES:
-            row["learning_sample_count"] = int(fallback_stats.get("sample_count", 0)) if fallback_stats else 0
-            row["learning_working_rate"] = round(float(fallback_stats.get("working_rate", 0.0)), 3) if fallback_stats else ""
-            row["learning_failed_rate"] = round(float(fallback_stats.get("failed_rate", 0.0)), 3) if fallback_stats else ""
-            row["learning_trap_avoided_rate"] = round(float(fallback_stats.get("trap_avoided_rate", 0.0)), 3) if fallback_stats else ""
-            row["learning_avg_score"] = round(float(fallback_stats.get("avg_score", 0.0)), 3) if fallback_stats else ""
+            row["learning_sample_count"] = int(report_stats.get("sample_count", 0)) if report_stats else 0
+            row["learning_working_rate"] = round(float(report_stats.get("working_rate", 0.0)), 3) if report_stats else ""
+            row["learning_failed_rate"] = round(float(report_stats.get("failed_rate", 0.0)), 3) if report_stats else ""
+            row["learning_trap_avoided_rate"] = round(float(report_stats.get("trap_avoided_rate", 0.0)), 3) if report_stats else ""
+            row["learning_avg_score"] = round(float(report_stats.get("avg_score", 0.0)), 3) if report_stats else ""
+            row["learning_distinct_ticker_count"] = int(report_stats.get("distinct_ticker_count", 0)) if report_stats else 0
+            row["learning_evaluation_date_count"] = int(report_stats.get("evaluation_date_count", 0)) if report_stats else 0
+            row["learning_evaluation_date_min"] = report_stats.get("evaluation_date_min", "") if report_stats else ""
+            row["learning_evaluation_date_max"] = report_stats.get("evaluation_date_max", "") if report_stats else ""
+            row["learning_window_start"] = row["learning_evaluation_date_min"]
+            row["learning_window_end"] = row["learning_evaluation_date_max"]
+            row["learning_model_version"] = str(report_stats.get("model_version") or LEARNING_MODEL_VERSION) if report_stats else LEARNING_MODEL_VERSION
+            row["learning_promotion_eligible"] = False
+            row["learning_reporting_only"] = True
+            row["learning_promotion_state"] = "REPORTING_ONLY"
             row["learning_adjustment"] = 0.0
-            row["learning_scope"] = fallback_scope or "none"
+            row["learning_scope"] = report_scope
+            row["learning_key_used"] = report_key
             row["learning_plan"] = (
                 f"Learning pending: needs at least {LEARNING_MIN_SAMPLES} settled samples; "
                 f"currently has {row['learning_sample_count']} from {row['learning_scope']}."
@@ -2648,6 +2800,15 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
 
         anti_level = str(row.get("anti_signal_level") or "NONE").upper()
         stale = str(row.get("freshness_block") or "").upper() == "YES"
+        # Learning may warn from imperfect contexts, but it must never promote a
+        # setup that the live execution governor would reject.
+        execution_gates_allow = (
+            is_affirmative(row.get("personality_setup_allowed"))
+            and str(row.get("market_permission") or "").upper() == "ALLOW"
+            and str(row.get("ticker_permission") or "").upper() == "ALLOW"
+            and str(row.get("walk_forward_permission") or "").upper() == "ALLOW"
+            and str(row.get("risk_permission") or "").upper() == "ALLOW"
+        )
         if stale:
             effective_adjustment = 0.0
             plan = f"Learning observed from {selected_scope}, but data is stale; no score adjustment applied."
@@ -2661,10 +2822,46 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
             effective_adjustment = adjustment
             plan = f"Learning adjustment applied from settled {selected_scope} outcomes."
 
+        distinct_tickers = int(stats.get("distinct_ticker_count", 0))
+        evaluation_dates = int(stats.get("evaluation_date_count", 0))
+        promotion_evidence_ok = (
+            selected_scope == "exact signal personality"
+            and int(stats.get("sample_count", 0)) >= LEARNING_CONFIRM_MIN_SAMPLES
+            and distinct_tickers >= LEARNING_CONFIRM_MIN_DISTINCT_TICKERS
+            and evaluation_dates >= LEARNING_CONFIRM_MIN_EVALUATION_DATES
+        )
+        if effective_adjustment > 0 and not promotion_evidence_ok:
+            effective_adjustment = 0.0
+            if selected_scope != "exact signal personality":
+                plan = f"Broad {selected_scope} outcomes are reporting-only for positive learning; no promotion applied."
+            else:
+                plan = (
+                    "Exact learning evidence is not diverse enough for promotion: "
+                    f"needs {LEARNING_CONFIRM_MIN_DISTINCT_TICKERS} tickers and {LEARNING_CONFIRM_MIN_EVALUATION_DATES} evaluation dates."
+                )
+
+        if effective_adjustment > 0 and not execution_gates_allow:
+            effective_adjustment = 0.0
+            plan = "Learning evidence is reporting-only until every execution and personality gate is ALLOW."
+
         action = str(row.get("action") or "")
         if action in {"EXIT PRESSURE", "WAIT", "WAIT / AVOID"} and effective_adjustment > 0:
             effective_adjustment = 0.0
             plan = f"Learning supports the defensive {action} read from {selected_scope}; no bullish score promotion applied."
+
+        promotion_eligible = (
+            promotion_evidence_ok
+            and execution_gates_allow
+            and not stale
+            and anti_level != "BLOCK"
+            and action not in {"EXIT PRESSURE", "WAIT", "WAIT / AVOID"}
+        )
+        reporting_only = not promotion_evidence_ok or not execution_gates_allow
+        promotion_state = (
+            "REPORTING_ONLY" if reporting_only
+            else "PROMOTION_ELIGIBLE" if promotion_eligible
+            else "PROMOTION_BLOCKED"
+        )
 
         base_adjusted = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
         row["adjusted_score"] = round(max(0.0, min(128.0, base_adjusted + effective_adjustment)), 1)
@@ -2675,6 +2872,16 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         row["learning_failed_rate"] = round(failed_rate, 3)
         row["learning_trap_avoided_rate"] = round(trap_rate, 3)
         row["learning_avg_score"] = round(avg_score, 3)
+        row["learning_distinct_ticker_count"] = distinct_tickers
+        row["learning_evaluation_date_count"] = evaluation_dates
+        row["learning_evaluation_date_min"] = stats.get("evaluation_date_min", "")
+        row["learning_evaluation_date_max"] = stats.get("evaluation_date_max", "")
+        row["learning_window_start"] = row["learning_evaluation_date_min"]
+        row["learning_window_end"] = row["learning_evaluation_date_max"]
+        row["learning_model_version"] = str(stats.get("model_version") or LEARNING_MODEL_VERSION)
+        row["learning_promotion_eligible"] = promotion_eligible
+        row["learning_reporting_only"] = reporting_only
+        row["learning_promotion_state"] = promotion_state
         row["learning_adjustment"] = round(float(effective_adjustment), 2)
         row["learning_scope"] = selected_scope
         row["learning_key_used"] = selected_key
@@ -3179,6 +3386,21 @@ def market_permission_from_frames(benchmarks: dict[str, pd.DataFrame]) -> dict:
     permission = "ALLOW" if ok_count >= 2 else "BLOCK"
     summary = ", ".join(f"{symbol} {item.get('note', 'unknown')}" for symbol, item in probes.items())
     return {"market_permission": permission, "market_ok_count": ok_count, "market_regime_summary": summary}
+
+
+def market_permission_for_replay_date(benchmarks: dict[str, pd.DataFrame], replay_date: object) -> dict:
+    """Calculate replay market permission using only data known on that date."""
+    truncated: dict[str, pd.DataFrame] = {}
+    replay_day = pd.to_datetime(replay_date, errors="coerce")
+    if pd.isna(replay_day):
+        return market_permission_from_frames({})
+    for symbol in ("SPY", "QQQ", "SMH"):
+        frame = benchmarks.get(symbol)
+        if frame is None or frame.empty or "date" not in frame.columns:
+            continue
+        frame_dates = pd.to_datetime(frame["date"], errors="coerce")
+        truncated[symbol] = frame.loc[frame_dates <= replay_day].copy()
+    return market_permission_from_frames(truncated)
 
 
 def classify_and_score(
@@ -4260,7 +4482,12 @@ def enrich_signal_transitions(history_rows: list[dict]) -> list[dict]:
     return enriched
 
 
-def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> list[dict]:
+def build_behavior_history(
+    ticker: str,
+    raw: pd.DataFrame,
+    days: int = 30,
+    benchmark_frames: Optional[dict[str, pd.DataFrame]] = None,
+) -> list[dict]:
     d = prepare(raw)
     if len(d) < 220:
         return []
@@ -4269,6 +4496,10 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
     start = max(220, len(d) - days + 1)
     for end in range(start, len(d) + 1):
         try:
+            replay_market_permission = market_permission_for_replay_date(
+                benchmark_frames or {},
+                d.iloc[end - 1].date,
+            )
             snapshot = classify_and_score(
                 ticker,
                 d.iloc[:end].copy(),
@@ -4277,6 +4508,7 @@ def build_behavior_history(ticker: str, raw: pd.DataFrame, days: int = 30) -> li
                 # Replay must use the same executable gates as production;
                 # otherwise learning can reward signals the app would block.
                 include_audit_gates=True,
+                market_permission=replay_market_permission,
             )
         except Exception:
             continue
@@ -5350,10 +5582,10 @@ def main() -> None:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
             row = classify_and_score(ticker, df, market_permission=market_permission)
             row = apply_data_provider_context(row, df)
-            ticker_history = build_behavior_history(ticker, df, days=args.history_days)
+            ticker_history = build_behavior_history(ticker, df, days=args.history_days, benchmark_frames=benchmark_frames)
             ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
             if args.learning_lookback_days > args.history_days:
-                ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days)
+                ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days, benchmark_frames=benchmark_frames)
                 ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
             else:
                 ticker_learning_history = ticker_history
@@ -5375,10 +5607,10 @@ def main() -> None:
                 df = cached_chart(ticker, years=args.years)
                 row = classify_and_score(ticker, df, market_permission=market_permission)
                 row = apply_data_provider_context(row, df)
-                ticker_history = build_behavior_history(ticker, df, days=args.history_days)
+                ticker_history = build_behavior_history(ticker, df, days=args.history_days, benchmark_frames=benchmark_frames)
                 ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
                 if args.learning_lookback_days > args.history_days:
-                    ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days)
+                    ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days, benchmark_frames=benchmark_frames)
                     ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
                 else:
                     ticker_learning_history = ticker_history
@@ -5414,8 +5646,12 @@ def main() -> None:
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
     backfilled_outcomes = build_backfilled_signal_outcomes(learning_history_rows)
-    learning_history = combine_signal_outcomes(fetch_signal_outcome_history(today), backfilled_outcomes)
-    learning_stats = build_learning_stats(learning_history)
+    learning_history = restrict_learning_outcomes_to_window(
+        combine_signal_outcomes(fetch_signal_outcome_history(today), backfilled_outcomes),
+        today,
+        args.learning_lookback_days,
+    )
+    learning_stats = build_learning_stats(learning_history, today, args.learning_lookback_days)
     apply_learning_adjustments(rows, learning_stats)
     rows = sorted(
         rows,
@@ -5445,6 +5681,7 @@ def main() -> None:
         status_parts.append(f"providers {provider_summary}")
     stale_blocks = int((report.get("freshness_block", pd.Series(dtype=str)) == "YES").sum())
     outcome_summary = summarize_signal_outcomes(outcomes)
+    learning_window = learning_history.attrs.get("learning_window", {})
     if stale_blocks:
         status_parts.append(f"{stale_blocks} execution-blocked for stale data")
     if outcome_summary["total"]:
@@ -5486,6 +5723,9 @@ def main() -> None:
             "signal_outcomes": outcome_summary,
             "backfilled_signal_outcomes": int(len(backfilled_outcomes)),
             "learning_lookback_days": args.learning_lookback_days,
+            "learning_evaluation_date_min": learning_window.get("evaluation_date_min", ""),
+            "learning_evaluation_date_max": learning_window.get("evaluation_date_max", ""),
+            "learning_evaluation_session_count": learning_window.get("evaluation_session_count", 0),
             "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
         },
     }

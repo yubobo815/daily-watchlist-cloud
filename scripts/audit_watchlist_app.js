@@ -1,11 +1,36 @@
-const { staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
+const { conservativeFallbackRow, staticLatestPayload, staticTickerPayload } = require("../api/_static_data");
+const { publishedLatestPayload, publishedTickerPayload } = require("../api/_published_data");
 const { rowDto, runDto } = require("../api/_supabase");
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 const fs = require("fs");
 
 const REQUIRED_GATES = [
   "market_permission",
+  "ticker_permission",
+  "walk_forward_permission",
   "risk_permission",
+];
+
+const LEARNING_EVIDENCE_FIELDS = [
+  "learning_sample_count",
+  "learning_working_rate",
+  "learning_failed_rate",
+  "learning_trap_avoided_rate",
+  "learning_avg_score",
+  "learning_adjustment",
+  "learning_scope",
+  "learning_key_used",
+  "learning_plan",
+  "learning_model_version",
+  "learning_distinct_ticker_count",
+  "learning_evaluation_date_count",
+  "learning_evaluation_date_min",
+  "learning_evaluation_date_max",
+  "learning_window_start",
+  "learning_window_end",
+  "learning_promotion_eligible",
+  "learning_reporting_only",
+  "learning_promotion_state",
 ];
 
 function assert(condition, message) {
@@ -81,14 +106,61 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes('state.filter === "risk"'), "RISK queue must retain Exit and Avoid rows");
   assert(pageSource.includes('id="market-activity"'), "secondary market activity must have a navigable target");
   assert(appSource.includes("target.open = true"), "Activity navigation must open the details drawer before scrolling");
-  assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker execution panel");
-  assert(appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must retain the Pine confirmation boundary");
+  assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker scanner review panel");
+  assert(!appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must not repeat the removed Pine confirmation copy");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
+  assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
+  assert(!pageSource.includes("Execution tier first"), "watchlist must not retain execution-tier sorting copy");
+  assert(!tickerSource.includes("Execution plan"), "ticker detail must not retain execution-plan copy");
+  assert(pageSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "watchlist must show the permanent scanner boundary legend");
+  assert(tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must show the permanent scanner boundary legend");
   assert(tickerSource.includes("calm-paper-20260716"), "ticker detail must load the current shared application bundle");
   assert(pageSource.includes('data-mobile-filter="building"'), "mobile Building filter must use the aggregate queue");
   assert(pageSource.includes('data-mobile-filter="risk"'), "mobile Risk filter must use the aggregate queue");
   assert(!appSource.includes('if (state.query.trim()) state.filter = "all"'), "search must preserve the selected decision queue");
-  return { executionQueues: 3, activityTarget: "market-activity" };
+  return { executionQueues: 3, activityTarget: "market-activity", scannerLegend: true };
+}
+
+function auditLearningReadoutUi() {
+  const source = fs.readFileSync("assets/app.js", "utf8");
+  const start = source.indexOf("function payloadValue");
+  const end = source.indexOf("function cacheKeyFor");
+  assert(start >= 0 && end > start, "learning readout must remain independently testable");
+  assert(source.includes("learning_distinct_ticker_count"), "learning readout must surface diversity when present");
+  assert(source.includes("learning_evaluation_date_min"), "learning readout must surface date range when present");
+  assert(source.includes("entry_model_version"), "learning readout must surface model version when present");
+  const learningReadout = new Function("fmtNumber", "fmtSignedNumber", `${source.slice(start, end)}; return learningReadout;`)(
+    (value) => String(value),
+    (value) => `${Number(value) >= 0 ? "+" : ""}${value}`
+  );
+  const rich = learningReadout({ action: "BUY CANDIDATE", payload: {
+    learning_sample_count: 8, learning_adjustment: 2.4, learning_scope: "exact signal personality",
+    learning_distinct_ticker_count: 4, learning_evaluation_date_count: 4,
+    learning_evaluation_date_min: "2026-06-01", learning_evaluation_date_max: "2026-07-15",
+    learning_window_start: "2026-05-15", learning_window_end: "2026-07-15", entry_model_version: "zone-v2",
+    learning_promotion_eligible: true, learning_promotion_state: "PROMOTION_ELIGIBLE",
+  } });
+  const explicitFalse = learningReadout({ action: "BUY CANDIDATE", payload: {
+    learning_sample_count: 8, learning_scope: "exact signal personality", learning_distinct_ticker_count: 4,
+    learning_evaluation_date_count: 4, learning_promotion_eligible: false, learning_promotion_state: "PROMOTION_ELIGIBLE",
+  } });
+  const missingProducerEligibility = learningReadout({ action: "BUY CANDIDATE", payload: {
+    learning_sample_count: 12, learning_scope: "exact signal personality", learning_distinct_ticker_count: 8,
+    learning_evaluation_date_count: 6, learning_model_version: "zone-v2", learning_promotion_state: "PROMOTION_ELIGIBLE",
+  } });
+  const missingModelVersion = learningReadout({ action: "BUY CANDIDATE", payload: {
+    learning_sample_count: 12, learning_scope: "exact signal personality", learning_distinct_ticker_count: 8,
+    learning_evaluation_date_count: 6, learning_promotion_eligible: true,
+  } });
+  const basic = learningReadout({ action: "BUY CANDIDATE", payload: { learning_sample_count: 3 } });
+  assert(rich.includes("4 tickers") && rich.includes("range 2026-06-01 to 2026-07-15"), "learning readout must show diversity and date range");
+  assert(rich.includes("window 2026-05-15 to 2026-07-15"), "learning readout must show the learning window when it differs from evaluation bounds");
+  assert(rich.includes("model zone-v2") && rich.includes("promotion evidence eligible"), "learning readout must show model and promotion eligibility");
+  assert(explicitFalse.includes("reporting-only") && !explicitFalse.includes("promotion evidence eligible"), "explicit false learning promotion eligibility must override inferred eligibility");
+  assert(missingProducerEligibility.includes("reporting-only") && !missingProducerEligibility.includes("promotion evidence eligible"), "learning readout must not infer eligibility from counts or promotion state without producer approval");
+  assert(missingModelVersion.includes("model version pending") && !missingModelVersion.includes("promotion evidence eligible"), "learning readout must keep promotion pending without a model version");
+  assert(!basic.includes("tickers") && !basic.includes("range") && basic.includes("model version pending") && basic.includes("reporting-only"), "learning readout must mark incomplete learning evidence as pending reporting-only");
+  return { rich, explicitFalse, missingProducerEligibility, missingModelVersion, basic };
 }
 
 function auditStorageGuard() {
@@ -134,6 +206,107 @@ function auditStaticFallback() {
   };
 }
 
+function auditStaticFallbackNormalization() {
+  const row = conservativeFallbackRow({
+    ticker: "STATIC",
+    action: "BUY CANDIDATE",
+    score: 98,
+    market_permission: "ALLOW",
+    ticker_permission: "ALLOW",
+    risk_permission: "ALLOW",
+    payload: {
+      market_permission: "BLOCK",
+      ticker_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      freshness_block: "NO",
+      freshness_status: "LIVE_OR_CURRENT",
+      data_age_days: 0,
+    },
+  });
+
+  assert(row.action === "SETUP FORMING", "static fallback must downgrade a contradictory blocked-gate BUY row");
+  assert(gateValues(row).every((value) => value === "UNKNOWN"), "static fallback must erase stale gate evidence from both row shapes");
+  assert(row.payload.freshness_block === "YES", "static fallback must override freshness_block=NO");
+  assert(row.payload.freshness_status === "STATIC_FALLBACK_BLOCK", "static fallback must expose its conservative freshness status");
+  assert(row.personality_setup_allowed === "NO" && row.payload.personality_setup_allowed === "NO", "static fallback must explicitly block personality setup promotion");
+  assert(adjustedScore(row) <= 49, "static fallback must cap a contradictory blocked-gate BUY row");
+
+  return {
+    action: row.action,
+    gates: gateValues(row),
+    freshnessBlock: row.payload.freshness_block,
+    adjustedScore: adjustedScore(row),
+  };
+}
+
+async function auditBrowserFallbackNormalization() {
+  const source = fs.readFileSync("assets/app.js", "utf8");
+  const start = source.indexOf("function staticFallbackNumber");
+  const end = source.indexOf("async function fetchJsonNoStore");
+  assert(start >= 0 && end > start, "browser fallback must define a conservative normalizer");
+  const normalizeStaticFallbackRow = new Function(
+    "displaySecurityName",
+    "STATIC_FALLBACK_SCORE_CAP",
+    "STATIC_FALLBACK_GATE_FIELDS",
+    `${source.slice(start, end)}; return normalizeStaticFallbackRow;`
+  )(
+    (name) => name || "",
+    49,
+    ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"]
+  );
+  const row = normalizeStaticFallbackRow({
+    ticker: "BROWSER",
+    action: "BUY CANDIDATE",
+    score: 98,
+    market_permission: "ALLOW",
+    ticker_permission: "ALLOW",
+    risk_permission: "ALLOW",
+    payload: { freshness_block: "NO", market_permission: "BLOCK" },
+  }, "2026-07-16");
+
+  assert(row.action === "SETUP FORMING", "browser fallback must downgrade BUY-like actions");
+  assert(gateValues(row).every((value) => value === "UNKNOWN"), "browser fallback must remove stale gate evidence");
+  assert(row.payload.freshness_block === "YES", "browser fallback must block execution");
+  assert(row.personality_setup_allowed === "NO" && row.payload.personality_setup_allowed === "NO", "browser fallback must explicitly block personality setup promotion");
+  assert(row.learning_promotion_eligible === false && row.payload.learning_promotion_eligible === false, "browser fallback must fail closed on learning promotion eligibility");
+  assert(row.learning_reporting_only === true && row.payload.learning_promotion_state === "REPORTING_ONLY", "browser fallback must explicitly mark learning as reporting-only");
+  assert(adjustedScore(row) <= 49, "browser fallback must cap actionable rank");
+  assert(source.includes("loadStaticLatestRows") && source.includes("normalizeStaticFallbackRow(row, fallbackRunDate)"), "browser latest fallback must use the normalizer");
+  assert(source.includes("loadStaticTickerHistory") && source.includes("normalizeStaticFallbackRow({"), "browser ticker history fallback must use the normalizer");
+
+  const loaderStart = source.indexOf("function staticFallbackRunDate");
+  const loaderEnd = source.indexOf("function uniqueHistoryDateCount");
+  assert(loaderStart >= 0 && loaderEnd > loaderStart, "browser fallback loader must remain independently testable");
+  const loadStaticLatestRows = new Function(
+    "fetch",
+    "displaySecurityName",
+    "STATIC_FALLBACK_SCORE_CAP",
+    "STATIC_FALLBACK_GATE_FIELDS",
+    "PUBLISHED_LATEST_JSON_URL",
+    `${source.slice(loaderStart, loaderEnd)}; return loadStaticLatestRows;`
+  )(
+    async () => ({
+      ok: true,
+      json: async () => ({ run_date: "2000-01-01", rows: [{ ticker: "STALE_BROWSER", action: "BUY CANDIDATE", score: 98 }] }),
+    }),
+    (name) => name || "",
+    49,
+    ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"],
+    ""
+  );
+  const stalePayload = await loadStaticLatestRows();
+  assert(stalePayload.rows.length === 1, "stale browser fallback must still render bundled rows");
+  assert(stalePayload.rows[0].payload.freshness_status === "STATIC_FALLBACK_BLOCK", "stale browser fallback rows must remain explicitly blocked");
+
+  return {
+    action: row.action,
+    gates: gateValues(row),
+    freshnessBlock: row.payload.freshness_block,
+    adjustedScore: adjustedScore(row),
+    staleRows: stalePayload.rows.length,
+  };
+}
+
 function auditStaticTickerFallback(tickers) {
   let historyRows = 0;
   let unsafeBuys = 0;
@@ -159,6 +332,130 @@ function auditStaticTickerFallback(tickers) {
   };
 }
 
+function auditStaticLearningEvidenceFallback() {
+  const row = conservativeFallbackRow({
+    ticker: "STATIC",
+    payload: {
+      learning_distinct_ticker_count: 8,
+      learning_evaluation_date_count: 6,
+      learning_evaluation_date_min: "2026-05-01",
+      learning_evaluation_date_max: "2026-06-15",
+      learning_model_version: "learning-v3",
+      learning_promotion_eligible: true,
+    },
+  });
+
+  assert(row.learning_distinct_ticker_count === 8, "static fallback must expose distinct-ticker learning evidence");
+  assert(row.learning_evaluation_date_count === 6, "static fallback must expose evaluation-date learning evidence");
+  assert(row.learning_evaluation_date_min === "2026-05-01", "static fallback must expose learning evaluation minimum date");
+  assert(row.learning_evaluation_date_max === "2026-06-15", "static fallback must expose learning evaluation maximum date");
+  assert(row.learning_model_version === "learning-v3", "static fallback must expose learning model version");
+  assert(row.learning_promotion_eligible === false, "static fallback must fail closed on learning promotion eligibility");
+  assert(row.payload.learning_promotion_eligible === false, "static fallback payload must fail closed on learning promotion eligibility");
+  assert(row.learning_reporting_only === true && row.payload.learning_reporting_only === true, "static fallback must explicitly mark learning as reporting-only");
+  assert(row.learning_promotion_state === "REPORTING_ONLY" && row.payload.learning_promotion_state === "REPORTING_ONLY", "static fallback must expose reporting-only promotion state");
+
+  return {
+    distinctTickers: row.learning_distinct_ticker_count,
+    evaluationDates: row.learning_evaluation_date_count,
+    modelVersion: row.learning_model_version,
+    promotionEligible: row.learning_promotion_eligible,
+  };
+}
+
+async function withMockFetch(fetchImpl, callback) {
+  const originalFetch = global.fetch;
+  global.fetch = fetchImpl;
+  try {
+    return await callback();
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+async function auditPublishedFallbackContract() {
+  const learningEvidence = {
+    learning_sample_count: 12,
+    learning_working_rate: 0.67,
+    learning_failed_rate: 0.17,
+    learning_trap_avoided_rate: 0.83,
+    learning_avg_score: 4.2,
+    learning_adjustment: 1.5,
+    learning_scope: "exact signal personality",
+    learning_key_used: "BUY CANDIDATE|BREAKOUT BUY|BALANCED|ACCUMULATION|NONE",
+    learning_plan: "Use the evidence as a reporting input.",
+    learning_model_version: "learning-v3",
+    learning_distinct_ticker_count: 8,
+    learning_evaluation_date_count: 6,
+    learning_evaluation_date_min: "2026-06-01",
+    learning_evaluation_date_max: "2026-07-15",
+    learning_window_start: "2026-06-01",
+    learning_window_end: "2026-07-15",
+    learning_promotion_eligible: true,
+    learning_reporting_only: false,
+    learning_promotion_state: "PROMOTION_ELIGIBLE",
+  };
+  const liveLookingRunInfo = {
+    run_date: "2026-07-16",
+    status: "ok",
+    live_access_ok: true,
+    payload: {
+      data_provider_counts: { polygon: 2 },
+      stale_execution_blocks: 0,
+    },
+  };
+  const latestData = {
+    run_date: "2026-07-16",
+    runInfo: liveLookingRunInfo,
+    rows: [
+      { ticker: "PUBLISHED", run_date: "2026-07-16", action: "BUY CANDIDATE", score: 98, payload: learningEvidence },
+      { ticker: "SECOND", run_date: "2026-07-16", action: "WATCH TREND", score: 62, payload: {} },
+    ],
+  };
+  const historyData = {
+    by_ticker: {
+      PUBLISHED: [{ ticker: "PUBLISHED", history_date: "2026-07-15", action: "BUY CANDIDATE", score: 96, payload: learningEvidence }],
+    },
+  };
+
+  const published = await withMockFetch(async (url) => ({
+    ok: true,
+    json: async () => String(url).includes("history.json") ? historyData : latestData,
+  }), async () => {
+    const latest = await publishedLatestPayload();
+    const ticker = await publishedTickerPayload("PUBLISHED");
+    return { latest, ticker };
+  });
+
+  assert(published.latest.runInfo.status === "published_fallback", "published latest endpoint must replace source run status with fallback status");
+  assert(published.latest.runInfo.live_access_ok === false, "published latest endpoint must not claim live access");
+  assert(published.latest.runInfo.payload.stale_execution_blocks === 2, "published latest endpoint must block every fallback row");
+  assert(published.latest.runInfo.payload.data_provider_counts.published_pages === 2, "published latest endpoint must report the fallback provider");
+  assert(published.ticker.runInfo.status === "published_fallback", "published ticker endpoint must replace source run status with fallback status");
+  assert(published.ticker.runInfo.payload.stale_execution_blocks === 1, "published ticker endpoint must block the fallback snapshot");
+  LEARNING_EVIDENCE_FIELDS.forEach((field) => {
+    const expected = field === "learning_promotion_eligible" ? false
+      : field === "learning_reporting_only" ? true
+        : field === "learning_promotion_state" ? "REPORTING_ONLY"
+          : learningEvidence[field];
+    assert(published.latest.rows[0][field] === expected, `published fallback must retain ${field} at row level`);
+    assert(published.latest.rows[0].payload[field] === expected, `published fallback must retain ${field} in payload`);
+  });
+
+  const staticLatest = await withMockFetch(async () => {
+    throw new Error("published unavailable");
+  }, () => publishedLatestPayload());
+  assert(staticLatest.runInfo.status === "static_fallback", "static latest endpoint must replace bundled run status with static fallback status");
+  assert(staticLatest.runInfo.live_access_ok === false, "static latest endpoint must not claim live access");
+  assert(staticLatest.runInfo.payload.stale_execution_blocks === staticLatest.rows.length, "static latest endpoint must block every bundled row");
+
+  return {
+    latestBlocks: published.latest.runInfo.payload.stale_execution_blocks,
+    tickerBlocks: published.ticker.runInfo.payload.stale_execution_blocks,
+    staticBlocks: staticLatest.runInfo.payload.stale_execution_blocks,
+  };
+}
+
 function auditSupabaseFallback() {
   const legacy = rowDto({
     ticker: "TEST",
@@ -167,6 +464,7 @@ function auditSupabaseFallback() {
     score: 99,
     payload: {
       adjusted_score: 128,
+      data_age_days: 0,
       signal_quality: "FRESH",
       transition_label: "Fresh Setup To Buy",
       transition_score: 35,
@@ -185,6 +483,7 @@ function auditSupabaseFallback() {
     score: 91,
     payload: {
       adjusted_score: 128,
+      data_age_days: 0,
       signal_quality: "FRESH",
       transition_label: "Fresh Setup To Buy",
       market_permission: "UNKNOWN",
@@ -203,6 +502,8 @@ function auditSupabaseFallback() {
     score: 99,
     payload: {
       market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      walk_forward_permission: "ALLOW",
       risk_permission: "ALLOW",
       next_day_bias: "BULLISH CONFIRM",
       next_day_bias_score: 82,
@@ -223,14 +524,30 @@ function auditSupabaseFallback() {
       execution_priority: 1,
       freshness_status: "LIVE_OR_CURRENT",
       freshness_block: "NO",
-      data_age_days: 1,
+      data_age_days: 0,
       feedback_quality: "WORKING",
       feedback_return_pct: 4.2,
       feedback_max_drawdown_pct: -1.1,
       feedback_stop_hit: "NO",
       learning_sample_count: 12,
+      learning_working_rate: 0.67,
+      learning_failed_rate: 0.17,
+      learning_trap_avoided_rate: 0.83,
+      learning_avg_score: 4.2,
+      learning_adjustment: 1.5,
+      learning_distinct_ticker_count: 8,
+      learning_evaluation_date_count: 6,
+      learning_evaluation_date_min: "2026-05-01",
+      learning_evaluation_date_max: "2026-06-15",
+      learning_window_start: "2026-05-01",
+      learning_window_end: "2026-06-15",
+      learning_model_version: "learning-v3",
+      learning_promotion_eligible: true,
+      learning_reporting_only: false,
+      learning_promotion_state: "PROMOTION_ELIGIBLE",
       learning_scope: "action/setup family",
       learning_key_used: "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY",
+      learning_plan: "Promotion evidence passed the producer checks.",
       data_provider: "polygon",
       data_provider_status: "LIVE_OK",
       data_provider_latency_ms: 180,
@@ -245,13 +562,114 @@ function auditSupabaseFallback() {
   assert(gated.payload.buy_tier === "A+ BUY", "execution-gated BUY row must keep execution tier");
   assert(gated.payload.freshness_block === "NO", "execution-gated BUY row must keep freshness gate state");
   assert(gated.payload.feedback_quality === "WORKING", "execution-gated BUY row must keep feedback state");
-  assert(gated.payload.learning_scope === "action/setup family", "execution-gated row must keep learning scope");
-  assert(gated.payload.learning_key_used === "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY", "execution-gated row must keep learning key");
-  assert(gated.learning_sample_count === 12, "execution-gated row must promote learning sample count to top level");
-  assert(gated.learning_scope === "action/setup family", "execution-gated row must promote learning scope to top level");
-  assert(gated.learning_key_used === "BUY CANDIDATE|BREAKOUT BUY|ANY|ANY", "execution-gated row must promote learning key to top level");
+  LEARNING_EVIDENCE_FIELDS.forEach((field) => {
+    assert(gated.payload[field] !== undefined, `execution-gated row must retain ${field} in payload`);
+    assert(gated[field] !== undefined, `execution-gated row must promote ${field} to top level`);
+    assert(gated[field] === gated.payload[field], `execution-gated row must keep ${field} consistent across DTO shapes`);
+  });
   assert(gated.payload.data_provider === "polygon", "execution-gated BUY row must keep data provider");
   assert(gated.payload.data_provider_status === "LIVE_OK", "execution-gated BUY row must keep data provider status");
+
+  const unsafeGates = [
+    {
+      name: "blocked ticker gate",
+      row: {
+        ticker: "BLOCKED",
+        action: "BUY CANDIDATE",
+        score: 98,
+        payload: { market_permission: "ALLOW", ticker_permission: "BLOCK", risk_permission: "ALLOW", data_age_days: 0 },
+      },
+    },
+    {
+      name: "blocked walk-forward gate",
+      row: {
+        ticker: "WALK_BLOCKED",
+        action: "BUY CANDIDATE",
+        score: 98,
+        payload: { market_permission: "ALLOW", ticker_permission: "ALLOW", walk_forward_permission: "BLOCK", risk_permission: "ALLOW", data_age_days: 0 },
+      },
+    },
+    {
+      name: "malformed market gate",
+      row: {
+        ticker: "MALFORMED",
+        action: "BUY CANDIDATE",
+        score: 98,
+        payload: { market_permission: "GREEN", ticker_permission: "ALLOW", risk_permission: "ALLOW", data_age_days: 0 },
+      },
+    },
+    {
+      name: "contradictory market gate",
+      row: {
+        ticker: "CONTRADICTORY",
+        action: "BUY CANDIDATE",
+        score: 98,
+        market_permission: "ALLOW",
+        payload: { market_permission: "BLOCK", ticker_permission: "ALLOW", risk_permission: "ALLOW", data_age_days: 0 },
+      },
+    },
+  ].map(({ name, row }) => ({ name, dto: rowDto(row) }));
+  unsafeGates.forEach(({ name, dto }) => {
+    assert(!isBuyLike(dto), `${name} must not preserve a BUY-like action`);
+    assert(adjustedScore(dto) <= 49, `${name} must be capped below actionable rank`);
+  });
+
+  const personalityBlocked = rowDto({
+    ticker: "PERSONALITY_BLOCKED",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    score: 98,
+    personality_setup_allowed: "YES",
+    payload: {
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      personality_setup_allowed: "NO",
+      data_age_days: 0,
+    },
+  });
+  assert(!isBuyLike(personalityBlocked), "personality_setup_allowed=NO must block a BUY-like action even when the row is contradictory");
+  assert(personalityBlocked.payload.personality_setup_allowed === "NO", "personality NO must win over a contradictory top-level YES");
+  assert(personalityBlocked.payload.reason_codes.includes("personality_setup_not_allowed"), "personality block must be auditable");
+  assert(adjustedScore(personalityBlocked) <= 49, "personality-blocked BUY row must be capped below actionable rank");
+
+  const staleContradiction = rowDto({
+    ticker: "STALE",
+    action: "BUY CANDIDATE",
+    score: 98,
+    payload: {
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      data_age_days: 1,
+      freshness_block: "NO",
+      freshness_status: "LIVE_OR_CURRENT",
+    },
+  });
+  assert(staleContradiction.action === "SETUP FORMING", "stale age must downgrade a contradictory fresh BUY row");
+  assert(staleContradiction.payload.freshness_block === "YES", "stale age must override freshness_block=NO");
+  assert(staleContradiction.payload.freshness_status === "STALE_BLOCK", "stale age must override a contradictory fresh status");
+  assert(adjustedScore(staleContradiction) <= 49, "stale age must cap the contradictory fresh row");
+
+  const dateAgeContradiction = rowDto({
+    ticker: "DATE_CONTRADICTION",
+    data_date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    score: 98,
+    payload: {
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      data_age_days: 0,
+      freshness_block: "NO",
+      freshness_status: "LIVE_OR_CURRENT",
+    },
+  });
+  assert(dateAgeContradiction.action === "SETUP FORMING", "data_date contradicting data_age_days=0 must downgrade a BUY row");
+  assert(dateAgeContradiction.payload.freshness_block === "YES", "data_date contradiction must block execution");
+  assert(dateAgeContradiction.payload.freshness_status === "STALE_BLOCK", "data_date contradiction must replace fresh status");
+  assert(dateAgeContradiction.payload.reason_codes.includes("data_age_date_contradiction"), "data_date contradiction must be auditable");
+  assert(adjustedScore(dateAgeContradiction) <= 49, "data_date contradiction must cap actionable rank");
 
   const antiBullTrap = rowDto({
     ticker: "TRAP",
@@ -296,6 +714,13 @@ function auditSupabaseFallback() {
     gatedAction: gated.action,
     gatedGates: gateValues(gated),
     gatedProvider: gated.payload.data_provider,
+    unsafeGateActions: unsafeGates.map(({ dto }) => dto.action),
+    personalityBlockedAction: personalityBlocked.action,
+    personalityBlockedScore: adjustedScore(personalityBlocked),
+    staleContradictionAction: staleContradiction.action,
+    staleContradictionBlock: staleContradiction.payload.freshness_block,
+    dateAgeContradictionAction: dateAgeContradiction.action,
+    dateAgeContradictionBlock: dateAgeContradiction.payload.freshness_block,
     antiBullTrapAction: antiBullTrap.action,
     antiBullTrapLevel: antiBullTrap.payload.anti_signal_level,
     antiBullTrapTier: antiBullTrap.payload.buy_tier,
@@ -390,7 +815,7 @@ function auditTickerDetailMerge() {
   assert(merged.action === "EXIT PRESSURE", "ticker detail latest row must use snapshot action");
   assert(merged.adjusted_score === 12.7, "ticker detail latest row top-level score must match snapshot adjusted score");
   assert(merged.payload.signal_quality === "EXIT RISK", "ticker detail latest row must use snapshot quality");
-  assert(gateValues(merged).join(",") === "ALLOW,ALLOW", "ticker detail latest row must use snapshot execution gates");
+  assert(gateValues(merged).join(",") === "ALLOW,CAUTION,NONE,ALLOW", "ticker detail latest row must use snapshot execution gates");
 
   return {
     action: merged.action,
@@ -430,17 +855,29 @@ function auditRunHealthProviderPayload() {
   return dto.payload;
 }
 
-const result = {
-  staticFallback: auditStaticFallback(),
-  staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
-  supabaseFallback: auditSupabaseFallback(),
-  historicalReplayDto: auditHistoricalReplayDto(),
-  searchBehavior: auditSearchBehavior(),
-  decisionFunnelUi: auditDecisionFunnelUi(),
-  storageGuard: auditStorageGuard(),
-  partialRunStatus: auditPartialRunStatus(),
-  runHealthProviders: auditRunHealthProviderPayload(),
-  tickerDetailMerge: auditTickerDetailMerge(),
-};
+async function main() {
+  const result = {
+    staticFallback: auditStaticFallback(),
+    staticFallbackNormalization: auditStaticFallbackNormalization(),
+    browserFallbackNormalization: await auditBrowserFallbackNormalization(),
+    staticLearningEvidenceFallback: auditStaticLearningEvidenceFallback(),
+    staticTickerFallback: auditStaticTickerFallback(["AVGO", "CRWV", "ZM", "MU"]),
+    publishedFallbackContract: await auditPublishedFallbackContract(),
+    supabaseFallback: auditSupabaseFallback(),
+    historicalReplayDto: auditHistoricalReplayDto(),
+    searchBehavior: auditSearchBehavior(),
+    decisionFunnelUi: auditDecisionFunnelUi(),
+    learningReadoutUi: auditLearningReadoutUi(),
+    storageGuard: auditStorageGuard(),
+    partialRunStatus: auditPartialRunStatus(),
+    runHealthProviders: auditRunHealthProviderPayload(),
+    tickerDetailMerge: auditTickerDetailMerge(),
+  };
 
-console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result, null, 2));
+}
+
+main().catch((error) => {
+  console.error(error.stack || error.message || error);
+  process.exitCode = 1;
+});

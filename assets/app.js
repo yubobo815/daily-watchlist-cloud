@@ -5,7 +5,7 @@ const UI_LABELS = {
     "SETUP FORMING": "BUILDING",
     "WATCH TREND": "WATCH",
     "EXIT PRESSURE": "EXIT",
-    "WAIT": "WAIT",
+    "WAIT": "AVOID",
     "WAIT / AVOID": "AVOID"
   },
   setup: {
@@ -145,7 +145,8 @@ const JSON_CACHE_PREFIX = "daily-trade-copilot:json:v1:";
 const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const FOCUS_PIN_KEY = "daily-trade-copilot:focus-pin:v1";
-const STATIC_FALLBACK_MAX_AGE_DAYS = 10;
+const STATIC_FALLBACK_SCORE_CAP = 49;
+const STATIC_FALLBACK_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
 const PUBLISHED_LATEST_JSON_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/latest.json";
 const PUBLISHED_HISTORY_JSON_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/history.json";
 const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
@@ -621,19 +622,23 @@ function payloadNumeric(row, key) {
 function reasonCodes(row) {
   const raw = payloadValue(row, "reason_codes");
   if (!raw) return [];
-  if (Array.isArray(raw)) return raw.filter(Boolean);
+  const normalize = (values) => values
+    .flatMap((value) => String(value ?? "").split(","))
+    .map((item) => item.trim().replace(/^\[+|\]+$/g, "").replace(/^['\"]|['\"]$/g, "").trim())
+    .filter(Boolean);
+  if (Array.isArray(raw)) return normalize(raw);
   if (typeof raw === "string") {
+    let source = raw.trim();
     try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+      const parsed = JSON.parse(source);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      if (typeof parsed !== "string") return [];
+      source = parsed.trim();
     } catch {
-      return raw
-        .replace(/^\s*\[/, "")
-        .replace(/\]\s*$/, "")
-        .split(",")
-        .map((item) => item.trim().replace(/^['\"]|['\"]$/g, ""))
-        .filter(Boolean);
+      // CSV serialization can preserve a Python-list string inside JSON quotes.
+      source = source.replace(/^['\"]|['\"]$/g, "");
     }
+    return normalize([source]);
   }
   return [];
 }
@@ -772,6 +777,8 @@ function permissionTone(value) {
 function renderPermissionGates(row) {
   const gates = [
     ["M", payloadValue(row, "market_permission")],
+    ["T", payloadValue(row, "ticker_permission")],
+    ["W", payloadValue(row, "walk_forward_permission")],
     ["R", payloadValue(row, "risk_permission")]
   ];
   return `<span class="gate-stack">${gates.map(([label, value]) => `
@@ -782,6 +789,8 @@ function renderPermissionGates(row) {
 function auditGateValues(row) {
   return [
     payloadValue(row, "market_permission"),
+    payloadValue(row, "ticker_permission"),
+    payloadValue(row, "walk_forward_permission"),
     payloadValue(row, "risk_permission")
   ].map((value) => String(value || "UNKNOWN").toUpperCase());
 }
@@ -901,19 +910,56 @@ function learningReadout(row) {
   const scope = payloadValue(row, "learning_scope");
   const action = String(row?.action || "").toUpperCase();
   const defensiveAction = action === "WAIT" || action === "WAIT / AVOID" || action === "EXIT PRESSURE";
+  const evidenceDetails = learningEvidenceDetails(row, samples, scope);
 
   if (!Number.isFinite(samples) || samples <= 0) {
-    return "pending: no settled peer signal samples yet";
+    return `pending: no settled peer signal samples yet${evidenceDetails}`;
   }
 
   const sampleText = `${fmtNumber(samples, 0)} peer signal samples`;
   const scopeText = scope ? ` / ${scope}` : "";
   if (defensiveAction) {
-    return `${sampleText} / defensive only; no bullish promotion${scopeText}`;
+    return `${sampleText} / defensive only; no bullish promotion${scopeText}${evidenceDetails}`;
   }
 
   const adjustmentText = Number.isFinite(adjustment) ? ` / ${fmtSignedNumber(adjustment, 1)} pts` : "";
-  return `${sampleText}${adjustmentText}${scopeText}`;
+  return `${sampleText}${adjustmentText}${scopeText}${evidenceDetails}`;
+}
+
+function learningEvidenceDetails(row, samples, scope) {
+  const distinctTickers = Number(payloadValue(row, "learning_distinct_ticker_count"));
+  const evaluationDates = Number(payloadValue(row, "learning_evaluation_date_count"));
+  const dateMin = payloadValue(row, "learning_evaluation_date_min");
+  const dateMax = payloadValue(row, "learning_evaluation_date_max");
+  const windowStart = payloadValue(row, "learning_window_start");
+  const windowEnd = payloadValue(row, "learning_window_end");
+  const modelVersion = payloadValue(row, "learning_model_version") || payloadValue(row, "entry_model_version") || payloadValue(row, "model_version");
+  const plan = String(payloadValue(row, "learning_plan") || "").toLowerCase();
+  const promotionEligible = learningBoolean(payloadValue(row, "learning_promotion_eligible"));
+  const reportingOnly = learningBoolean(payloadValue(row, "learning_reporting_only"));
+  const promotionState = String(payloadValue(row, "learning_promotion_state") || "").trim().toUpperCase();
+  const details = [];
+  if (Number.isFinite(distinctTickers)) details.push(`${fmtNumber(distinctTickers, 0)} tickers`);
+  if (Number.isFinite(evaluationDates)) details.push(`${fmtNumber(evaluationDates, 0)} dates`);
+  if (dateMin || dateMax) details.push(`range ${dateMin || "?"} to ${dateMax || "?"}`);
+  if ((windowStart || windowEnd) && (windowStart !== dateMin || windowEnd !== dateMax)) details.push(`window ${windowStart || "?"} to ${windowEnd || "?"}`);
+  if (modelVersion) details.push(`model ${modelVersion}`);
+  else details.push("model version pending");
+  if (samples > 0 || Number.isFinite(distinctTickers) || Number.isFinite(evaluationDates) || plan) {
+    // Counts describe evidence, but only the producer can approve a promotion.
+    const eligible = Boolean(modelVersion)
+      && promotionEligible === true
+      && reportingOnly !== true
+      && promotionState !== "REPORTING_ONLY";
+    details.push(eligible ? "promotion evidence eligible" : "reporting-only");
+  }
+  return details.length ? ` / ${details.join(" · ")}` : "";
+}
+
+function learningBoolean(value) {
+  if (value === true || String(value).toLowerCase() === "true") return true;
+  if (value === false || String(value).toLowerCase() === "false") return false;
+  return null;
 }
 
 function cacheKeyFor(path, prefix = JSON_CACHE_PREFIX) {
@@ -1326,7 +1372,7 @@ function renderScoreBreakdown(row) {
   const dataProvider = payloadValue(row, "data_provider") || "unknown";
   const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
   const items = [
-    ["Execution Tier", buyTier],
+    ["Scanner Rank", buyTier],
     ["Context", `${contextualOverlay}${contextualOverlayRaw && Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
     ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
     ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
@@ -1517,21 +1563,81 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   renderMarketRail(runInfo, rows);
 }
 
-function fallbackAgeDays(runDate) {
-  if (!runDate) return Infinity;
-  const parsed = new Date(`${runDate}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return Infinity;
-  return Math.floor((Date.now() - parsed.getTime()) / 86400000);
-}
-
-function assertFreshStaticFallback(runDate) {
-  if (fallbackAgeDays(runDate) > STATIC_FALLBACK_MAX_AGE_DAYS) {
-    throw new Error("Live data is unavailable and the offline archive is too old to display safely.");
-  }
-}
-
 function staticFallbackRunDate(payload) {
   return payload?.run_date || payload?.latest || payload?.runInfo?.run_date || payload?.runInfo?.latest_data_date || "";
+}
+
+function staticFallbackNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function capStaticFallbackScore(value, cap = STATIC_FALLBACK_SCORE_CAP) {
+  const score = staticFallbackNumber(value);
+  return score === null ? value : Math.min(score, cap);
+}
+
+function appendStaticFallbackReason(payload, code) {
+  const raw = payload.reason_codes;
+  const codes = Array.isArray(raw)
+    ? [...raw]
+    : (typeof raw === "string" && raw ? raw.split(",").map((value) => value.trim()) : []);
+  if (!codes.includes(code)) codes.push(code);
+  payload.reason_codes = codes.filter(Boolean);
+}
+
+function normalizeStaticFallbackRow(row, fallbackRunDate = "") {
+  const next = { ...(row || {}) };
+  const payload = next.payload && typeof next.payload === "object" ? { ...next.payload } : {};
+  const plan = "Execution blocked: this is bundled fallback data. Refresh live Supabase data before acting.";
+
+  next.run_date = next.run_date || fallbackRunDate;
+  next.data_date = next.data_date || next.date || next.history_date;
+  next.name = displaySecurityName(next.name, next.ticker) || next.name || next.ticker;
+  payload.data_provider = "static_bundle";
+  payload.data_provider_status = "STALE_STATIC_FALLBACK";
+  payload.data_provider_error = payload.data_provider_error || "Live database unavailable; bundled static data is not execution-grade.";
+  next.learning_promotion_eligible = false;
+  payload.learning_promotion_eligible = false;
+  next.learning_reporting_only = true;
+  payload.learning_reporting_only = true;
+  next.learning_promotion_state = "REPORTING_ONLY";
+  payload.learning_promotion_state = "REPORTING_ONLY";
+  payload.data_age_days = payload.data_age_days ?? next.data_age_days ?? "";
+  payload.freshness_block = "YES";
+  payload.freshness_status = "STATIC_FALLBACK_BLOCK";
+  payload.freshness_plan = plan;
+  payload.buy_tier = payload.buy_tier === "EXIT RISK" ? payload.buy_tier : "SETUP ONLY";
+  payload.execution_priority = Math.max(Number(payload.execution_priority || 4), 4);
+  payload.execution_plan = plan;
+  payload.signal_quality = "STATIC FALLBACK - NEEDS GATE PROOF";
+  payload.transition_label = "Needs Gate Proof";
+  payload.transition_score = capStaticFallbackScore(payload.transition_score ?? next.transition_score ?? -25, -25);
+  payload.next_day_bias = "EXECUTION BLOCKED";
+  payload.next_day_plan = plan;
+  payload.audit_gate_status = "STATIC_FALLBACK";
+  payload.personality_setup_allowed = "NO";
+  next.personality_setup_allowed = "NO";
+
+  STATIC_FALLBACK_GATE_FIELDS.forEach((field) => {
+    payload[field] = "UNKNOWN";
+    next[field] = "UNKNOWN";
+  });
+  appendStaticFallbackReason(payload, "static_fallback_block");
+  appendStaticFallbackReason(payload, "data_stale_block");
+  appendStaticFallbackReason(payload, "missing_audit_gates");
+  appendStaticFallbackReason(payload, "personality_setup_not_allowed");
+
+  if (["BUY CANDIDATE", "STRONG CONTINUATION"].includes(next.action)) {
+    next.action = "SETUP FORMING";
+    payload.signal_stage = "SETUP";
+  }
+  payload.adjusted_score = capStaticFallbackScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
+  next.adjusted_score = capStaticFallbackScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
+  next.score = capStaticFallbackScore(next.score);
+  next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
+  next.payload = payload;
+  return next;
 }
 
 async function fetchJsonNoStore(path, errorPrefix = "Static fallback") {
@@ -1586,16 +1692,11 @@ function parseCsv(text) {
 
 async function loadStaticLatestRows() {
   const fallback = await fetchStaticJson("./data/latest.json", PUBLISHED_LATEST_JSON_URL);
-  assertFreshStaticFallback(staticFallbackRunDate(fallback));
+  const fallbackRunDate = staticFallbackRunDate(fallback);
   return {
-    latest: staticFallbackRunDate(fallback),
+    latest: fallbackRunDate,
     previous: "",
-    rows: (fallback.rows || []).map((row) => ({
-      ...row,
-      run_date: row.run_date || staticFallbackRunDate(fallback),
-      data_date: row.data_date || row.date,
-      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
-    })),
+    rows: (fallback.rows || []).map((row) => normalizeStaticFallbackRow(row, fallbackRunDate)),
     previousRows: [],
     runInfo: fallback.runInfo || null,
   };
@@ -1610,13 +1711,12 @@ async function loadPublishedTickerHistory(ticker) {
   if (!response.ok) throw new Error(`Published history returned HTTP ${response.status}.`);
   return parseCsv(await response.text())
     .filter((row) => normaliseTicker(row.ticker) === ticker)
-    .map((row) => ({
+    .map((row) => normalizeStaticFallbackRow({
       ...row,
       history_date: row.history_date || row.data_date || row.date || row.run_date,
       data_date: row.data_date || row.date || row.history_date,
       name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
-      payload: row,
-    }))
+    }, row.run_date))
     .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
 }
 
@@ -1624,13 +1724,12 @@ async function loadStaticTickerHistory(ticker) {
   const fallback = await fetchStaticJson("./data/history.json", PUBLISHED_HISTORY_JSON_URL);
   const rawRows = fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || (fallback.rows || []).filter((row) => row.ticker === ticker);
   let rows = rawRows
-    .map((row) => ({
+    .map((row) => normalizeStaticFallbackRow({
       ...row,
       history_date: row.data_date || row.date || row.run_date,
       data_date: row.data_date || row.date,
       name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
-      payload: row,
-    }))
+    }, fallback.run_date || ""))
     .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
   if (uniqueHistoryDateCount(rows) < 5) {
     rows = await loadPublishedTickerHistory(ticker);
@@ -1639,7 +1738,6 @@ async function loadStaticTickerHistory(ticker) {
     throw new Error("Live history is unavailable and the published archive does not have enough history for this ticker.");
   }
   const fallbackRunDate = fallback.run_date || rows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || rows[0]?.history_date || "";
-  assertFreshStaticFallback(fallbackRunDate);
   return {
     latest: rows[0]?.run_date || fallbackRunDate,
     name: rows[0]?.name || "",
@@ -1745,6 +1843,9 @@ function riskSummaryLabel(row) {
   const operator = String(payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL").toUpperCase();
   const riskPermission = String(payloadValue(row, "risk_permission") || "").toUpperCase();
   const marketPermission = String(payloadValue(row, "market_permission") || "").toUpperCase();
+  const tickerPermission = String(payloadValue(row, "ticker_permission") || "").toUpperCase();
+  const walkForwardPermission = String(payloadValue(row, "walk_forward_permission") || "").toUpperCase();
+  const personalityAllowed = String(payloadValue(row, "personality_setup_allowed") || "").toUpperCase();
   if (kind === "exit") return ["risk", "EXIT RISK"];
   if (kind === "avoid") return ["risk", "AVOID"];
   if (row.action === "WAIT") return ["watch", "NO EDGE"];
@@ -1752,7 +1853,7 @@ function riskSummaryLabel(row) {
   if (antiLevel === "BLOCK") return ["risk", "BLOCKED"];
   if (antiLevel === "CAUTION") return ["watch", "CAUTION"];
   if (payloadValue(row, "extension_state") === "EXTENDED") return ["watch", "EXTENDED"];
-  if (riskPermission === "BLOCK" || marketPermission === "BLOCK") return ["risk", "GATE BLOCK"];
+  if (riskPermission !== "ALLOW" || marketPermission !== "ALLOW" || tickerPermission !== "ALLOW" || walkForwardPermission !== "ALLOW" || personalityAllowed === "NO") return ["risk", "GATE BLOCK"];
   if (operator.includes("BULL_TRAP") || operator.includes("DISTRIBUTION") || operator.includes("SHORT")) return ["risk", shortOperatorPressure(operator)];
   if (operator.includes("ACCUMULATION") || operator.includes("ABSORPTION") || operator.includes("BEAR_TRAP") || operator.includes("SQUEEZE")) return ["constructive", shortOperatorPressure(operator)];
   return ["strong", "OK"];
@@ -1893,7 +1994,6 @@ function renderTickerDetailPanel() {
     </dl>
     <section class="detail-rationale"><span class="eyebrow">Why this state</span><p>${escapeHtml(whyThisMatters(row).slice(0, 2).join(" · ") || behaviorDetail(row))}</p></section>
     ${target ? `<details class="detail-diagnostics"><summary>More context</summary><p>Target estimate ${escapeHtml(fmtNumber(target, 2))} · Operator state ${escapeHtml(operator)}</p></details>` : ""}
-    <p class="detail-confirm">Confirm any BUY on the TradingView Pine chart before acting.</p>
   `;
 }
 
@@ -2449,7 +2549,6 @@ function renderLatestHistoryPanel(latest) {
       </div>
       <p class="latest-rationale">${escapeHtml(whyThisMatters(latest).slice(0, 2).join(" · ") || behaviorDetail(latest))}</p>
       <details class="detail-diagnostics"><summary>Diagnostics</summary>${renderScoreBreakdown(latest)}<p>${escapeHtml(`Pattern ${setupLabel(latest.setup)} · Trend quality ${fmtConviction(latest)} / 100`)}</p></details>
-      <p class="pine-confirmation">Confirm a BUY on the TradingView Pine chart before acting.</p>
     </div>
   `;
 }

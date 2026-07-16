@@ -3,6 +3,14 @@ const historyData = require("../data/history.json");
 
 const AUDIT_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
 const UNGATED_SCORE_CAP = 49;
+const BUY_LIKE_ACTIONS = new Set(["BUY CANDIDATE", "STRONG CONTINUATION"]);
+const LEARNING_EVIDENCE_FIELDS = [
+  "learning_distinct_ticker_count",
+  "learning_evaluation_date_count",
+  "learning_evaluation_date_min",
+  "learning_evaluation_date_max",
+  "learning_model_version",
+];
 
 function normalizeTicker(value) {
   return String(value || "").trim().toUpperCase().replace("BRK.B", "BRK-B");
@@ -106,14 +114,21 @@ function applyAntiSignalFallback(row) {
   return next;
 }
 
-function hasKnownAuditGate(value) {
-  const text = String(value || "").toUpperCase();
-  return Boolean(text) && text !== "UNKNOWN";
-}
-
 function conservativeFallbackRow(row) {
   const next = { ...(row || {}) };
   const payload = next.payload && typeof next.payload === "object" ? { ...next.payload } : {};
+  LEARNING_EVIDENCE_FIELDS.forEach((field) => {
+    if (next[field] === undefined && payload[field] !== undefined) next[field] = payload[field];
+    if (payload[field] === undefined && next[field] !== undefined) payload[field] = next[field];
+  });
+  // Bundled data cannot establish that historical learning is eligible to
+  // promote a current decision, regardless of the source snapshot's value.
+  next.learning_promotion_eligible = false;
+  payload.learning_promotion_eligible = false;
+  next.learning_reporting_only = true;
+  payload.learning_reporting_only = true;
+  next.learning_promotion_state = "REPORTING_ONLY";
+  payload.learning_promotion_state = "REPORTING_ONLY";
   payload.data_provider = "static_bundle";
   payload.data_provider_status = "STALE_STATIC_FALLBACK";
   payload.data_provider_error = payload.data_provider_error || "Live database unavailable; bundled static data is not execution-grade.";
@@ -130,27 +145,25 @@ function conservativeFallbackRow(row) {
   appendReasonCode(payload, "static_fallback_block");
   appendReasonCode(payload, "data_stale_block");
 
-  const hasAllGates = AUDIT_GATE_FIELDS.every((field) => hasKnownAuditGate(next[field] || payload[field]));
-  if (!hasAllGates) {
-    payload.market_permission = payload.market_permission || next.market_permission || "UNKNOWN";
-    payload.ticker_permission = payload.ticker_permission || next.ticker_permission || "UNKNOWN";
-    payload.walk_forward_permission = payload.walk_forward_permission || next.walk_forward_permission || "UNKNOWN";
-    payload.risk_permission = payload.risk_permission || next.risk_permission || "UNKNOWN";
-    payload.audit_gate_status = "MISSING";
-    payload.signal_quality = "STATIC FALLBACK - NEEDS GATE PROOF";
-    payload.transition_label = "Needs Gate Proof";
-    payload.transition_score = capScore(payload.transition_score ?? next.transition_score ?? -25, -25);
-    payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
-    next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
-    next.score = capScore(next.score);
-    appendReasonCode(payload, "missing_audit_gates");
-    next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
-    if (next.action === "BUY CANDIDATE" || next.action === "STRONG CONTINUATION") {
-      next.action = "SETUP FORMING";
-      payload.signal_stage = "SETUP";
-    }
-  }
-  if (next.action === "BUY CANDIDATE" || next.action === "STRONG CONTINUATION") {
+  // Bundled rows cannot prove current gates, even when the source snapshot had
+  // old ALLOW values. Overwrite both shapes because browser consumers read both.
+  AUDIT_GATE_FIELDS.forEach((field) => {
+    payload[field] = "UNKNOWN";
+    next[field] = "UNKNOWN";
+  });
+  payload.audit_gate_status = "STATIC_FALLBACK";
+  next.personality_setup_allowed = "NO";
+  payload.personality_setup_allowed = "NO";
+  payload.signal_quality = "STATIC FALLBACK - NEEDS GATE PROOF";
+  payload.transition_label = "Needs Gate Proof";
+  payload.transition_score = capScore(payload.transition_score ?? next.transition_score ?? -25, -25);
+  payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
+  next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
+  next.score = capScore(next.score);
+  appendReasonCode(payload, "missing_audit_gates");
+  appendReasonCode(payload, "personality_setup_not_allowed");
+  next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
+  if (BUY_LIKE_ACTIONS.has(next.action)) {
     next.action = "SETUP FORMING";
     payload.signal_stage = "SETUP";
   }

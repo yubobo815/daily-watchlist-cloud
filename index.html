@@ -76,13 +76,14 @@
             <span>Watchlist</span>
           </div>
         </div>
+        <p class="scanner-legend">Buy = scanner candidate; chart confirmation required; not trade execution.</p>
         <section class="controls">
           <div class="search-shell">
             <input id="search" class="search" type="search" placeholder="Search ticker or behavior..." autocomplete="off" inputmode="search">
             <button id="clear-search" class="search-clear hidden" type="button" aria-label="Clear search">Clear</button>
           </div>
           <select id="sort" class="control">
-            <option value="execution_priority-asc">Execution tier first</option>
+            <option value="execution_priority-asc">Scanner rank first</option>
             <option value="score-desc">Trend quality high to low</option>
             <option value="day_change_pct-desc">Best day change</option>
             <option value="day_change_pct-asc">Worst day change</option>
@@ -96,7 +97,7 @@
         </table>
         <div id="empty" class="empty hidden">No matching rows yet.</div>
       </section>
-      <aside id="ticker-detail-panel" class="ticker-detail-panel" aria-label="Selected ticker execution plan"></aside>
+      <aside id="ticker-detail-panel" class="ticker-detail-panel" aria-label="Selected ticker scanner review"></aside>
       </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
