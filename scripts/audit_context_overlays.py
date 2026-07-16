@@ -624,6 +624,22 @@ def audit_prediction_probabilities_are_smoothed_and_complete():
     assert_true(current["prediction_horizon_sessions"] == dwo.LEARNING_HORIZON_SESSIONS, "prediction must disclose its horizon")
 
 
+def audit_outcome_freezes_original_prediction():
+    prior = executable_prior(
+        prediction_upside_probability=0.62,
+        prediction_downside_probability=0.18,
+        prediction_no_edge_probability=0.20,
+        prediction_confidence=0.55,
+        prediction_state="CALIBRATED",
+    )
+    outcome = dwo.score_signal_horizon(
+        prior,
+        [executable_current(open=100, high=104, low=99, close=103)] * dwo.LEARNING_HORIZON_SESSIONS,
+    )
+    assert_true(outcome["prior_prediction_upside_probability"] == 0.62, "outcomes must retain the forecast made before evaluation")
+    assert_true(outcome["prior_prediction_state"] == "CALIBRATED", "outcomes must retain the original prediction state")
+
+
 def audit_learning_promotion_requires_all_execution_gates():
     key = dwo.learning_key_for(learning_confirmed_setup_row())
     stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, key)))
@@ -692,6 +708,7 @@ def main():
     audit_broad_learning_cannot_promote_score()
     audit_exact_learning_requires_diverse_evidence_for_promotion()
     audit_prediction_probabilities_are_smoothed_and_complete()
+    audit_outcome_freezes_original_prediction()
     audit_learning_promotion_requires_all_execution_gates()
     audit_replay_market_gate_matches_live_context()
     audit_replay_gate_cache_is_bounded_and_historical()
@@ -701,7 +718,7 @@ def main():
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 36,
+        "cases": 37,
     })
 
 

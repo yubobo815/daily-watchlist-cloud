@@ -268,6 +268,11 @@ create table if not exists public.watchlist_signal_outcomes (
   prior_buy_tier text,
   prior_operator_state text,
   prior_anti_signal_level text,
+  prior_prediction_upside_probability numeric,
+  prior_prediction_downside_probability numeric,
+  prior_prediction_no_edge_probability numeric,
+  prior_prediction_confidence numeric,
+  prior_prediction_state text,
   prior_close numeric,
   entry_model_version text,
   entry_eligible boolean,
@@ -510,6 +515,11 @@ alter table public.watchlist_signal_outcomes add column if not exists entry_mode
 alter table public.watchlist_signal_outcomes add column if not exists entry_eligible boolean;
 alter table public.watchlist_signal_outcomes add column if not exists entry_filled boolean;
 alter table public.watchlist_signal_outcomes add column if not exists entry_fill_est numeric;
+alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_upside_probability numeric;
+alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_downside_probability numeric;
+alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_no_edge_probability numeric;
+alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_confidence numeric;
+alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_state text;
 
 alter table public.watchlist_snapshots enable row level security;
 alter table public.watchlist_behavior_history enable row level security;
