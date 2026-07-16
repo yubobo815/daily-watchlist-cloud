@@ -4765,7 +4765,9 @@ def build_behavior_history(
     days: int = 30,
     benchmark_frames: Optional[dict[str, pd.DataFrame]] = None,
 ) -> list[dict]:
-    d = prepare(raw)
+    # Setup detection is history-wide but immutable for a fixed replay frame.
+    # Compute it once; each truncated replay slice then reuses only prior data.
+    d = ensure_setup_names(prepare(raw))
     if len(d) < 220:
         return []
 
