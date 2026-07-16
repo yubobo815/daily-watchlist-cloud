@@ -5813,6 +5813,7 @@ def main() -> None:
         except Exception as exc:
             print(f"Benchmark context unavailable for {benchmark}: {exc}")
     market_permission = market_permission_from_frames(benchmark_frames)
+    replay_days = max(args.history_days, args.learning_lookback_days)
 
     for ticker in tickers:
         try:
@@ -5826,13 +5827,13 @@ def main() -> None:
                 df = fetch_chart(ticker, years=args.years, refresh=args.refresh)
             row = classify_and_score(ticker, df, market_permission=market_permission)
             row = apply_data_provider_context(row, df)
-            ticker_history = build_behavior_history(ticker, df, days=args.history_days, benchmark_frames=benchmark_frames)
-            ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
-            if args.learning_lookback_days > args.history_days:
-                ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days, benchmark_frames=benchmark_frames)
-                ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
-            else:
-                ticker_learning_history = ticker_history
+            # Replay once at the longest required horizon. The displayed
+            # history is a trailing view of the same no-lookahead snapshots.
+            ticker_learning_history = build_behavior_history(
+                ticker, df, days=replay_days, benchmark_frames=benchmark_frames
+            )
+            ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
+            ticker_history = ticker_learning_history[-args.history_days:]
             row = apply_latest_signal_context(row, ticker_history)
             row.update(signal_outcome_from_history(row, ticker_history))
             if not args.skip_profiles:
@@ -5851,13 +5852,11 @@ def main() -> None:
                 df = cached_chart(ticker, years=args.years)
                 row = classify_and_score(ticker, df, market_permission=market_permission)
                 row = apply_data_provider_context(row, df)
-                ticker_history = build_behavior_history(ticker, df, days=args.history_days, benchmark_frames=benchmark_frames)
-                ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
-                if args.learning_lookback_days > args.history_days:
-                    ticker_learning_history = build_behavior_history(ticker, df, days=args.learning_lookback_days, benchmark_frames=benchmark_frames)
-                    ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
-                else:
-                    ticker_learning_history = ticker_history
+                ticker_learning_history = build_behavior_history(
+                    ticker, df, days=replay_days, benchmark_frames=benchmark_frames
+                )
+                ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
+                ticker_history = ticker_learning_history[-args.history_days:]
                 row = apply_latest_signal_context(row, ticker_history)
                 row.update(signal_outcome_from_history(row, ticker_history))
                 if not args.skip_profiles:
