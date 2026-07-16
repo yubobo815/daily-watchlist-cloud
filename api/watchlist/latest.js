@@ -38,14 +38,18 @@ module.exports = async function handler(request, response) {
       return;
     }
 
-    const latestRowsPromise = supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&run_date=eq.${encodeFilterValue(latest)}&order=score.desc`);
-    const previousRowsPromise = previous
-      ? supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&run_date=eq.${encodeFilterValue(previous)}&order=score.desc`)
-      : Promise.resolve([]);
-    const [latestRows, previousRows, latestRunInfo] = await Promise.all([
-      latestRowsPromise,
-      previousRowsPromise,
+    const [latestRunInfo, previousRunInfo] = await Promise.all([
       runInfo(latest),
+      previous ? runInfo(previous) : Promise.resolve(null),
+    ]);
+    const latestPublication = latestRunInfo?.publication_id || latestRunInfo?.payload?.publication_id;
+    const previousPublication = previousRunInfo?.publication_id || previousRunInfo?.payload?.publication_id;
+    if (!latestPublication) throw new Error("Latest validated publication is missing its id.");
+    const [latestRows, previousRows] = await Promise.all([
+      supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&run_date=eq.${encodeFilterValue(latest)}&publication_id=eq.${encodeFilterValue(latestPublication)}&order=score.desc`),
+      previous && previousPublication
+        ? supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&run_date=eq.${encodeFilterValue(previous)}&publication_id=eq.${encodeFilterValue(previousPublication)}&order=score.desc`)
+        : Promise.resolve([]),
     ]);
     if (!committedPublicationMatches(latestRunInfo, latestRows)) {
       response.setHeader("Cache-Control", "no-store");

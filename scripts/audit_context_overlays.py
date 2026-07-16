@@ -568,6 +568,8 @@ def audit_signal_outcome_history_is_paginated():
 
     def fake_select(path):
         calls.append(path)
+        if path.startswith("watchlist_refresh_runs?"):
+            return [{"payload": {"publication_id": "pub-validated", "sync_state": "complete"}}]
         offset = 1000 if "offset=1000" in path else 0
         count = 500 if offset else 1000
         return [
@@ -579,6 +581,7 @@ def audit_signal_outcome_history_is_paginated():
                 "learning_key": "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE",
                 "entry_model_version": dwo.LEARNING_MODEL_VERSION,
                 "forecast_learnable": True,
+                "payload": {"publication_id": "pub-validated"},
             }
             for index in range(count)
         ]

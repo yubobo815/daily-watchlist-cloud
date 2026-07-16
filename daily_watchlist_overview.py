@@ -1137,7 +1137,7 @@ def supabase_upsert_with_optional_outcome_columns(records: list[dict], conflict_
 
 def supabase_upsert_refresh_run(records: list[dict]) -> None:
     try:
-        supabase_upsert("watchlist_refresh_runs", records, ["run_date"])
+        supabase_upsert("watchlist_refresh_runs", records, ["publication_id"])
         return
     except RuntimeError as exc:
         message = str(exc).lower()
@@ -1158,189 +1158,7 @@ def supabase_upsert_refresh_run(records: list[dict]) -> None:
             stripped["payload"] = {**payload, **optional_payload}
             stripped_records.append(stripped)
         print("Supabase watchlist_refresh_runs optional health columns unavailable; storing full health in payload only.")
-        supabase_upsert("watchlist_refresh_runs", stripped_records, ["run_date"])
-
-
-def supabase_delete_older_than(table: str, date_column: str, cutoff_date: str) -> None:
-    url, key = supabase_credentials()
-    if not url or not key:
-        return
-
-    endpoint = f"{url}/rest/v1/{table}?{urllib.parse.quote(date_column)}=lt.{urllib.parse.quote(cutoff_date)}"
-    req = urllib.request.Request(
-        endpoint,
-        method="DELETE",
-        headers=supabase_headers(key),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status not in {200, 202, 204}:
-                raise RuntimeError(f"Supabase retention cleanup for {table} returned HTTP {resp.status}")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"Supabase retention cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
-
-
-def supabase_delete_other_runs(table: str, run_date: str) -> None:
-    """Keep one canonical replay run; historical outcomes have their own table."""
-    url, key = supabase_credentials()
-    if not url or not key:
-        return
-    endpoint = f"{url}/rest/v1/{table}?run_date=neq.{urllib.parse.quote(str(run_date))}"
-    req = urllib.request.Request(endpoint, method="DELETE", headers=supabase_headers(key))
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            if resp.status not in {200, 202, 204}:
-                raise RuntimeError(f"Supabase run cleanup for {table} returned HTTP {resp.status}")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"Supabase run cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
-
-
-def supabase_delete_run_ticker(table: str, run_date: str, ticker: str) -> None:
-    url, key = supabase_credentials()
-    if not url or not key or not ticker:
-        return
-
-    endpoint = (
-        f"{url}/rest/v1/{table}"
-        f"?run_date=eq.{urllib.parse.quote(str(run_date))}"
-        f"&ticker=eq.{urllib.parse.quote(str(ticker))}"
-    )
-    req = urllib.request.Request(
-        endpoint,
-        method="DELETE",
-        headers=supabase_headers(key),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status not in {200, 202, 204}:
-                raise RuntimeError(f"Supabase failed-ticker cleanup for {table} returned HTTP {resp.status}")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"Supabase failed-ticker cleanup for {table} failed with HTTP {exc.code}: {body}") from exc
-
-
-def supabase_delete_run_history_before(run_date: str, min_history_date: str) -> None:
-    url, key = supabase_credentials()
-    if not url or not key or not min_history_date:
-        return
-
-    endpoint = (
-        f"{url}/rest/v1/watchlist_behavior_history"
-        f"?run_date=eq.{urllib.parse.quote(str(run_date))}"
-        f"&history_date=lt.{urllib.parse.quote(str(min_history_date))}"
-    )
-    req = urllib.request.Request(
-        endpoint,
-        method="DELETE",
-        headers=supabase_headers(key),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status not in {200, 202, 204}:
-                raise RuntimeError(f"Supabase obsolete-history cleanup returned HTTP {resp.status}")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"Supabase obsolete-history cleanup failed with HTTP {exc.code}: {body}") from exc
-
-
-def postgrest_in_list(values: list[str]) -> str:
-    return ",".join(urllib.parse.quote(str(value), safe="") for value in values if str(value))
-
-
-def supabase_delete_run_not_in(table: str, run_date: str, column: str, allowed_values: list[str]) -> None:
-    url, key = supabase_credentials()
-    values = sorted({str(value) for value in allowed_values if str(value)})
-    if not url or not key or not values:
-        return
-
-    endpoint = (
-        f"{url}/rest/v1/{table}"
-        f"?run_date=eq.{urllib.parse.quote(str(run_date))}"
-        f"&{urllib.parse.quote(column)}=not.in.({postgrest_in_list(values)})"
-    )
-    req = urllib.request.Request(
-        endpoint,
-        method="DELETE",
-        headers=supabase_headers(key),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status not in {200, 202, 204}:
-                raise RuntimeError(f"Supabase replacement cleanup for {table}.{column} returned HTTP {resp.status}")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"Supabase replacement cleanup for {table}.{column} failed with HTTP {exc.code}: {body}") from exc
-
-
-def cleanup_supabase_run_replacement(run_date: str, report_records: list[dict], history_records: list[dict]) -> None:
-    tickers = sorted({str(record.get("ticker") or "").strip().upper() for record in report_records if record.get("ticker")})
-    history_dates = sorted({str(record.get("history_date") or "") for record in history_records if record.get("history_date")})
-
-    if tickers:
-        supabase_delete_run_not_in("watchlist_snapshots", run_date, "ticker", tickers)
-        supabase_delete_run_not_in("watchlist_behavior_history", run_date, "ticker", tickers)
-    if history_dates:
-        supabase_delete_run_not_in("watchlist_behavior_history", run_date, "history_date", history_dates)
-
-    print(
-        f"Supabase replacement cleanup complete: kept {len(tickers)} ticker(s) "
-        f"and {len(history_dates)} history date(s) for {run_date}."
-    )
-
-
-def cleanup_supabase_obsolete_history(run_date: str, history_records: list[dict]) -> None:
-    history_dates = sorted({
-        str(record.get("history_date") or "")
-        for record in history_records
-        if record.get("history_date")
-    })
-    if not history_dates:
-        return
-
-    supabase_delete_run_history_before(run_date, history_dates[0])
-    print(f"Supabase obsolete-history cleanup complete: removed same-day history before {history_dates[0]}.")
-
-
-def cleanup_supabase_failed_tickers(run_date: str, run_metadata: Optional[dict]) -> None:
-    failures = ((run_metadata or {}).get("payload") or {}).get("failures") or []
-    tickers = sorted({
-        str(item.get("ticker") or "").strip().upper()
-        for item in failures
-        if isinstance(item, dict) and item.get("ticker")
-    })
-    if not tickers:
-        return
-
-    deleted = 0
-    for ticker in tickers:
-        for table in ("watchlist_snapshots", "watchlist_behavior_history"):
-            supabase_delete_run_ticker(table, run_date, ticker)
-        deleted += 1
-    print(f"Supabase failed-ticker cleanup complete: removed same-day rows for {deleted} failed ticker(s).")
-
-
-def cleanup_supabase_retention(run_date: str) -> None:
-    run_day = datetime.fromisoformat(run_date).date()
-    targets = [
-        ("watchlist_snapshots", "run_date", SUPABASE_SNAPSHOT_RETENTION_DAYS),
-        ("watchlist_signal_outcomes", "evaluation_run_date", SUPABASE_OUTCOME_RETENTION_DAYS),
-        ("watchlist_refresh_runs", "run_date", SUPABASE_REFRESH_RUN_RETENTION_DAYS),
-    ]
-    for table, date_column, retention_days in targets:
-        if retention_days > 0:
-            cutoff = (run_day - timedelta(days=retention_days)).isoformat()
-            supabase_delete_older_than(table, date_column, cutoff)
-
-    # The application serves only the latest replay run. Learning reads the
-    # compact outcome table, so prior replay runs are pure duplicated storage.
-    supabase_delete_other_runs("watchlist_behavior_history", run_date)
-    print(
-        "Supabase retention cleanup complete: "
-        f"snapshots={SUPABASE_SNAPSHOT_RETENTION_DAYS}d, outcomes={SUPABASE_OUTCOME_RETENTION_DAYS}d, "
-        f"runs={SUPABASE_REFRESH_RUN_RETENTION_DAYS}d, behavior_history=latest run only."
-    )
+        supabase_upsert("watchlist_refresh_runs", stripped_records, ["publication_id"])
 
 
 def optional_signal_values(row: dict) -> dict:
@@ -1434,6 +1252,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     for record in report.to_dict(orient="records"):
         row = clean_record(record)
         report_record = {
+            "publication_id": row.get("publication_id"),
             "run_date": run_date,
             "ticker": row.get("ticker"),
             "name": row.get("name"),
@@ -1472,6 +1291,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
         for record in history.to_dict(orient="records"):
             row = clean_record(record)
             history_record = {
+                "publication_id": row.get("publication_id"),
                 "run_date": run_date,
                 "ticker": row.get("ticker"),
                 "history_date": row.get("date"),
@@ -1513,6 +1333,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
                     "signal_run_date": row.get("signal_run_date"),
                     "evaluation_run_date": row.get("evaluation_run_date"),
                     "ticker": row.get("ticker"),
+                    "publication_id": row.get("publication_id"),
                     "prior_action": row.get("prior_action"),
                     "prior_setup": row.get("prior_setup"),
                     "prior_buy_tier": row.get("prior_buy_tier"),
@@ -1557,19 +1378,22 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     history_synced = 0
     outcome_synced = 0
     try:
-        supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["run_date", "ticker"])
+        supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["publication_id", "ticker"])
         snapshot_synced = len(report_records)
     except Exception as exc:
         print(f"Supabase snapshot sync skipped: {exc}")
     try:
-        supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["run_date", "ticker", "history_date"])
+        supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["publication_id", "ticker", "history_date"])
         history_synced = len(history_records)
     except Exception as exc:
         print(f"Supabase behavior-history sync skipped: {exc}")
     try:
         # Outcomes can grow well beyond normal snapshot batches. Keep this
         # non-critical archive write bounded so it cannot block publishing.
-        supabase_upsert_with_optional_outcome_columns(outcome_records, ["signal_run_date", "evaluation_run_date", "ticker"])
+        supabase_upsert_with_optional_outcome_columns(
+            outcome_records,
+            ["publication_id", "signal_run_date", "evaluation_run_date", "ticker"],
+        )
         outcome_synced = len(outcome_records)
     except Exception as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
@@ -1595,19 +1419,6 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
             supabase_upsert_refresh_run([final_metadata])
         except Exception as exc:
             print(f"Supabase final run-health sync skipped: {exc}")
-    if sync_complete:
-        try:
-            cleanup_supabase_run_replacement(run_date, report_records, history_records)
-        except Exception as exc:
-            print(f"Supabase replacement cleanup skipped: {exc}")
-        try:
-            cleanup_supabase_obsolete_history(run_date, history_records)
-        except Exception as exc:
-            print(f"Supabase obsolete-history cleanup skipped: {exc}")
-        try:
-            cleanup_supabase_failed_tickers(run_date, run_metadata)
-        except Exception as exc:
-            print(f"Supabase failed-ticker cleanup skipped: {exc}")
     print(
         f"Synced {snapshot_synced}/{len(report_records)} snapshot rows, "
         f"{history_synced}/{len(history_records)} history rows, and "
@@ -2420,14 +2231,20 @@ def merge_payload_row(row: dict) -> dict:
 
 def fetch_previous_snapshot_rows(run_date: str) -> list[dict]:
     try:
-        date_rows = supabase_select(
-            f"watchlist_snapshots?select=run_date&run_date=lt.{urllib.parse.quote(run_date)}&order=run_date.desc&limit=1"
+        run_rows = supabase_select(
+            "watchlist_refresh_runs?select=run_date,publication_id,payload&status=in.(ok,degraded)&"
+            f"run_date=lt.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
         )
-        if not date_rows:
+        if not run_rows:
             return []
-        previous_run_date = date_rows[0].get("run_date")
+        previous_run_date = run_rows[0].get("run_date")
+        previous_publication_id = run_rows[0].get("publication_id") or (run_rows[0].get("payload") or {}).get("publication_id")
+        if not previous_publication_id:
+            return []
         rows = supabase_select(
-            f"watchlist_snapshots?select=*&run_date=eq.{urllib.parse.quote(str(previous_run_date))}&limit=1000"
+            "watchlist_snapshots?select=*&"
+            f"run_date=eq.{urllib.parse.quote(str(previous_run_date))}&"
+            f"publication_id=eq.{urllib.parse.quote(str(previous_publication_id))}&limit=1000"
         )
         return [merge_payload_row(row) for row in rows]
     except RuntimeError as exc:
@@ -2996,6 +2813,20 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
     try:
         run_timestamp = pd.Timestamp(run_date)
         cutoff = (run_timestamp - pd.Timedelta(days=max(90, LEARNING_LOOKBACK_DAYS * 3))).date().isoformat()
+        validated_runs = supabase_select(
+            "watchlist_refresh_runs?select=payload&status=in.(ok,degraded)&"
+            f"run_date=lt.{urllib.parse.quote(run_date)}&run_date=gte.{urllib.parse.quote(cutoff)}&limit=200"
+        )
+        publication_ids = sorted({
+            str((record.get("payload") or {}).get("publication_id") or "")
+            for record in validated_runs
+            if isinstance(record.get("payload"), dict)
+            and (record.get("payload") or {}).get("sync_state") == "complete"
+            and (record.get("payload") or {}).get("publication_id")
+        })
+        if not publication_ids:
+            return load_local_signal_outcomes(run_date)
+        publication_filter = ",".join(urllib.parse.quote(value, safe="") for value in publication_ids)
         rows: list[dict] = []
         page_size = 1000
         for offset in range(0, 25000, page_size):
@@ -3004,6 +2835,7 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
                 "select=*&"
                 f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
                 f"evaluation_run_date=gte.{urllib.parse.quote(cutoff)}&"
+                f"publication_id=in.({publication_filter})&"
                 "outcome_label=neq.PENDING&"
                 f"order=evaluation_run_date.desc,signal_run_date.desc,ticker.asc&limit={page_size}&offset={offset}"
             )
@@ -3496,6 +3328,8 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
             row["learning_evaluation_date_max"] = report_stats.get("evaluation_date_max", "") if report_stats else ""
             row["learning_calibration_sample_count"] = int(report_stats.get("calibration_sample_count", 0)) if report_stats else 0
             row["learning_execution_sample_count"] = int(report_stats.get("execution_sample_count", 0)) if report_stats else 0
+            row["learning_execution_distinct_ticker_count"] = int(report_stats.get("execution_distinct_ticker_count", 0)) if report_stats else 0
+            row["learning_execution_evaluation_date_count"] = int(report_stats.get("execution_evaluation_date_count", 0)) if report_stats else 0
             report_brier = report_stats.get("brier_score") if report_stats else None
             row["learning_brier_score"] = round(float(report_brier), 4) if report_brier is not None else ""
             row["learning_window_start"] = row["learning_evaluation_date_min"]
@@ -3633,6 +3467,8 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         row["learning_evaluation_date_max"] = stats.get("evaluation_date_max", "")
         row["learning_calibration_sample_count"] = calibration_samples
         row["learning_execution_sample_count"] = execution_samples
+        row["learning_execution_distinct_ticker_count"] = execution_distinct_tickers
+        row["learning_execution_evaluation_date_count"] = execution_evaluation_dates
         row["learning_brier_score"] = round(float(brier_score), 4) if brier_score is not None else ""
         row["learning_window_start"] = row["learning_evaluation_date_min"]
         row["learning_window_end"] = row["learning_evaluation_date_max"]
@@ -6526,6 +6362,8 @@ def main() -> None:
     previous_rows = fetch_previous_snapshot_rows(today) or load_previous_local_report(today)
     daily_outcomes = build_daily_signal_outcomes(previous_rows, rows, today)
     outcomes = combine_signal_outcomes(backfilled_outcomes, daily_outcomes)
+    if not outcomes.empty:
+        outcomes["publication_id"] = publication_id
     attach_latest_outcomes(rows, outcomes)
     report = pd.DataFrame(rows)
     sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
@@ -6559,6 +6397,7 @@ def main() -> None:
     if failures and not rows:
         run_status = "failed"
     run_metadata = {
+        "publication_id": publication_id,
         "run_date": today,
         "status": run_status,
         "live_access_ok": live_access_ok,
@@ -6584,14 +6423,18 @@ def main() -> None:
             "signal_outcomes": outcome_summary,
             "backfilled_signal_outcomes": int(len(backfilled_outcomes)),
             "learning_lookback_days": args.learning_lookback_days,
+            "learning_model_version": LEARNING_MODEL_VERSION,
+            "learning_horizon_sessions": LEARNING_HORIZON_SESSIONS,
             "learning_evaluation_date_min": learning_window.get("evaluation_date_min", ""),
             "learning_evaluation_date_max": learning_window.get("evaluation_date_max", ""),
             "learning_evaluation_session_count": learning_window.get("evaluation_session_count", 0),
             "directional_model_version": DIRECTIONAL_MODEL_VERSION,
             "directional_model_oos_samples": directional_metrics.get("sample_count", 0),
+            "directional_model_oos_dates": directional_metrics.get("date_count", 0),
             "directional_model_brier_score": directional_metrics.get("brier_score"),
             "directional_model_baseline_brier": directional_metrics.get("baseline_brier_score"),
             "directional_model_brier_skill": directional_metrics.get("brier_skill_score"),
+            "directional_model_validated_personalities": directional_metrics.get("validated_personalities", []),
             "directional_model_validated": directional_metrics.get("passed", False),
             "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
         },

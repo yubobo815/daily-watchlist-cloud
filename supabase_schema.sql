@@ -20,6 +20,7 @@ create index if not exists watchlist_ohlcv_data_date_idx
 grant select, insert, update, delete on public.watchlist_ohlcv to service_role;
 
 create table if not exists public.watchlist_snapshots (
+  publication_id text not null,
   run_date date not null,
   ticker text not null,
   name text,
@@ -126,10 +127,11 @@ create table if not exists public.watchlist_snapshots (
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (run_date, ticker)
+  primary key (publication_id, ticker)
 );
 
 create table if not exists public.watchlist_behavior_history (
+  publication_id text not null,
   run_date date not null,
   ticker text not null,
   history_date date not null,
@@ -235,11 +237,12 @@ create table if not exists public.watchlist_behavior_history (
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (run_date, ticker, history_date)
+  primary key (publication_id, ticker, history_date)
 );
 
 create table if not exists public.watchlist_refresh_runs (
-  run_date date primary key,
+  publication_id text primary key,
+  run_date date not null,
   status text not null default 'ok',
   live_access_ok boolean,
   live_access_message text,
@@ -260,6 +263,7 @@ create table if not exists public.watchlist_refresh_runs (
 );
 
 create table if not exists public.watchlist_signal_outcomes (
+  publication_id text not null,
   signal_run_date date not null,
   evaluation_run_date date not null,
   ticker text not null,
@@ -292,7 +296,7 @@ create table if not exists public.watchlist_signal_outcomes (
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (signal_run_date, evaluation_run_date, ticker)
+  primary key (publication_id, signal_run_date, evaluation_run_date, ticker)
 );
 
 create table if not exists public.focus_tickers (
@@ -514,7 +518,11 @@ alter table public.watchlist_behavior_history add column if not exists feedback_
 alter table public.watchlist_behavior_history add column if not exists reason_codes jsonb not null default '[]'::jsonb;
 
 alter table public.watchlist_refresh_runs add column if not exists learning_history_rows integer;
+alter table public.watchlist_snapshots add column if not exists publication_id text;
+alter table public.watchlist_behavior_history add column if not exists publication_id text;
+alter table public.watchlist_refresh_runs add column if not exists publication_id text;
 alter table public.watchlist_signal_outcomes add column if not exists entry_model_version text;
+alter table public.watchlist_signal_outcomes add column if not exists publication_id text;
 alter table public.watchlist_signal_outcomes add column if not exists entry_eligible boolean;
 alter table public.watchlist_signal_outcomes add column if not exists entry_filled boolean;
 alter table public.watchlist_signal_outcomes add column if not exists entry_fill_est numeric;
@@ -526,6 +534,46 @@ alter table public.watchlist_signal_outcomes add column if not exists prior_pred
 alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_state text;
 alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_key text;
 alter table public.watchlist_signal_outcomes add column if not exists prior_prediction_scope text;
+
+update public.watchlist_signal_outcomes
+set publication_id = coalesce(
+  nullif(payload->>'publication_id', ''),
+  'legacy-' || signal_run_date::text || '-' || evaluation_run_date::text
+)
+where publication_id is null or publication_id = '';
+
+alter table public.watchlist_signal_outcomes alter column publication_id set not null;
+alter table public.watchlist_signal_outcomes drop constraint if exists watchlist_signal_outcomes_pkey;
+alter table public.watchlist_signal_outcomes
+  add primary key (publication_id, signal_run_date, evaluation_run_date, ticker);
+create index if not exists watchlist_signal_outcomes_publication_idx
+  on public.watchlist_signal_outcomes (publication_id, evaluation_run_date desc);
+
+update public.watchlist_snapshots
+set publication_id = coalesce(nullif(payload->>'publication_id', ''), 'legacy-' || run_date::text)
+where publication_id is null or publication_id = '';
+update public.watchlist_behavior_history
+set publication_id = coalesce(nullif(payload->>'publication_id', ''), 'legacy-' || run_date::text)
+where publication_id is null or publication_id = '';
+update public.watchlist_refresh_runs
+set publication_id = coalesce(nullif(payload->>'publication_id', ''), 'legacy-' || run_date::text)
+where publication_id is null or publication_id = '';
+
+alter table public.watchlist_snapshots alter column publication_id set not null;
+alter table public.watchlist_behavior_history alter column publication_id set not null;
+alter table public.watchlist_refresh_runs alter column publication_id set not null;
+alter table public.watchlist_snapshots drop constraint if exists watchlist_snapshots_pkey;
+alter table public.watchlist_snapshots add primary key (publication_id, ticker);
+alter table public.watchlist_behavior_history drop constraint if exists watchlist_behavior_history_pkey;
+alter table public.watchlist_behavior_history add primary key (publication_id, ticker, history_date);
+alter table public.watchlist_refresh_runs drop constraint if exists watchlist_refresh_runs_pkey;
+alter table public.watchlist_refresh_runs add primary key (publication_id);
+create index if not exists watchlist_snapshots_publication_idx
+  on public.watchlist_snapshots (publication_id, ticker);
+create index if not exists watchlist_behavior_history_publication_idx
+  on public.watchlist_behavior_history (publication_id, ticker, history_date desc);
+create index if not exists watchlist_refresh_runs_validated_idx
+  on public.watchlist_refresh_runs (run_date desc, status, updated_at desc);
 
 alter table public.watchlist_snapshots enable row level security;
 alter table public.watchlist_behavior_history enable row level security;

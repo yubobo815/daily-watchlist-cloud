@@ -51,6 +51,7 @@ const HISTORY_FIELDS = [
 ];
 
 const RUN_FIELDS = [
+  "publication_id",
   "run_date",
   "status",
   "live_access_ok",
@@ -687,15 +688,12 @@ async function recentRunDates(limit = 2) {
     if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
   };
 
-  const snapshotRows = await supabaseSelect("watchlist_snapshots?select=run_date&order=run_date.desc&limit=600");
-  const snapshotDates = new Set(snapshotRows.map((row) => row.run_date).filter(Boolean));
-
   try {
     // A run is publishable only after scanner, snapshot, history, and outcome
     // writes have all completed. Rows left in publishing/sync_failed state are
     // intentionally invisible to the production API.
-    const runRows = await supabaseSelect(`watchlist_refresh_runs?select=run_date,status&status=in.(ok,degraded)&order=run_date.desc&limit=${Math.max(limit * 3, 6)}`);
-    runRows.filter((row) => snapshotDates.has(row.run_date)).forEach(addDate);
+    const runRows = await supabaseSelect(`watchlist_refresh_runs?select=run_date,status&status=in.(ok,degraded)&order=run_date.desc,created_at.desc&limit=${Math.max(limit * 6, 12)}`);
+    runRows.forEach(addDate);
     return dates.slice(0, limit);
   } catch {
     // Fail closed. Published Pages data is the only safe fallback when the
@@ -707,11 +705,11 @@ async function recentRunDates(limit = 2) {
 async function runInfo(runDate) {
   if (!runDate) return null;
   try {
-    const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList([...RUN_FIELDS, ...RUN_OPTIONAL_FIELDS])}&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
+    const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList([...RUN_FIELDS, ...RUN_OPTIONAL_FIELDS])}&run_date=eq.${encodeFilterValue(runDate)}&status=in.(ok,degraded)&order=created_at.desc&limit=1`);
     return runDto(rows[0]);
   } catch {
     try {
-      const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList(RUN_FIELDS)}&run_date=eq.${encodeFilterValue(runDate)}&limit=1`);
+      const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList(RUN_FIELDS)}&run_date=eq.${encodeFilterValue(runDate)}&status=in.(ok,degraded)&order=created_at.desc&limit=1`);
       return runDto(rows[0]);
     } catch {
       return null;

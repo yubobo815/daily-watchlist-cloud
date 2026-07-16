@@ -174,7 +174,7 @@ function auditStorageGuard() {
   assert(workflow.includes("storage_hard_limit_bytes=250000000"), "database hard cap must be 250,000,000 bytes");
   assert(workflow.includes("delete from public.watchlist_snapshots"), "SQL fallback must retain snapshots");
   assert(workflow.includes("delete from public.watchlist_refresh_runs"), "SQL fallback must retain refresh runs");
-  assert(workflow.includes("where run_date <> date '$current_run_date'"), "replay retention must target the verified current run");
+  assert(workflow.includes("where publication_id <> '$current_publication_id'"), "replay retention must preserve the validated staging publication");
   return { hardCapBytes: 250000000 };
 }
 
@@ -191,14 +191,30 @@ function auditAtomicPublicationContract() {
   const tickerApi = fs.readFileSync("api/ticker/[ticker].js", "utf8");
   const latestApi = fs.readFileSync("api/watchlist/latest.js", "utf8");
   const healthAudit = fs.readFileSync("scripts/supabase_learning_health.py", "utf8");
+  const schema = fs.readFileSync("supabase_schema.sql", "utf8");
   assert(scanner.includes('final_metadata["status"] = "pending_audit"'), "scanner must keep a synced run hidden until database audit passes");
   assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Reclaim Supabase replay storage"), "database health audit must precede destructive retention");
+  assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy to GitHub Pages"), "an oversized staged publication must roll back before deployment");
+  assert(workflow.indexOf("Finalize Supabase publication") < workflow.indexOf("Reclaim Supabase replay storage"), "retention must never mutate a pending publication");
+  assert(workflow.indexOf("Deploy to GitHub Pages") < workflow.indexOf("Finalize Supabase publication"), "Supabase publication must not become visible before Pages deployment succeeds");
+  assert(workflow.includes("supabase_learning_health.py --finalize"), "workflow must explicitly finalize the audited publication");
   assert(supabaseApi.includes("status=in.(ok,degraded)"), "API must select only validated run states");
   assert(supabaseApi.includes("committedPublicationMatches"), "API must verify immutable publication ids after fetching rows");
   assert(supabaseApi.includes("return [];"), "status-query failures must fail closed instead of selecting raw snapshots");
   assert(tickerApi.includes("recentRunDates(1)"), "ticker detail must share the validated run selector with the main list");
   assert(tickerApi.includes("committedPublicationMatches") && latestApi.includes("committedPublicationMatches"), "list and detail APIs must reject mixed same-day reruns");
   assert(healthAudit.includes('payload->>publication_id=eq.') && healthAudit.includes('status=eq.pending_audit'), "audit promotion must compare-and-set the exact pending publication");
+  assert(scanner.includes('outcomes["publication_id"] = publication_id'), "outcomes must be attributable to one immutable publication");
+  assert(scanner.includes('publication_id=in.({publication_filter})'), "learning must exclude outcomes from unvalidated publications");
+  assert(scanner.includes('["publication_id", "signal_run_date", "evaluation_run_date", "ticker"]'), "outcome upserts must preserve publication versions");
+  assert(schema.includes("add primary key (publication_id, ticker)") && schema.includes("add primary key (publication_id, ticker, history_date)"), "snapshot and history staging rows must be versioned by publication");
+  assert(latestApi.includes("publication_id=eq.") && tickerApi.includes("publication_id=eq."), "list and detail APIs must select the active validated publication only");
+  assert(scanner.includes('"learning_model_version": LEARNING_MODEL_VERSION'), "publication metadata must declare the active learning model");
+  assert(scanner.includes('"learning_horizon_sessions": LEARNING_HORIZON_SESSIONS'), "publication metadata must declare the active learning horizon");
+  assert(!healthAudit.includes('entry_model_version") or "") == "zone-v2"'), "health audit must not hard-code a stale learning model");
+  assert(healthAudit.includes('synced_outcome_rows') && healthAudit.includes('len(outcome_rows)'), "health audit must reconcile the current publication outcome count");
+  assert(healthAudit.includes("if finalize and") && healthAudit.includes("--finalize"), "health validation must not expose a publication before explicit finalization");
+  assert(healthAudit.includes("invalid_promotions") && healthAudit.includes("directional_validation_safe"), "health audit must reject under-evidenced model activation");
   const committedRun = { status: "ok", payload: { publication_id: "pub-1", sync_state: "complete" } };
   assert(committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-1" } }]), "matching publication ids must be readable");
   assert(!committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-2" } }]), "mixed same-day publication ids must fail closed");

@@ -61,10 +61,12 @@ async function handler(request, response) {
       throw new Error("No complete Supabase run is available.");
     }
 
-    const [snapshotRows, historyRows, latestRunInfo, profile] = await Promise.all([
-      supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&limit=1`),
-      supabaseSelect(`watchlist_behavior_history?select=${selectList(HISTORY_FIELDS)}&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&order=history_date.desc`),
-      runInfo(latest),
+    const latestRunInfo = await runInfo(latest);
+    const publicationId = latestRunInfo?.publication_id || latestRunInfo?.payload?.publication_id;
+    if (!publicationId) throw new Error("Latest validated publication is missing its id.");
+    const [snapshotRows, historyRows, profile] = await Promise.all([
+      supabaseSelect(`watchlist_snapshots?select=${selectList(SNAPSHOT_FIELDS)}&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&publication_id=eq.${encodeFilterValue(publicationId)}&limit=1`),
+      supabaseSelect(`watchlist_behavior_history?select=${selectList(HISTORY_FIELDS)}&ticker=eq.${encodeFilterValue(ticker)}&run_date=eq.${encodeFilterValue(latest)}&publication_id=eq.${encodeFilterValue(publicationId)}&order=history_date.desc`),
       withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {}),
     ]);
     if (!committedPublicationMatches(latestRunInfo, [...snapshotRows, ...historyRows])) {

@@ -125,54 +125,28 @@ jobs:
         shell: bash
         run: |
           export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
           python scripts/supabase_learning_health.py
 
-      - name: Reclaim Supabase replay storage
+      - name: Enforce staged database ceiling
         if: steps.time_gate.outputs.run == 'true'
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         shell: bash
         run: |
-          storage_soft_limit_bytes=209715200
           storage_hard_limit_bytes=250000000
-          outcome_row_cap=25000
-          snapshot_retention_days=14
-          run_retention_days=60
-          current_run_date="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select max(run_date) from public.watchlist_refresh_runs where status in ('ok', 'degraded') and coalesce(payload->>'sync_state', '') = 'complete'")"
-          if [ -z "$current_run_date" ]; then
-            echo "No complete Supabase run is available for retention cleanup."
-            exit 1
-          fi
-
-          # REST deletes are constrained by PostgREST statement timeouts. This
-          # runs after a successful refresh and retains the current canonical replay.
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where run_date <> date '$current_run_date'"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_ohlcv where (ticker, data_date) in (select ticker, data_date from (select ticker, data_date, row_number() over (partition by ticker order by data_date desc) as row_number from public.watchlist_ohlcv) retained where row_number > 400)"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_signal_outcomes where (signal_run_date, evaluation_run_date, ticker) in (select signal_run_date, evaluation_run_date, ticker from public.watchlist_signal_outcomes order by evaluation_run_date desc, signal_run_date desc offset ${outcome_row_cap})"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_snapshots where run_date < date '$current_run_date' - ${snapshot_retention_days}"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_refresh_runs where run_date < date '$current_run_date' - ${run_retention_days}"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_snapshots"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_signal_outcomes"
+          publication_id="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
           database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
-          if [ "${{ inputs.reclaim_database_space }}" = "true" ] || [ "$database_bytes" -gt "$storage_soft_limit_bytes" ]; then
-            echo "Reclaiming physical storage (database_bytes=$database_bytes)."
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_behavior_history"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_ohlcv"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_snapshots"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.watchlist_signal_outcomes"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_behavior_history"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_ohlcv"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_snapshots"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.watchlist_signal_outcomes"
+          if [ "$database_bytes" -le "$storage_hard_limit_bytes" ]; then
+            echo "Staged database size is within limit: $database_bytes bytes"
+            exit 0
           fi
-          database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
-          if [ "$database_bytes" -gt "$storage_hard_limit_bytes" ]; then
-            echo "Database exceeds the 250 MB hard limit after cleanup: $database_bytes bytes"
-            exit 1
-          fi
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select pg_size_pretty(pg_database_size(current_database())) as database_size, pg_size_pretty(pg_total_relation_size('public.watchlist_behavior_history')) as behavior_history_total, count(*) as behavior_history_rows from public.watchlist_behavior_history"
+          echo "Staged publication exceeds the 250 MB ceiling; rolling it back before deployment."
+          for table in watchlist_behavior_history watchlist_snapshots watchlist_signal_outcomes watchlist_refresh_runs; do
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.$table where publication_id = '$publication_id'"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.$table"
+          done
+          exit 1
 
       - name: Prepare Pages artifact
         if: steps.time_gate.outputs.run == 'true'
@@ -240,3 +214,54 @@ jobs:
         if: steps.time_gate.outputs.run == 'true'
         id: deployment
         uses: actions/deploy-pages@v5
+
+      - name: Finalize Supabase publication
+        if: steps.time_gate.outputs.run == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          python scripts/supabase_learning_health.py --finalize
+
+      - name: Reclaim Supabase replay storage
+        if: steps.time_gate.outputs.run == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        shell: bash
+        run: |
+          storage_soft_limit_bytes=209715200
+          storage_hard_limit_bytes=250000000
+          outcome_row_cap=25000
+          snapshot_retention_days=14
+          run_retention_days=60
+          current_run_date="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          current_publication_id="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_behavior_history where publication_id <> '$current_publication_id'"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_ohlcv where (ticker, data_date) in (select ticker, data_date from (select ticker, data_date, row_number() over (partition by ticker order by data_date desc) as row_number from public.watchlist_ohlcv) retained where row_number > 400)"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_signal_outcomes where publication_id <> '$current_publication_id'"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_signal_outcomes where publication_id = '$current_publication_id' and ctid in (select ctid from public.watchlist_signal_outcomes where publication_id = '$current_publication_id' order by evaluation_run_date desc, signal_run_date desc offset ${outcome_row_cap})"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_snapshots where run_date < date '$current_run_date' - ${snapshot_retention_days}"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_snapshots where run_date = date '$current_run_date' and publication_id <> '$current_publication_id'"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "delete from public.watchlist_refresh_runs where run_date < date '$current_run_date' - ${run_retention_days}"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_behavior_history"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_snapshots"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_signal_outcomes"
+          database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
+          if [ "${{ inputs.reclaim_database_space }}" = "true" ] || [ "$database_bytes" -gt "$storage_soft_limit_bytes" ]; then
+            echo "Reclaiming physical storage (database_bytes=$database_bytes)."
+            for table in watchlist_behavior_history watchlist_ohlcv watchlist_snapshots watchlist_signal_outcomes; do
+              psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum full analyze public.$table"
+              psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "reindex table public.$table"
+            done
+          fi
+          database_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())")"
+          if [ "$database_bytes" -gt "$storage_hard_limit_bytes" ]; then
+            echo "Database exceeds the 250 MB hard limit after cleanup: $database_bytes bytes"
+            exit 1
+          fi
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select pg_size_pretty(pg_database_size(current_database())) as database_size, pg_size_pretty(pg_total_relation_size('public.watchlist_behavior_history')) as behavior_history_total, count(*) as behavior_history_rows from public.watchlist_behavior_history"
