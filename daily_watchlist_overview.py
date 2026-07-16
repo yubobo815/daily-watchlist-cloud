@@ -63,6 +63,9 @@ BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
 LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "60"))
 DEFAULT_LEARNING_LOOKBACK_DAYS = LEARNING_LOOKBACK_DAYS
 LEARNING_HORIZON_SESSIONS = int(os.getenv("LEARNING_HORIZON_SESSIONS", "5"))
+# Historical replay recalculates expensive per-ticker and walk-forward gates on
+# this cadence. Between refreshes, only earlier replay sessions are reusable.
+REPLAY_AUDIT_GATE_REFRESH_BARS = int(os.getenv("REPLAY_AUDIT_GATE_REFRESH_BARS", "5"))
 MARKET_DATA_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12"))
 SELF_SCORE_ACTIONS = {
     "BUY CANDIDATE",
@@ -3598,6 +3601,7 @@ def classify_and_score(
     include_setup_stats: bool = True,
     include_audit_gates: bool = True,
     market_permission: Optional[dict] = None,
+    audit_gate_cache: Optional[dict[str, dict]] = None,
 ) -> dict:
     d = raw.copy() if prepared else prepare(raw)
     if len(d) < 220:
@@ -3786,8 +3790,11 @@ def classify_and_score(
         if include_setup_stats
         else {"hist_trades": "", "hist_win_rate": "", "hist_avg_return": ""}
     )
+    cached_audit_gates = (audit_gate_cache or {}).get(setup)
     ticker_profile = (
-        ticker_learning_profile(d)
+        cached_audit_gates["ticker_profile"]
+        if include_audit_gates and cached_audit_gates
+        else ticker_learning_profile(d)
         if include_audit_gates
         else {
             "ticker_trades": "",
@@ -3799,7 +3806,9 @@ def classify_and_score(
         }
     )
     walk_forward_stats = (
-        walk_forward_setup_stats(d, setup)
+        cached_audit_gates["walk_forward_stats"]
+        if include_audit_gates and cached_audit_gates
+        else walk_forward_setup_stats(d, setup)
         if include_audit_gates
         else {
             "wf_train_trades": "",
@@ -4691,12 +4700,21 @@ def build_behavior_history(
         return []
 
     history_rows: list[dict] = []
+    audit_gate_cache: dict[str, dict] = {}
     start = max(220, len(d) - days + 1)
-    for end in range(start, len(d) + 1):
+    for replay_index, end in enumerate(range(start, len(d) + 1)):
         try:
             replay_market_permission = market_permission_for_replay_date(
                 benchmark_frames or {},
                 d.iloc[end - 1].date,
+            )
+            # A newly observed setup is calculated immediately. Cached gates
+            # only originate from earlier bars and are refreshed every five
+            # sessions; daily OHLCV and market gates remain live.
+            cache_for_snapshot = (
+                None
+                if replay_index % REPLAY_AUDIT_GATE_REFRESH_BARS == 0
+                else audit_gate_cache
             )
             snapshot = classify_and_score(
                 ticker,
@@ -4707,9 +4725,30 @@ def build_behavior_history(
                 # otherwise learning can reward signals the app would block.
                 include_audit_gates=True,
                 market_permission=replay_market_permission,
+                audit_gate_cache=cache_for_snapshot,
             )
         except Exception:
             continue
+        audit_gate_cache[snapshot["setup"]] = {
+            "ticker_profile": {
+                "ticker_trades": snapshot.get("ticker_trades", ""),
+                "ticker_win_rate": snapshot.get("ticker_win_rate", ""),
+                "ticker_avg_return": snapshot.get("ticker_avg_return", ""),
+                "ticker_worst_return": snapshot.get("ticker_worst_return", ""),
+                "ticker_permission": snapshot.get("ticker_permission", "UNKNOWN"),
+                "ticker_learning_notes": snapshot.get("ticker_learning_notes", ""),
+            },
+            "walk_forward_stats": {
+                "wf_train_trades": snapshot.get("wf_train_trades", ""),
+                "wf_train_win_rate": snapshot.get("wf_train_win_rate", ""),
+                "wf_train_avg_return": snapshot.get("wf_train_avg_return", ""),
+                "wf_test_trades": snapshot.get("wf_test_trades", ""),
+                "wf_test_win_rate": snapshot.get("wf_test_win_rate", ""),
+                "wf_test_avg_return": snapshot.get("wf_test_avg_return", ""),
+                "walk_forward_permission": snapshot.get("walk_forward_permission", "UNKNOWN"),
+                "wf_notes": snapshot.get("wf_notes", ""),
+            },
+        }
         snapshot["history_day"] = len(d) - end
         history_rows.append(snapshot)
     return [apply_anti_signal_penalty(row) for row in enrich_signal_transitions(history_rows)]

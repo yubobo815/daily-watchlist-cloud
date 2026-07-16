@@ -505,6 +505,36 @@ def audit_replay_market_gate_matches_live_context():
     assert_true(replay[0]["market_permission"] == live_gate["market_permission"] == "ALLOW", "replay market gate must match the live benchmark gate on the same date")
 
 
+def audit_replay_gate_cache_is_bounded_and_historical():
+    ticker = synthetic_price_frame(100, 0.35, periods=248)
+    benchmarks = {symbol: synthetic_price_frame(100, 0.2, periods=248) for symbol in ("SPY", "QQQ", "SMH")}
+    calls = {"ticker": 0, "walk_forward": 0}
+    original_ticker_profile = dwo.ticker_learning_profile
+    original_walk_forward = dwo.walk_forward_setup_stats
+
+    def counted_ticker_profile(*args, **kwargs):
+        calls["ticker"] += 1
+        return original_ticker_profile(*args, **kwargs)
+
+    def counted_walk_forward(*args, **kwargs):
+        calls["walk_forward"] += 1
+        return original_walk_forward(*args, **kwargs)
+
+    dwo.ticker_learning_profile = counted_ticker_profile
+    dwo.walk_forward_setup_stats = counted_walk_forward
+    try:
+        replay = dwo.build_behavior_history("TEST", ticker, days=8, benchmark_frames=benchmarks)
+    finally:
+        dwo.ticker_learning_profile = original_ticker_profile
+        dwo.walk_forward_setup_stats = original_walk_forward
+
+    assert_true(len(replay) == 8, "replay cache fixture must retain every requested historical session")
+    assert_true(calls["ticker"] < len(replay), "replay must not recalculate ticker gates on every historical bar")
+    assert_true(calls["walk_forward"] < len(replay), "replay must not recalculate walk-forward gates on every historical bar")
+    assert_true(calls["ticker"] >= 2, "replay must refresh cached gates during a multi-session replay")
+    assert_true(calls["walk_forward"] >= 2, "replay must refresh cached gates during a multi-session replay")
+
+
 def audit_risk_off_or_missing_replay_cannot_seed_bullish_learning():
     ticker = synthetic_price_frame(100, 0.35)
     risk_off_benchmarks = {symbol: synthetic_price_frame(180, -0.25) for symbol in ("SPY", "QQQ", "SMH")}
@@ -633,12 +663,13 @@ def main():
     audit_prediction_probabilities_are_smoothed_and_complete()
     audit_learning_promotion_requires_all_execution_gates()
     audit_replay_market_gate_matches_live_context()
+    audit_replay_gate_cache_is_bounded_and_historical()
     audit_risk_off_or_missing_replay_cannot_seed_bullish_learning()
     audit_personality_setup_governor_blocks_range_chase()
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 34,
+        "cases": 35,
     })
 
 
