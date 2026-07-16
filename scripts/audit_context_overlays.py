@@ -173,15 +173,19 @@ def audit_volatile_hold_has_consistent_score():
 def audit_behavior_history_seeds_learning():
     history_rows = [
         {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101, stop_est=97), "ticker": "MU"},
-        {**row("2026-06-02", "WATCH TREND", 104, setup="NONE", open=100, low=99.5, high=105), "ticker": "MU"},
-        {**row("2026-06-03", "SETUP FORMING", 103, setup="PULLBACK BUY"), "ticker": "MU"},
+        {**row("2026-06-02", "WATCH TREND", 100.5, setup="NONE", open=100, low=99.5, high=101), "ticker": "MU"},
+        {**row("2026-06-03", "WATCH TREND", 103.5, setup="NONE", open=101, low=100.5, high=104), "ticker": "MU"},
+        {**row("2026-06-04", "WATCH TREND", 103, setup="NONE", open=103, low=102, high=104), "ticker": "MU"},
+        {**row("2026-06-05", "WATCH TREND", 104, setup="NONE", open=103, low=102, high=105), "ticker": "MU"},
+        {**row("2026-06-06", "SETUP FORMING", 103, setup="PULLBACK BUY", open=104, low=102, high=105), "ticker": "MU"},
     ]
     outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
     assert_true(len(outcomes) >= 1, "behavior replay should create backfilled learning samples")
     first = outcomes.iloc[0].to_dict()
     assert_true(first["signal_run_date"] == "2026-06-01", "backfilled sample must use prior history date")
-    assert_true(first["evaluation_run_date"] == "2026-06-02", "backfilled sample must evaluate on next history date")
-    assert_true(first["outcome_label"] == "WORKING", "BUY with follow-through should seed WORKING")
+    assert_true(first["evaluation_run_date"] == "2026-06-03", "backfilled sample must settle on the bar that reaches the target")
+    assert_true(first["label_horizon_sessions"] == dwo.LEARNING_HORIZON_SESSIONS, "backfilled sample must use the risk-adjusted horizon")
+    assert_true(first["outcome_label"] == "WORKING", "BUY that reaches 1R before the stop should seed WORKING")
     assert_true(first["entry_filled"] is True, "BUY learning must require a next-session entry-zone fill")
     stats = dwo.build_learning_stats(outcomes)
     assert_true(bool(stats), "backfilled outcomes should feed learning stats")
@@ -191,6 +195,10 @@ def audit_unfilled_buy_is_excluded_from_learning():
     history_rows = [
         {**row("2026-06-01", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=101, stop_est=97), "ticker": "MU"},
         {**row("2026-06-02", "WATCH TREND", 108, setup="NONE", open=107, low=106, high=109), "ticker": "MU"},
+        {**row("2026-06-03", "WATCH TREND", 109, setup="NONE", open=108, low=107, high=110), "ticker": "MU"},
+        {**row("2026-06-04", "WATCH TREND", 110, setup="NONE", open=109, low=108, high=111), "ticker": "MU"},
+        {**row("2026-06-05", "WATCH TREND", 111, setup="NONE", open=110, low=109, high=112), "ticker": "MU"},
+        {**row("2026-06-06", "WATCH TREND", 112, setup="NONE", open=111, low=110, high=113), "ticker": "MU"},
     ]
     outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
     first = outcomes.iloc[0].to_dict()
@@ -198,30 +206,48 @@ def audit_unfilled_buy_is_excluded_from_learning():
     assert_true(not dwo.build_learning_stats(outcomes), "unfilled BUY must not change learning weights")
 
 
+def audit_ambiguous_daily_path_is_excluded_from_learning():
+    prior = executable_prior()
+    bars = [executable_current(open=100, high=104, low=96, close=101) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
+    outcome = dwo.score_signal_horizon(prior, bars)
+    assert_true(outcome["path_status"] == "AMBIGUOUS", "same-bar entry and stop must not invent an intraday sequence")
+    assert_true(outcome["outcome_learnable"] is False, "ambiguous daily path must be excluded from learning")
+
+
+def audit_non_executable_signal_is_excluded_from_risk_path_learning():
+    prior = row("2026-06-01", "WATCH TREND", 100, setup="NONE", ticker="MU")
+    bars = [executable_current(open=100, high=104, low=98, close=102) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
+    outcome = dwo.score_signal_horizon(prior, bars)
+    assert_true(outcome["path_status"] == "NON_EXECUTABLE", "v4 risk-path learning must only score planned entries")
+    assert_true(outcome["outcome_learnable"] is False, "WATCH/EXIT paths without entry, stop, and target must not become v4 evidence")
+
+
 def audit_defensive_learning_shows_samples_without_promotion():
-    history_rows = []
-    for ticker in ["A", "B", "C"]:
-        history_rows.append({**row("2026-06-01", "EXIT PRESSURE", 100, setup="NONE"), "ticker": ticker})
-        history_rows.append({**row("2026-06-02", "EXIT PRESSURE", 98, setup="NONE"), "ticker": ticker})
-    outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
-    stats = dwo.build_learning_stats(outcomes)
     current = row("2026-06-03", "EXIT PRESSURE", 100, setup="NONE", score=20)
     current["ticker"] = "NVDA"
     current["adjusted_score"] = 20
+    key = dwo.learning_key_for(current)
+    outcomes = pd.DataFrame(outcome_rows(3, key))
+    outcomes["prior_action"] = "EXIT PRESSURE"
+    outcomes["prior_setup"] = "NONE"
+    outcomes["learning_key"] = key
+    outcomes["outcome_label"] = "TRAP_AVOIDED"
+    outcomes["outcome_score"] = 1.0
+    stats = dwo.build_learning_stats(outcomes)
     dwo.apply_learning_adjustments([current], stats)
     assert_true(current["learning_sample_count"] == 3, "defensive family samples should be visible")
     assert_true(current["learning_adjustment"] == 0.0, "successful defensive learning must not promote EXIT score")
     assert_true(float(current["adjusted_score"]) == 20.0, "EXIT adjusted score must remain unchanged by positive defense learning")
 
 
-def audit_learning_lookback_stays_on_30_day_window():
+def audit_learning_lookback_supports_60_day_window():
     history_rows = [
         {**row(f"2026-06-{day:02d}", "BUY CANDIDATE", 100 + day, setup="MOMENTUM BUY"), "ticker": "MU"}
-        for day in range(1, 31)
+        for day in range(1, 61)
     ]
     learning_outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
-    assert_true(dwo.DEFAULT_LEARNING_LOOKBACK_DAYS == 30, "default learning lookback should stay aligned to stored 30-day history")
-    assert_true(len(learning_outcomes) == 29, "30 stored days should create 29 adjacent learning samples")
+    assert_true(dwo.DEFAULT_LEARNING_LOOKBACK_DAYS == 60, "learning should use a broader outcome window than the displayed history")
+    assert_true(len(learning_outcomes) == 59, "60 replayed days should create one outcome per prior signal")
 
 
 def audit_learning_key_uses_behavior_not_ticker_identity():
@@ -431,6 +457,8 @@ def outcome_rows(count, learning_key, *, model_version=dwo.LEARNING_MODEL_VERSIO
             "outcome_label": "WORKING",
             "outcome_score": 1.0,
             "close_return_pct": 2.5,
+            "label_horizon_sessions": dwo.LEARNING_HORIZON_SESSIONS,
+            "path_status": "SETTLED",
         }
         for index in range(count)
     ]
@@ -518,6 +546,23 @@ def audit_exact_learning_requires_diverse_evidence_for_promotion():
     assert_true(diverse_current["learning_distinct_ticker_count"] >= 4, "promotion must expose distinct-ticker evidence")
 
 
+def audit_prediction_probabilities_are_smoothed_and_complete():
+    current = learning_confirmed_setup_row()
+    key = dwo.learning_key_for(current)
+    outcomes = pd.DataFrame(outcome_rows(6, key))
+    outcomes.loc[0, "outcome_label"] = "FAILED"
+    outcomes.loc[0, "outcome_score"] = -1.0
+    stats = dwo.build_learning_stats(outcomes)
+    dwo.apply_learning_adjustments([current], stats)
+    probability_sum = (
+        float(current["prediction_upside_probability"])
+        + float(current["prediction_downside_probability"])
+        + float(current["prediction_no_edge_probability"])
+    )
+    assert_true(abs(probability_sum - 1.0) < 0.002, "smoothed prediction probabilities must sum to one")
+    assert_true(current["prediction_horizon_sessions"] == dwo.LEARNING_HORIZON_SESSIONS, "prediction must disclose its horizon")
+
+
 def audit_learning_promotion_requires_all_execution_gates():
     key = dwo.learning_key_for(learning_confirmed_setup_row())
     stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(6, key)))
@@ -566,8 +611,10 @@ def main():
     audit_volatile_hold_has_consistent_score()
     audit_behavior_history_seeds_learning()
     audit_unfilled_buy_is_excluded_from_learning()
+    audit_ambiguous_daily_path_is_excluded_from_learning()
+    audit_non_executable_signal_is_excluded_from_risk_path_learning()
     audit_defensive_learning_shows_samples_without_promotion()
-    audit_learning_lookback_stays_on_30_day_window()
+    audit_learning_lookback_supports_60_day_window()
     audit_learning_key_uses_behavior_not_ticker_identity()
     audit_action_display_labels_match_product_ui()
     audit_learning_can_upgrade_building_execution_tier()
@@ -583,6 +630,7 @@ def main():
     audit_learning_window_uses_recent_evaluation_sessions_only()
     audit_broad_learning_cannot_promote_score()
     audit_exact_learning_requires_diverse_evidence_for_promotion()
+    audit_prediction_probabilities_are_smoothed_and_complete()
     audit_learning_promotion_requires_all_execution_gates()
     audit_replay_market_gate_matches_live_context()
     audit_risk_off_or_missing_replay_cannot_seed_bullish_learning()
@@ -590,7 +638,7 @@ def main():
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 31,
+        "cases": 34,
     })
 
 

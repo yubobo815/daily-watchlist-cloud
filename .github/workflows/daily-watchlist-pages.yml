@@ -109,7 +109,10 @@ jobs:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           DATA_PROVIDER_PRIORITY: yahoo,polygon,twelvedata,stooq
           MARKET_DATA_TIMEOUT_SECONDS: "12"
-        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 1 --history-days 30 --learning-lookback-days 30
+        # Two years of source OHLCV leaves enough post-warmup bars for the
+        # 60-session learning replay. Supabase still retains only 30 display
+        # days plus a capped compact outcome table.
+        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60
 
       - name: Reclaim Supabase replay storage
         if: steps.time_gate.outputs.run == 'true'

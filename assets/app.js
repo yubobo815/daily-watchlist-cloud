@@ -870,6 +870,21 @@ function naturalActionSentence(row) {
   return "There is no favourable setup at the moment.";
 }
 
+function predictionNarrative(row) {
+  const upside = Number(payloadValue(row, "prediction_upside_probability"));
+  const downside = Number(payloadValue(row, "prediction_downside_probability"));
+  const noEdge = Number(payloadValue(row, "prediction_no_edge_probability"));
+  const confidence = Number(payloadValue(row, "prediction_confidence"));
+  const horizon = Number(payloadValue(row, "prediction_horizon_sessions")) || 5;
+  const state = String(payloadValue(row, "prediction_state") || "").toUpperCase();
+  if (![upside, downside, noEdge].every(Number.isFinite)) {
+    return `The ${horizon}-session model is still collecting comparable, settled outcomes; it is not changing the recommendation.`;
+  }
+  const certainty = confidence >= 0.65 ? "moderate" : confidence >= 0.40 ? "limited" : "low";
+  const message = `Across comparable ${horizon}-session setups, the model estimates ${fmtNumber(upside * 100, 0)}% upside-first, ${fmtNumber(downside * 100, 0)}% downside-first, and ${fmtNumber(noEdge * 100, 0)}% without a clear outcome. Confidence is ${certainty}.`;
+  return state === "CALIBRATED" ? message : `${message} This remains reporting-only until the evidence and execution gates qualify.`;
+}
+
 function contextSummary(row) {
   const entry = formatEntryZone(row);
   const stop = numericValue(row, "stop_est");
@@ -879,6 +894,7 @@ function contextSummary(row) {
   const parts = [naturalActionSentence(row), `The tape suggests ${operatorNarrative(operator)}.`];
   if (entry) parts.push(`The preferred entry area is ${entry}${stop ? `, with a stop near ${fmtNumber(stop, 2)}` : ""}.`);
   if (target) parts.push(`The scanner's reference target is ${fmtNumber(target, 2)}; it is a planning level, not a forecast.`);
+  parts.push(predictionNarrative(row));
   if (validation !== "All available validation gates allow") parts.push(`Current constraint: ${validation}.`);
   return parts.join(" ");
 }

@@ -77,6 +77,13 @@ create table if not exists public.watchlist_snapshots (
   learning_promotion_eligible boolean,
   learning_reporting_only boolean,
   learning_promotion_state text,
+  prediction_horizon_sessions integer,
+  prediction_upside_probability numeric,
+  prediction_downside_probability numeric,
+  prediction_no_edge_probability numeric,
+  prediction_confidence numeric,
+  prediction_model_version text,
+  prediction_state text,
   data_provider text,
   data_provider_status text,
   data_provider_latency_ms numeric,
@@ -179,6 +186,13 @@ create table if not exists public.watchlist_behavior_history (
   learning_promotion_eligible boolean,
   learning_reporting_only boolean,
   learning_promotion_state text,
+  prediction_horizon_sessions integer,
+  prediction_upside_probability numeric,
+  prediction_downside_probability numeric,
+  prediction_no_edge_probability numeric,
+  prediction_confidence numeric,
+  prediction_model_version text,
+  prediction_state text,
   data_provider text,
   data_provider_status text,
   data_provider_latency_ms numeric,
@@ -347,6 +361,13 @@ alter table public.watchlist_snapshots add column if not exists learning_window_
 alter table public.watchlist_snapshots add column if not exists learning_promotion_eligible boolean;
 alter table public.watchlist_snapshots add column if not exists learning_reporting_only boolean;
 alter table public.watchlist_snapshots add column if not exists learning_promotion_state text;
+alter table public.watchlist_snapshots add column if not exists prediction_horizon_sessions integer;
+alter table public.watchlist_snapshots add column if not exists prediction_upside_probability numeric;
+alter table public.watchlist_snapshots add column if not exists prediction_downside_probability numeric;
+alter table public.watchlist_snapshots add column if not exists prediction_no_edge_probability numeric;
+alter table public.watchlist_snapshots add column if not exists prediction_confidence numeric;
+alter table public.watchlist_snapshots add column if not exists prediction_model_version text;
+alter table public.watchlist_snapshots add column if not exists prediction_state text;
 alter table public.watchlist_snapshots add column if not exists contextual_overlay text;
 alter table public.watchlist_snapshots add column if not exists contextual_score_adjustment numeric;
 alter table public.watchlist_snapshots add column if not exists contextual_plan text;
@@ -433,6 +454,13 @@ alter table public.watchlist_behavior_history add column if not exists learning_
 alter table public.watchlist_behavior_history add column if not exists learning_promotion_eligible boolean;
 alter table public.watchlist_behavior_history add column if not exists learning_reporting_only boolean;
 alter table public.watchlist_behavior_history add column if not exists learning_promotion_state text;
+alter table public.watchlist_behavior_history add column if not exists prediction_horizon_sessions integer;
+alter table public.watchlist_behavior_history add column if not exists prediction_upside_probability numeric;
+alter table public.watchlist_behavior_history add column if not exists prediction_downside_probability numeric;
+alter table public.watchlist_behavior_history add column if not exists prediction_no_edge_probability numeric;
+alter table public.watchlist_behavior_history add column if not exists prediction_confidence numeric;
+alter table public.watchlist_behavior_history add column if not exists prediction_model_version text;
+alter table public.watchlist_behavior_history add column if not exists prediction_state text;
 alter table public.watchlist_behavior_history add column if not exists contextual_overlay text;
 alter table public.watchlist_behavior_history add column if not exists contextual_score_adjustment numeric;
 alter table public.watchlist_behavior_history add column if not exists contextual_plan text;

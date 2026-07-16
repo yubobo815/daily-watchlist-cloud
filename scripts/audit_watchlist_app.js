@@ -109,6 +109,7 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker scanner review panel");
   assert(!appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must not repeat the removed Pine confirmation copy");
   assert(appSource.includes("function contextSummary(row)"), "ticker context must be summarized in natural language");
+  assert(appSource.includes("function predictionNarrative(row)"), "ticker context must explain prediction evidence in natural language");
   assert(appSource.includes("function recentBehaviorSummary(row, previous)"), "recent behavior must be summarized in natural language");
   assert(appSource.includes("Context &amp; evidence"), "ticker panel must use the reader-facing context label");
   assert(!appSource.includes("<summary>More context</summary>"), "ticker panel must not expose the old machine-context label");

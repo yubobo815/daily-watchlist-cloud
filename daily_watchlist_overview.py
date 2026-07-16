@@ -38,8 +38,8 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.07.15-executable-learning"
-LEARNING_MODEL_VERSION = "next-session-zone-v3-hard-gate-boundary"
+SCANNER_VERSION = "2026.07.16-risk-adjusted-learning"
+LEARNING_MODEL_VERSION = "five-session-r-risk-v4"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -60,8 +60,9 @@ WALK_FORWARD_MIN_TEST_TRADES = 3
 MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
-LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "30"))
+LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "60"))
 DEFAULT_LEARNING_LOOKBACK_DAYS = LEARNING_LOOKBACK_DAYS
+LEARNING_HORIZON_SESSIONS = int(os.getenv("LEARNING_HORIZON_SESSIONS", "5"))
 MARKET_DATA_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12"))
 SELF_SCORE_ACTIONS = {
     "BUY CANDIDATE",
@@ -926,6 +927,13 @@ OPTIONAL_SIGNAL_COLUMNS = {
     "learning_promotion_eligible",
     "learning_reporting_only",
     "learning_promotion_state",
+    "prediction_horizon_sessions",
+    "prediction_upside_probability",
+    "prediction_downside_probability",
+    "prediction_no_edge_probability",
+    "prediction_confidence",
+    "prediction_model_version",
+    "prediction_state",
     "contextual_overlay",
     "contextual_score_adjustment",
     "contextual_plan",
@@ -1273,6 +1281,13 @@ def optional_signal_values(row: dict) -> dict:
         "learning_promotion_eligible": row.get("learning_promotion_eligible"),
         "learning_reporting_only": row.get("learning_reporting_only"),
         "learning_promotion_state": row.get("learning_promotion_state"),
+        "prediction_horizon_sessions": numeric_or_none(row.get("prediction_horizon_sessions")),
+        "prediction_upside_probability": numeric_or_none(row.get("prediction_upside_probability")),
+        "prediction_downside_probability": numeric_or_none(row.get("prediction_downside_probability")),
+        "prediction_no_edge_probability": numeric_or_none(row.get("prediction_no_edge_probability")),
+        "prediction_confidence": numeric_or_none(row.get("prediction_confidence")),
+        "prediction_model_version": row.get("prediction_model_version"),
+        "prediction_state": row.get("prediction_state"),
         "contextual_overlay": row.get("contextual_overlay"),
         "contextual_score_adjustment": numeric_or_none(row.get("contextual_score_adjustment")),
         "contextual_plan": row.get("contextual_plan"),
@@ -1512,6 +1527,27 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
     out["body_pct"] = np.where(out["range"] > 0, out["body"] / out["range"], 0)
     out["upper_wick_pct"] = np.where(out["range"] > 0, (out["high"] - out[["open", "close"]].max(axis=1)) / out["range"], 0)
     out["lower_wick_pct"] = np.where(out["range"] > 0, (out[["open", "close"]].min(axis=1) - out["low"]) / out["range"], 0)
+    # Multi-session supply/demand proxies. These are observable OHLCV
+    # properties, not claims about the identity of the market participant.
+    out["relative_volume"] = np.where(out["vol_ma"] > 0, out["volume"] / out["vol_ma"], np.nan)
+    out["range_atr"] = np.where(out["atr"] > 0, out["range"] / out["atr"], np.nan)
+    up_day = (out["close"] > out["open"]) & (out["close"] >= out["close"].shift(1)) & (out["close_loc"] >= 0.55)
+    down_day = (out["close"] < out["open"]) & (out["close"] <= out["close"].shift(1)) & (out["close_loc"] <= 0.45)
+    out["demand_day"] = (up_day & (out["relative_volume"] >= 0.90)).astype(int)
+    out["supply_day"] = (down_day & (out["relative_volume"] >= 1.05)).astype(int)
+    out["demand_days_5"] = out["demand_day"].rolling(5, min_periods=3).sum()
+    out["supply_days_5"] = out["supply_day"].rolling(5, min_periods=3).sum()
+    out["signed_volume_pressure_5"] = (
+        np.sign(out["close"].diff()).fillna(0) * out["relative_volume"].fillna(0)
+    ).rolling(5, min_periods=3).mean()
+    out["volatility_contraction_5"] = out["range_atr"].rolling(5, min_periods=3).mean() <= out["range_atr"].rolling(20, min_periods=10).mean() * 0.78
+    out["volume_contraction_5"] = out["relative_volume"].rolling(5, min_periods=3).mean() <= 0.85
+    failed_breakout = (out["high"] > out["high"].shift(1)) & (out["close"] <= out["high"].shift(1)) & (out["close_loc"] <= 0.50)
+    failed_breakdown = (out["low"] < out["low"].shift(1)) & (out["close"] >= out["low"].shift(1)) & (out["close_loc"] >= 0.50)
+    # Confirmation occurs on a later bar, preventing a single wick from being
+    # treated as a fully formed trap.
+    out["bull_trap_confirmed"] = failed_breakout.shift(1, fill_value=False).astype(bool) & (out["close"] < out["low"].shift(1))
+    out["bear_trap_confirmed"] = failed_breakdown.shift(1, fill_value=False).astype(bool) & (out["close"] > out["high"].shift(1))
     return out
 
 
@@ -2506,6 +2542,135 @@ def build_daily_signal_outcomes(previous_rows: list[dict], current_rows: list[di
     return pd.DataFrame(outcomes)
 
 
+def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions: int = LEARNING_HORIZON_SESSIONS) -> dict:
+    """Settle a planned entry using only daily bars available after the signal.
+
+    Daily OHLC cannot establish intraday order when entry, stop, and target all
+    trade in the same bar. Those cases are deliberately marked ambiguous rather
+    than invented into wins or losses.
+    """
+    horizon = max(1, int(horizon_sessions))
+    prior_action = str(prior.get("action") or "")
+    final_row = future_rows[min(len(future_rows), horizon) - 1] if future_rows else {}
+    evaluation_date = final_row.get("date") or final_row.get("history_date") or ""
+    base = {
+        "signal_run_date": prior.get("run_date") or prior.get("date") or prior.get("data_date"),
+        "evaluation_run_date": evaluation_date,
+        "ticker": prior.get("ticker"),
+        "prior_action": prior_action,
+        "prior_setup": prior.get("setup"),
+        "prior_buy_tier": prior.get("buy_tier"),
+        "prior_operator_state": prior.get("operator_state"),
+        "prior_anti_signal_level": prior.get("anti_signal_level"),
+        "prior_close": numeric_or_none(prior.get("close")) or "",
+        "entry_model_version": LEARNING_MODEL_VERSION,
+        "label_horizon_sessions": horizon,
+        "path_status": "PENDING",
+        "entry_eligible": False,
+        "entry_filled": False,
+        "entry_fill_est": "",
+        "stop_hit": False,
+        "target_hit": False,
+        "mfe_pct": "",
+        "mae_pct": "",
+        "relative_return_pct": "",
+        "current_action": final_row.get("action"),
+        "current_operator_state": final_row.get("operator_state"),
+        "current_close": numeric_or_none(final_row.get("close")) or "",
+        "close_return_pct": "",
+        "outcome_label": "PENDING",
+        "outcome_score": 0.0,
+        "outcome_reason": "Awaiting a complete five-session evaluation window.",
+        "outcome_learnable": False,
+    }
+    base["learning_key"] = "|".join([
+        prior_action or "UNKNOWN", str(prior.get("setup") or "NONE"),
+        str(prior.get("personality_type") or "UNKNOWN"), str(prior.get("operator_state") or "NEUTRAL"),
+        str(prior.get("anti_signal_level") or "NONE"),
+    ])
+    if len(future_rows) < horizon:
+        return base
+
+    gates_allow, gate_blockers = prior_signal_hard_gate_status(prior, prior_action)
+    executable = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    if not executable:
+        base.update({
+            "path_status": "NON_EXECUTABLE",
+            "outcome_label": "NON_LEARNABLE",
+            "outcome_reason": "The v4 first-hit model only learns planned entry, stop, and target paths.",
+        })
+        return base
+    if not gates_allow:
+        base.update({
+            "path_status": "GATED",
+            "outcome_label": "NON_LEARNABLE",
+            "outcome_reason": f"Prior execution gate blocked ({', '.join(gate_blockers)}); excluded from learning.",
+        })
+        return base
+
+    zone_low = numeric_or_none(prior.get("entry_zone_low")) or numeric_or_none(prior.get("entry_est"))
+    zone_high = numeric_or_none(prior.get("entry_zone_high")) or zone_low
+    stop = numeric_or_none(prior.get("stop_est"))
+    if zone_low is None or zone_high is None or stop is None or float(zone_high) < float(zone_low) or float(stop) >= float(zone_low):
+        base.update({"path_status": "UNUSABLE", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Missing a valid entry zone or stop; excluded from learning."})
+        return base
+
+    entry = None
+    target = None
+    highs: list[float] = []
+    lows: list[float] = []
+    for offset, bar in enumerate(future_rows[:horizon], start=1):
+        open_, high, low, close = (numeric_or_none(bar.get(field)) for field in ("open", "high", "low", "close"))
+        if any(value is None for value in (open_, high, low, close)):
+            base.update({"path_status": "UNUSABLE", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Incomplete OHLC inside the evaluation window; excluded from learning."})
+            return base
+        if entry is None:
+            if float(open_) <= float(stop):
+                base.update({"path_status": "GAP", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Price gapped through the stop before a valid entry."})
+                return base
+            touches_zone = float(low) <= float(zone_high) and float(high) >= float(zone_low)
+            if not touches_zone:
+                continue
+            if float(low) <= float(stop):
+                base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both the entry area and stop; intraday order is unknown."})
+                return base
+            entry = float(open_) if float(zone_low) <= float(open_) <= float(zone_high) else float(zone_high)
+            target = entry + (entry - float(stop))
+            base.update({"entry_eligible": True, "entry_filled": True, "entry_fill_est": round(entry, 2)})
+        highs.append(float(high))
+        lows.append(float(low))
+        hit_stop, hit_target = float(low) <= float(stop), float(high) >= float(target)
+        if hit_stop and hit_target:
+            base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both stop and target; intraday order is unknown."})
+            return base
+        if hit_target or hit_stop:
+            mfe = (max(highs) / entry - 1) * 100
+            mae = (min(lows) / entry - 1) * 100
+            close_return = (float(close) / entry - 1) * 100
+            base.update({
+                "path_status": "SETTLED", "target_hit": hit_target, "stop_hit": hit_stop,
+                "evaluation_run_date": bar.get("date") or bar.get("history_date") or evaluation_date,
+                "mfe_pct": round(mfe, 2), "mae_pct": round(mae, 2), "close_return_pct": round(close_return, 2),
+                "current_close": round(float(close), 2), "outcome_learnable": True,
+                "outcome_label": "WORKING" if hit_target else "FAILED", "outcome_score": 1.0 if hit_target else -1.0,
+                "outcome_reason": f"{'Target' if hit_target else 'Stop'} was reached first within {offset} session(s).",
+            })
+            return base
+
+    if entry is None:
+        base.update({"path_status": "NOT_FILLED", "outcome_label": "NOT_FILLED", "outcome_reason": f"Price did not enter the planned zone within {horizon} sessions."})
+        return base
+    final_close = numeric_or_none(future_rows[horizon - 1].get("close"))
+    base.update({
+        "path_status": "SETTLED", "outcome_learnable": True, "outcome_label": "STALE", "outcome_score": 0.0,
+        "mfe_pct": round((max(highs) / entry - 1) * 100, 2), "mae_pct": round((min(lows) / entry - 1) * 100, 2),
+        "close_return_pct": round((float(final_close) / entry - 1) * 100, 2) if final_close else "",
+        "current_close": round(float(final_close), 2) if final_close else "",
+        "outcome_reason": f"Entry filled but neither target nor stop was reached within {horizon} sessions.",
+    })
+    return base
+
+
 def build_backfilled_signal_outcomes(history_rows: list[dict]) -> pd.DataFrame:
     """Convert generated behavior replay rows into settled learning samples.
 
@@ -2532,14 +2697,11 @@ def build_backfilled_signal_outcomes(history_rows: list[dict]) -> pd.DataFrame:
     for ticker_rows in by_ticker.values():
         by_date = {str(item.get("date") or ""): item for item in sorted(ticker_rows, key=lambda item: str(item.get("date") or ""))}
         ordered = [by_date[date] for date in sorted(date for date in by_date if date)]
-        for prior, current in zip(ordered, ordered[1:]):
+        for index, prior in enumerate(ordered[:-1]):
             prior_action = prior.get("action", "")
             if prior_action not in SELF_SCORE_ACTIONS:
                 continue
-            evaluation_date = str(current.get("date") or "")
-            if not evaluation_date:
-                continue
-            outcomes.append(self_score_prior_signal(prior, current, evaluation_date))
+            outcomes.append(score_signal_horizon(prior, ordered[index + 1 : index + 1 + LEARNING_HORIZON_SESSIONS]))
 
     if not outcomes:
         return pd.DataFrame()
@@ -2699,6 +2861,10 @@ def build_learning_stats(
     # Every learning row must use the current executable entry model. Legacy
     # rows with no version are not comparable and must not influence weights.
     usable = usable[usable["entry_model_version"].astype(str) == LEARNING_MODEL_VERSION]
+    if "label_horizon_sessions" in usable.columns:
+        usable = usable[pd.to_numeric(usable["label_horizon_sessions"], errors="coerce") == LEARNING_HORIZON_SESSIONS]
+    if "path_status" in usable.columns:
+        usable = usable[usable["path_status"].astype(str).str.upper() == "SETTLED"]
     if usable.empty:
         return {}
 
@@ -2724,6 +2890,7 @@ def build_learning_stats(
             working = int((labels == "WORKING").sum())
             failed = int((labels == "FAILED").sum())
             trap_avoided = int((labels == "TRAP_AVOIDED").sum())
+            no_edge = int((labels == "STALE").sum())
             distinct_tickers = int(group["ticker"].dropna().astype(str).str.upper().nunique()) if "ticker" in group.columns else 0
             evaluation_series = pd.to_datetime(group["evaluation_run_date"], errors="coerce").dropna() if "evaluation_run_date" in group.columns else pd.Series(dtype="datetime64[ns]")
             evaluation_dates = int(evaluation_series.dt.normalize().nunique()) if not evaluation_series.empty else 0
@@ -2734,6 +2901,11 @@ def build_learning_stats(
                 "working_rate": working / total if total else 0.0,
                 "failed_rate": failed / total if total else 0.0,
                 "trap_avoided_rate": trap_avoided / total if total else 0.0,
+                # Dirichlet smoothing avoids treating a small exact bucket as
+                # a precise forecast. The remaining mass is explicit no-edge.
+                "upside_probability": (working + 1) / (total + 3),
+                "downside_probability": (failed + 1) / (total + 3),
+                "no_edge_probability": (no_edge + trap_avoided + 1) / (total + 3),
                 "avg_score": float(scores.mean()) if not scores.empty else 0.0,
                 "avg_return_pct": float(returns.mean()) if not returns.empty else None,
                 "scope": scope,
@@ -2788,6 +2960,13 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
                 f"Learning pending: needs at least {LEARNING_MIN_SAMPLES} settled samples; "
                 f"currently has {row['learning_sample_count']} from {row['learning_scope']}."
             )
+            row["prediction_horizon_sessions"] = LEARNING_HORIZON_SESSIONS
+            row["prediction_upside_probability"] = ""
+            row["prediction_downside_probability"] = ""
+            row["prediction_no_edge_probability"] = ""
+            row["prediction_confidence"] = 0.0
+            row["prediction_model_version"] = LEARNING_MODEL_VERSION
+            row["prediction_state"] = "INSUFFICIENT_EVIDENCE"
             continue
 
         avg_score = float(stats.get("avg_score", 0.0))
@@ -2886,6 +3065,15 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         row["learning_scope"] = selected_scope
         row["learning_key_used"] = selected_key
         row["learning_plan"] = plan
+        sample_confidence = min(0.90, int(stats.get("sample_count", 0)) / (int(stats.get("sample_count", 0)) + 12.0))
+        diversity_confidence = min(1.0, distinct_tickers / LEARNING_CONFIRM_MIN_DISTINCT_TICKERS) * min(1.0, evaluation_dates / LEARNING_CONFIRM_MIN_EVALUATION_DATES)
+        row["prediction_horizon_sessions"] = LEARNING_HORIZON_SESSIONS
+        row["prediction_upside_probability"] = round(float(stats.get("upside_probability", 0.0)), 3)
+        row["prediction_downside_probability"] = round(float(stats.get("downside_probability", 0.0)), 3)
+        row["prediction_no_edge_probability"] = round(float(stats.get("no_edge_probability", 0.0)), 3)
+        row["prediction_confidence"] = round(sample_confidence * diversity_confidence, 3)
+        row["prediction_model_version"] = LEARNING_MODEL_VERSION
+        row["prediction_state"] = "CALIBRATED" if promotion_eligible else "REPORTING_ONLY"
 
 
 def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_pullback_pct: float) -> tuple[float, str]:
@@ -3459,6 +3647,13 @@ def classify_and_score(
     breakout_vol = vol_ready and row.volume > row.vol_ma * 1.1 and (close > prev.high or close > row.ema_fast) and row.close_loc >= 0.60
     breakdown_vol = vol_ready and row.volume > row.vol_ma * 1.2 and close < open_ and close < row.ema_fast and close < prev.low and row.close_loc <= 0.45
     exhaust_vol = vol_ready and row.volume > row.vol_ma * 1.5 and atr_now > 0 and (close - row.ema_fast) / atr_now >= 3.375 and row.close_loc <= 0.55
+    demand_days_5 = int(row.demand_days_5) if not pd.isna(row.demand_days_5) else 0
+    supply_days_5 = int(row.supply_days_5) if not pd.isna(row.supply_days_5) else 0
+    signed_volume_pressure_5 = float(row.signed_volume_pressure_5) if not pd.isna(row.signed_volume_pressure_5) else 0.0
+    volatility_contraction = bool(row.volatility_contraction_5) if not pd.isna(row.volatility_contraction_5) else False
+    volume_contraction = bool(row.volume_contraction_5) if not pd.isna(row.volume_contraction_5) else False
+    bull_trap_confirmed = bool(row.bull_trap_confirmed)
+    bear_trap_confirmed = bool(row.bear_trap_confirmed)
 
     buyer_score = min(
         100.0,
@@ -3942,6 +4137,7 @@ def classify_and_score(
     distribution_score += 10.0 if trend_damage and close < row.ema_fast else 0.0
     distribution_score += 8.0 if upper_wick > body_for_ratio * 1.5 and row.close_loc <= 0.50 else 0.0
     distribution_score += 8.0 if vol_ready and row.volume > row.vol_ma * 1.4 and close < prev.close else 0.0
+    distribution_score += 16.0 if supply_days_5 >= 3 and signed_volume_pressure_5 < -0.25 else 0.0
     distribution_score = clamp_float(distribution_score, 0.0, 100.0)
 
     absorption_score = 0.0
@@ -3951,6 +4147,7 @@ def classify_and_score(
     absorption_score += 12.0 if buyer_control else 0.0
     absorption_score += 10.0 if lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.55 else 0.0
     absorption_score += 8.0 if vol_ready and row.volume >= row.vol_ma and low <= row.ema_fast * 1.02 and close >= row.ema_slow else 0.0
+    absorption_score += 16.0 if demand_days_5 >= 3 and signed_volume_pressure_5 > 0.20 else 0.0
     absorption_score -= 18.0 if breakdown_vol else 0.0
     absorption_score -= 12.0 if seller_control else 0.0
     absorption_score = clamp_float(absorption_score, 0.0, 100.0)
@@ -3968,7 +4165,7 @@ def classify_and_score(
     failed_reclaim = prior_high_retest and close < max(prior_high, row.ema_fast) and row.close_loc <= 0.50
     failed_breakout = setup in {"BREAKOUT BUY", "MOMENTUM BUY"} and prior_high_retest and close <= prior_high and row.close_loc <= 0.55
     bull_trap_score = 0.0
-    bull_trap_score += 28.0 if failed_breakout else 0.0
+    bull_trap_score += 40.0 if bull_trap_confirmed else 28.0 if failed_breakout else 0.0
     bull_trap_score += 24.0 if greed_rejected else 0.0
     bull_trap_score += 18.0 if fomo and row.close_loc < 0.60 else 0.0
     bull_trap_score += 14.0 if upper_wick > body_for_ratio * 1.5 and row.close_loc <= 0.50 else 0.0
@@ -3979,7 +4176,7 @@ def classify_and_score(
     support_flush = low < prev.low or low <= row.ema_fast or low <= row.lower_bb
     false_breakdown = support_flush and close >= min(prev.close, row.ema_slow) and row.close_loc >= 0.55 and not confirmed_break
     bear_trap_score = 0.0
-    bear_trap_score += 28.0 if false_breakdown else 0.0
+    bear_trap_score += 40.0 if bear_trap_confirmed else 28.0 if false_breakdown else 0.0
     bear_trap_score += 24.0 if fear_rejected else 0.0
     bear_trap_score += 14.0 if lower_wick > body_for_ratio * 1.5 and row.close_loc >= 0.55 else 0.0
     bear_trap_score += 10.0 if vol_ready and row.volume >= row.vol_ma and close > open_ and support_flush else 0.0
@@ -3993,6 +4190,7 @@ def classify_and_score(
     demand_control_score += 16.0 if breakout_vol else 12.0 if accum_vol else 8.0 if row.close_loc >= 0.62 and close > prev.close else 0.0
     demand_control_score += 12.0 if close > row.ema_fast and close > row.ema_slow else 0.0
     demand_control_score += 8.0 if next_day_bias_score >= 70.0 else 0.0
+    demand_control_score += 10.0 if volatility_contraction and volume_contraction and breakout_vol else 0.0
     demand_control_score -= 18.0 if distribution_score >= 35.0 else 0.0
     demand_control_score -= 16.0 if bull_trap_score >= 40.0 else 0.0
     demand_control_score -= 14.0 if fomo or greed_rejected or seller_control else 0.0
@@ -4043,11 +4241,11 @@ def classify_and_score(
         operator_pressure_score = operator_pressure_risk_score
     operator_blocks_buy = operator_pressure in {"SHORT / DISTRIBUTION PRESSURE", "DISTRIBUTION"}
 
-    if bull_trap_score >= 58.0 and bull_trap_score >= bear_trap_score and distribution_score >= 35.0:
+    if bull_trap_confirmed or (bull_trap_score >= 58.0 and bull_trap_score >= bear_trap_score and distribution_score >= 35.0):
         operator_state = "BULL_TRAP"
         operator_state_score = max(bull_trap_score, distribution_score)
         operator_state_plan = "Breakout strength was rejected; avoid chasing until price reclaims the failed breakout area."
-    elif bear_trap_score >= 58.0 and bear_trap_score >= bull_trap_score and not confirmed_break:
+    elif bear_trap_confirmed or (bear_trap_score >= 58.0 and bear_trap_score >= bull_trap_score and not confirmed_break):
         operator_state = "BEAR_TRAP / SQUEEZE WATCH"
         operator_state_score = max(bear_trap_score, absorption_score, short_pressure_proxy)
         operator_state_plan = "Support break was rejected; wait for reclaim confirmation before treating it as a squeeze setup."
@@ -4558,6 +4756,13 @@ LATEST_SIGNAL_FIELDS = [
     "anti_signal_score",
     "anti_signal_level",
     "anti_signal_plan",
+    "prediction_horizon_sessions",
+    "prediction_upside_probability",
+    "prediction_downside_probability",
+    "prediction_no_edge_probability",
+    "prediction_confidence",
+    "prediction_model_version",
+    "prediction_state",
     "contextual_overlay",
     "contextual_score_adjustment",
     "contextual_plan",
