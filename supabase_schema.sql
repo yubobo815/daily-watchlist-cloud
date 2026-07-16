@@ -17,6 +17,8 @@ create table if not exists public.watchlist_ohlcv (
 create index if not exists watchlist_ohlcv_data_date_idx
   on public.watchlist_ohlcv (data_date);
 
+grant select, insert, update, delete on public.watchlist_ohlcv to service_role;
+
 create table if not exists public.watchlist_snapshots (
   run_date date not null,
   ticker text not null,
