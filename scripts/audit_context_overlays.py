@@ -561,9 +561,9 @@ def audit_ohlcv_cache_reuses_persistent_history():
         dwo.fetch_chart = original_fetch
         dwo.persist_ohlcv_to_supabase = original_persist
 
-    assert_true(calls["years"] == 1, "seeded OHLCV cache must request only the short live refresh window")
+    assert_true(calls["years"] == dwo.OHLCV_INCREMENTAL_YEARS, "seeded OHLCV cache must request only the short live refresh window")
     assert_true(len(combined) == dwo.OHLCV_RETENTION_BARS, "OHLCV cache must enforce the fixed retention cap")
-    assert_true(calls["persisted"] == dwo.OHLCV_RETENTION_BARS, "merged OHLCV cache must be persisted at the fixed cap")
+    assert_true(0 < calls["persisted"] < dwo.OHLCV_RETENTION_BARS, "seeded OHLCV cache must write only recent revisions")
 
 
 def audit_risk_off_or_missing_replay_cannot_seed_bullish_learning():

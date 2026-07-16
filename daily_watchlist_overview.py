@@ -976,6 +976,7 @@ ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().l
 # while keeping the persistent raw-data layer well below the database budget.
 OHLCV_RETENTION_BARS = int(os.getenv("OHLCV_RETENTION_BARS", "400"))
 OHLCV_MIN_READY_BARS = int(os.getenv("OHLCV_MIN_READY_BARS", "300"))
+OHLCV_INCREMENTAL_YEARS = float(os.getenv("OHLCV_INCREMENTAL_YEARS", "0.1"))
 
 
 def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[bool, str]:
@@ -1058,14 +1059,19 @@ def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool) -> pd.DataFram
     if not refresh and not stored.empty:
         return stored.tail(OHLCV_RETENTION_BARS).reset_index(drop=True)
 
-    # A one-year live window is enough to overwrite recent sessions after the
-    # persistent cache has been seeded. It avoids re-downloading two years daily.
-    live = fetch_chart(ticker, years=years if needs_seed else 1, refresh=refresh)
+    # Once seeded, request a short window and only write dates that are new or
+    # recent enough to correct provider revisions. This keeps daily syncs small.
+    live = fetch_chart(ticker, years=years if needs_seed else OHLCV_INCREMENTAL_YEARS, refresh=refresh)
     combined = pd.concat([stored, live], ignore_index=True, sort=False)
     combined["date"] = pd.to_datetime(combined["date"], errors="coerce")
     combined = combined.dropna(subset=["date", "open", "high", "low", "close", "volume"])
     combined = combined.sort_values("date").drop_duplicates("date", keep="last").tail(OHLCV_RETENTION_BARS).reset_index(drop=True)
-    persist_ohlcv_to_supabase(ticker, combined)
+    if needs_seed:
+        persist_ohlcv_to_supabase(ticker, combined)
+    else:
+        latest_stored = pd.Timestamp(stored["date"].max())
+        revision_start = latest_stored - pd.Timedelta(days=10)
+        persist_ohlcv_to_supabase(ticker, live.loc[pd.to_datetime(live["date"]) >= revision_start])
     return combined
 
 
