@@ -3751,6 +3751,225 @@ body.ticker-page .visual-summary > div { background: var(--panel-strong); }
 .badge.avoid,
 .change-chip.quiet { color: #59655f; }
 .down { color: var(--tone-exit); }
+
+/* Market activity is secondary context. Keep it collapsed by default in HTML,
+   and use the same calm paper palette as the primary watchlist when opened. */
+#market-activity {
+  color-scheme: light;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+#market-activity > summary {
+  min-height: 46px;
+  padding: 11px 14px;
+  transition: background 140ms ease;
+}
+
+#market-activity > summary:hover,
+#market-activity > summary:focus-visible {
+  background: #f3f5ef;
+}
+
+#market-activity[open] > summary {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+#market-activity > .today-focus,
+#market-activity > .changed-today,
+#market-activity > .price-movers,
+#market-activity > .focus-list {
+  margin: 0;
+  padding: 5px 14px 14px;
+}
+
+#market-activity .section-heading {
+  margin: 14px 0 10px;
+}
+
+#market-activity .section-date {
+  border-color: var(--line);
+  background: var(--panel-strong);
+  color: var(--muted);
+}
+
+#market-activity .focus-item,
+#market-activity .change-card,
+#market-activity .focus-list-item {
+  border-color: var(--line);
+  background: #f7f7f2;
+  color: var(--ink);
+  box-shadow: 0 5px 14px rgba(48, 59, 53, 0.05);
+}
+
+#market-activity .focus-item:hover,
+#market-activity .change-card:hover,
+#market-activity .focus-list-item:hover {
+  background: #f1f4ed;
+}
+
+#market-activity .focus-item.tone-buy,
+#market-activity .change-card.tone-buy { border-top-color: var(--tone-buy); }
+#market-activity .focus-item.tone-continue,
+#market-activity .change-card.tone-continue { border-top-color: var(--tone-continue); }
+#market-activity .focus-item.tone-setup,
+#market-activity .change-card.tone-setup { border-top-color: var(--tone-setup); }
+#market-activity .focus-item.tone-watch,
+#market-activity .change-card.tone-watch { border-top-color: var(--tone-watch); }
+#market-activity .focus-item.tone-exit,
+#market-activity .change-card.tone-exit { border-top-color: var(--tone-exit); }
+#market-activity .focus-item.tone-avoid,
+#market-activity .change-card.tone-avoid { border-top-color: var(--tone-avoid); }
+
+#market-activity .focus-list-item.tone-buy { border-left-color: var(--tone-buy); }
+#market-activity .focus-list-item.tone-continue { border-left-color: var(--tone-continue); }
+#market-activity .focus-list-item.tone-setup { border-left-color: var(--tone-setup); }
+#market-activity .focus-list-item.tone-watch { border-left-color: var(--tone-watch); }
+#market-activity .focus-list-item.tone-exit { border-left-color: var(--tone-exit); }
+#market-activity .focus-list-item.tone-avoid { border-left-color: var(--tone-avoid); }
+
+#market-activity .focus-item strong,
+#market-activity .change-card-head strong,
+#market-activity .change-card-head span,
+#market-activity .focus-list-item strong {
+  color: var(--ink);
+}
+
+#market-activity .focus-main span,
+#market-activity .focus-meta,
+#market-activity .focus-list-item small,
+#market-activity .section-note,
+#market-activity .compact-empty {
+  color: var(--muted);
+}
+
+#market-activity .reason-chip,
+#market-activity .badge.pattern-pill,
+#market-activity .badge.conviction-pill,
+#market-activity .badge.entry-pill,
+#market-activity .change-chip.signal {
+  border-color: var(--line-soft);
+  background: #ecefe9;
+  color: #56625c;
+}
+
+#market-activity .change-chip b {
+  color: #66736c;
+}
+
+#market-activity .focus-empty,
+#market-activity .focus-unlock,
+#market-activity .focus-controls {
+  border-color: var(--line);
+  background: var(--panel-strong);
+  color: var(--muted);
+}
+
+#market-activity .focus-unlock input {
+  border-color: var(--line);
+  background: var(--field);
+  color: var(--ink);
+}
+
+#market-activity .focus-unlock button,
+#market-activity .focus-controls button {
+  border-color: #9eb8a8;
+  background: #e4eee6;
+  color: #285b45;
+}
+
+#market-activity .focus-unlock button:hover,
+#market-activity .focus-controls button:hover {
+  border-color: #789d88;
+  background: #d8e8dc;
+}
+
+#market-activity .focus-remove {
+  border-color: var(--line);
+  background: var(--field);
+  color: var(--muted);
+}
+
+#market-activity .focus-remove:hover {
+  border-color: #d8aaa3;
+  background: var(--exit);
+  color: var(--tone-exit);
+}
+
+@media (max-width: 960px) {
+  #market-activity {
+    border-radius: 12px;
+  }
+
+  #market-activity > summary {
+    padding-right: 11px;
+    padding-left: 11px;
+  }
+
+  #market-activity > summary span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #market-activity > .today-focus,
+  #market-activity > .changed-today,
+  #market-activity > .price-movers,
+  #market-activity > .focus-list {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  #market-activity .focus-list-item {
+    padding: 9px 8px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--tone-avoid);
+    border-radius: 10px;
+    background: #f7f7f2;
+  }
+
+  #market-activity .focus-list-grid {
+    gap: 7px;
+  }
+
+  #market-activity .change-rail,
+  #market-activity .change-rail.rolling {
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  #market-activity .change-rail.rolling .change-track {
+    width: max-content;
+    animation: none;
+  }
+
+  #market-activity .change-card {
+    scroll-snap-align: start;
+  }
+
+  #market-activity .focus-unlock input,
+  #market-activity .focus-unlock button,
+  #market-activity .focus-controls button {
+    min-height: 44px;
+  }
+
+  #market-activity .focus-remove {
+    top: 4px;
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (max-width: 420px) {
+  #market-activity > summary span {
+    display: none;
+  }
+}
 body.ticker-page .latest-card { padding-left: 14px; border-left: 4px solid var(--line); }
 body.ticker-page .latest-card.tone-buy { border-left-color: var(--tone-buy); }
 body.ticker-page .latest-card.tone-continue { border-left-color: var(--tone-continue); }

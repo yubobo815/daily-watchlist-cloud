@@ -105,7 +105,14 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes('state.filter === "building"'), "BUILDING queue must retain Trending, Building, and Watch rows");
   assert(appSource.includes('state.filter === "risk"'), "RISK queue must retain Exit and Avoid rows");
   assert(pageSource.includes('id="market-activity"'), "secondary market activity must have a navigable target");
+  const activityTag = pageSource.match(/<details\s+[^>]*id=["']market-activity["'][^>]*>/i)?.[0] || "";
+  assert(activityTag, "market activity must remain a details element");
+  assert(!/\sopen(?:\s|=|>)/i.test(activityTag), "market activity must be collapsed by default");
   assert(appSource.includes("target.open = true"), "Activity navigation must open the details drawer before scrolling");
+  const stylesSource = fs.readFileSync("assets/styles.css", "utf8");
+  assert(stylesSource.includes("#market-activity[open] > summary"), "open market activity must have a scoped surface treatment");
+  assert(stylesSource.includes("#market-activity .focus-item"), "market activity cards must use scoped palette overrides");
+  assert(stylesSource.includes("#market-activity .focus-unlock input"), "saved-name controls must use the shared light palette");
   assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker scanner review panel");
   assert(!appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must not repeat the removed Pine confirmation copy");
   assert(appSource.includes("function contextSummary(row)"), "ticker context must be summarized in natural language");
