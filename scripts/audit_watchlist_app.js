@@ -2,6 +2,7 @@ const { conservativeFallbackRow, staticLatestPayload, staticTickerPayload } = re
 const { publishedLatestPayload, publishedTickerPayload } = require("../api/_published_data");
 const { committedPublicationMatches, rowDto, runDto } = require("../api/_supabase");
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
+const { latestCompletedMarketSession, marketSessionAge, previousMarketSession } = require("../api/_market_session");
 const fs = require("fs");
 
 const REQUIRED_GATES = [
@@ -118,6 +119,9 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("function contextSummary(row)"), "ticker context must be summarized in natural language");
   assert(appSource.includes("function predictionNarrative(row)"), "ticker context must explain prediction evidence in natural language");
   assert(appSource.includes("function recentBehaviorSummary(row, previous)"), "recent behavior must be summarized in natural language");
+  assert(appSource.includes("function renderQualityScore(row)"), "watchlist quality must distinguish unavailable evidence from a numeric score");
+  assert(appSource.includes('"GATE BLOCK"'), "missing execution evidence must render as a gate block instead of a synthetic number");
+  assert(appSource.includes('antiSignal === "BLOCK"'), "anti-signal blocks must suppress the numeric quality display");
   assert(appSource.includes("Context &amp; evidence"), "ticker panel must use the reader-facing context label");
   assert(!appSource.includes("<summary>More context</summary>"), "ticker panel must not expose the old machine-context label");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
@@ -131,6 +135,51 @@ function auditDecisionFunnelUi() {
   assert(pageSource.includes('data-mobile-filter="risk"'), "mobile Risk filter must use the aggregate queue");
   assert(!appSource.includes('if (state.query.trim()) state.filter = "all"'), "search must preserve the selected decision queue");
   return { executionQueues: 3, activityTarget: "market-activity", scannerLegend: true };
+}
+
+function auditMarketSessionFreshness() {
+  const thursdayAfterClose = new Date("2026-07-17T02:00:00Z"); // 22:00 Thursday in New York.
+  const fridayBeforeClose = new Date("2026-07-17T19:00:00Z");
+  const fridayAfterClose = new Date("2026-07-17T20:01:00Z");
+  const mondayBeforeClose = new Date("2026-07-20T15:00:00Z");
+  const independenceHoliday = new Date("2026-07-03T21:00:00Z");
+  const blackFridayAfterEarlyClose = new Date("2026-11-27T18:01:00Z");
+
+  assert(latestCompletedMarketSession(thursdayAfterClose).toISOString().slice(0, 10) === "2026-07-16", "UTC rollover must not advance the completed New York session");
+  assert(marketSessionAge("2026-07-16", thursdayAfterClose) === 0, "Thursday close must remain current during Thursday evening in New York");
+  assert(marketSessionAge("2026-07-16", fridayBeforeClose) === 0, "prior close must remain current before Friday market close");
+  assert(marketSessionAge("2026-07-16", fridayAfterClose) === 1, "prior close must become one session old after Friday market close");
+  assert(marketSessionAge("2026-07-17", mondayBeforeClose) === 0, "Friday close must remain current before Monday market close");
+  assert(marketSessionAge("2026-07-02", independenceHoliday) === 0, "exchange holiday must not create a phantom completed session");
+  assert(marketSessionAge("2026-11-27", blackFridayAfterEarlyClose) === 0, "early-close session must become current after its actual close");
+  assert(marketSessionAge("2099-01-01", thursdayAfterClose) === null, "future market dates must fail closed");
+
+  const currentSession = latestCompletedMarketSession().toISOString().slice(0, 10);
+  const dto = rowDto({
+    ticker: "CURRENT_SESSION",
+    data_date: currentSession,
+    action: "BUY CANDIDATE",
+    score: 96,
+    payload: {
+      adjusted_score: 96,
+      data_age_days: 0,
+      freshness_block: "NO",
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      walk_forward_permission: "ALLOW",
+      risk_permission: "ALLOW",
+    },
+  });
+  assert(dto.payload.data_age_days === 0, "API DTO must agree with the scanner for the latest completed session");
+  assert(dto.payload.freshness_block === "NO", "API DTO must not stale-block the latest completed session");
+  assert(dto.score === 96 && adjustedScore(dto) === 96, "fresh API DTO must preserve raw and adjusted scores");
+
+  return {
+    utcRolloverAge: marketSessionAge("2026-07-16", thursdayAfterClose),
+    afterNextCloseAge: marketSessionAge("2026-07-16", fridayAfterClose),
+    holidayAge: marketSessionAge("2026-07-02", independenceHoliday),
+    currentDtoFreshness: dto.payload.freshness_block,
+  };
 }
 
 function auditLearningReadoutUi() {
@@ -700,10 +749,11 @@ function auditSupabaseFallback() {
   assert(staleContradiction.payload.freshness_block === "YES", "stale age must override freshness_block=NO");
   assert(staleContradiction.payload.freshness_status === "STALE_BLOCK", "stale age must override a contradictory fresh status");
   assert(adjustedScore(staleContradiction) <= 49, "stale age must cap the contradictory fresh row");
+  assert(staleContradiction.score === 98, "freshness policy must preserve the raw technical score");
 
   const dateAgeContradiction = rowDto({
     ticker: "DATE_CONTRADICTION",
-    data_date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+    data_date: previousMarketSession(latestCompletedMarketSession()).toISOString().slice(0, 10),
     action: "BUY CANDIDATE",
     score: 98,
     payload: {
@@ -720,6 +770,7 @@ function auditSupabaseFallback() {
   assert(dateAgeContradiction.payload.freshness_status === "STALE_BLOCK", "data_date contradiction must replace fresh status");
   assert(dateAgeContradiction.payload.reason_codes.includes("data_age_date_contradiction"), "data_date contradiction must be auditable");
   assert(adjustedScore(dateAgeContradiction) <= 49, "data_date contradiction must cap actionable rank");
+  assert(dateAgeContradiction.score === 98, "date freshness policy must not overwrite raw technical evidence");
 
   const antiBullTrap = rowDto({
     ticker: "TRAP",
@@ -750,6 +801,7 @@ function auditSupabaseFallback() {
   assert(antiBullTrap.action === "SETUP FORMING", "anti-signal bull-trap BUY row must be downgraded");
   assert(antiBullTrap.payload.anti_signal_level === "BLOCK", "anti-signal bull-trap row must carry BLOCK level");
   assert(antiBullTrap.payload.buy_tier === "SETUP ONLY", "anti-signal bull-trap row must not keep A+ BUY tier");
+  assert(antiBullTrap.score === 112, "anti-signal policy must preserve the raw technical score");
   assert(Number(antiBullTrap.payload.execution_priority) >= 4, "anti-signal bull-trap row must drop execution priority");
   assert(adjustedScore(antiBullTrap) <= 49, "anti-signal bull-trap row must be capped below actionable rank");
 
@@ -917,6 +969,7 @@ async function main() {
     historicalReplayDto: auditHistoricalReplayDto(),
     searchBehavior: auditSearchBehavior(),
     decisionFunnelUi: auditDecisionFunnelUi(),
+    marketSessionFreshness: auditMarketSessionFreshness(),
     learningReadoutUi: auditLearningReadoutUi(),
     storageGuard: auditStorageGuard(),
     partialRunStatus: auditPartialRunStatus(),

@@ -339,6 +339,35 @@ def audit_learning_upgrade_respects_anti_signals():
     assert_true(priority == 4, "blocked learning setup must stay low execution priority")
 
 
+def audit_safety_gates_preserve_raw_technical_score():
+    trapped = learning_confirmed_setup_row(
+        score=112,
+        adjusted_score=118,
+        anti_signal_level="BLOCK",
+        anti_signal_score=76,
+        anti_signal_plan="Bull-trap evidence blocks execution.",
+        operator_state="BULL_TRAP",
+        operator_pressure="DISTRIBUTION",
+        bull_trap_score=76,
+        distribution_score=62,
+    )
+    dwo.apply_anti_signal_penalty(trapped)
+    assert_true(trapped["score"] == 112, "anti-signal execution policy must preserve the raw technical score")
+    assert_true(trapped["adjusted_score"] <= 49, "anti-signal execution policy must cap only the adjusted rank")
+
+
+def audit_freshness_gate_preserves_raw_technical_score():
+    candidate = learning_confirmed_setup_row(score=96, adjusted_score=96)
+    original_age = dwo.nyse_session_age
+    try:
+        dwo.nyse_session_age = lambda _value: 1
+        dwo.apply_data_freshness_gate(candidate, "2026-07-17", set())
+    finally:
+        dwo.nyse_session_age = original_age
+    assert_true(candidate["score"] == 96, "stale-data policy must preserve the raw technical score")
+    assert_true(candidate["adjusted_score"] <= 49, "stale-data policy must cap only the adjusted rank")
+
+
 def audit_learning_upgrade_respects_personality_gate():
     blocked = learning_confirmed_setup_row(personality_setup_allowed="NO")
     tier, priority, _ = dwo.buy_tier_for(blocked, 0)
@@ -915,6 +944,8 @@ def main():
     audit_action_display_labels_match_product_ui()
     audit_learning_can_upgrade_building_execution_tier()
     audit_learning_upgrade_respects_anti_signals()
+    audit_safety_gates_preserve_raw_technical_score()
+    audit_freshness_gate_preserves_raw_technical_score()
     audit_learning_upgrade_respects_personality_gate()
     audit_stop_breach_cannot_be_working()
     audit_stale_stop_breach_is_not_learnable()
@@ -952,7 +983,7 @@ def main():
     audit_personality_exit_separates_profit_protect()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 52,
+        "cases": 54,
     })
 
 

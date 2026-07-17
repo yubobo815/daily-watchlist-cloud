@@ -845,6 +845,26 @@ function fmtConviction(rowOrScore) {
   return fmtNumber(convictionScore(rowOrScore), 0);
 }
 
+function renderQualityScore(row) {
+  const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
+  const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
+  const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
+  const proofBlocked = quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK");
+  const blockedLabel = freshnessBlocked
+    ? "STALE"
+    : proofBlocked
+      ? "GATE BLOCK"
+      : antiSignal === "BLOCK"
+        ? "BLOCKED"
+        : antiSignal === "CAUTION"
+          ? "CAUTION"
+          : "";
+  if (blockedLabel) {
+    return `<span class="table-score score-blocked" title="Numeric quality suppressed while execution evidence is constrained">${blockedLabel}</span>`;
+  }
+  return `<span class="table-score score-${strengthTone(row)}">${escapeHtml(fmtConviction(row))}</span>`;
+}
+
 function fmtRawScore(row) {
   return fmtNumber(numericValue(row, "score"), 1);
 }
@@ -1698,7 +1718,6 @@ function normalizeStaticFallbackRow(row, fallbackRunDate = "") {
   }
   payload.adjusted_score = capStaticFallbackScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
   next.adjusted_score = capStaticFallbackScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
-  next.score = capStaticFallbackScore(next.score);
   next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
   next.payload = payload;
   return next;
@@ -1841,7 +1860,7 @@ function renderWatchlistCell(row, key) {
   if (key === "notes") {
     return renderReasonSummary(row);
   }
-  if (key === "score") return `<span class="table-score score-${strengthTone(row)}">${escapeHtml(fmtConviction(row))}</span>`;
+  if (key === "score") return renderQualityScore(row);
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (key === "risk_pct_to_stop") {
     const risk = payloadNumeric(row, "risk_pct_to_stop");

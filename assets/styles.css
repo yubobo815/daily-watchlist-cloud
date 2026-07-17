@@ -3682,6 +3682,12 @@ body.ticker-page .latest-card {
 .watchlist-workspace .search::placeholder { color: var(--muted); }
 .watchlist-workspace .count,
 .watchlist-workspace .ticker-name { color: var(--muted); }
+.watchlist-workspace .table-score.score-blocked {
+  min-width: 0;
+  color: var(--tone-exit);
+  font-size: 10px;
+  letter-spacing: 0.035em;
+}
 
 @media (min-width: 961px) {
   .watchlist-workspace { grid-template-columns: minmax(0, 1fr) 306px; }

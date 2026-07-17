@@ -103,7 +103,6 @@ function applyAntiSignalFallback(row) {
       }
       payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
       next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
-      next.score = capScore(next.score);
     } else {
       payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score, 76);
       next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score, 76);
@@ -159,7 +158,6 @@ function conservativeFallbackRow(row) {
   payload.transition_score = capScore(payload.transition_score ?? next.transition_score ?? -25, -25);
   payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
   next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
-  next.score = capScore(next.score);
   appendReasonCode(payload, "missing_audit_gates");
   appendReasonCode(payload, "personality_setup_not_allowed");
   next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
@@ -169,7 +167,6 @@ function conservativeFallbackRow(row) {
   }
   payload.adjusted_score = capScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
   next.adjusted_score = capScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
-  next.score = capScore(next.score);
   next.payload = payload;
   return applyAntiSignalFallback(next);
 }

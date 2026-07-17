@@ -1,3 +1,5 @@
+const { marketSessionAge } = require("./_market_session");
+
 const SUPABASE_CONFIG = {
   url: process.env.SUPABASE_URL || "",
   apiKey: process.env.SUPABASE_SECRET_KEY
@@ -327,13 +329,7 @@ function isoDateOnly(value) {
 }
 
 function dataAgeDays(dataDate) {
-  const dateText = isoDateOnly(dataDate);
-  if (!dateText) return null;
-  const today = new Date();
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  const dataUtc = Date.parse(`${dateText}T00:00:00Z`);
-  if (!Number.isFinite(dataUtc)) return null;
-  return Math.floor((todayUtc - dataUtc) / 86400000);
+  return marketSessionAge(isoDateOnly(dataDate));
 }
 
 function appendReasonCode(payload, code) {
@@ -377,7 +373,6 @@ function applyPersonalitySetupGate(output, source) {
   payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -25, -25);
   payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
   output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
-  output.score = capScore(output.score);
   payload.buy_tier = "SETUP ONLY";
   payload.execution_priority = Math.max(Number(payload.execution_priority || 4), 4);
   payload.execution_plan = "Personality setup gate is NO; keep this as a setup and do not promote it to BUY.";
@@ -410,7 +405,6 @@ function applyAuditGateFallback(output, source) {
   payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -25, -25);
   payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
   output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
-  output.score = capScore(output.score);
   appendReasonCode(payload, "missing_execution_proof");
   gates.forEach((gate) => {
     if (gate.contradictory) appendReasonCode(payload, `${gate.field}_contradictory`);
@@ -463,7 +457,6 @@ function applyFreshnessFallback(output) {
       payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -30, -30);
       payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
       output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
-      output.score = capScore(output.score);
       payload.next_day_bias = "EXECUTION BLOCKED";
       payload.next_day_plan = payload.freshness_plan;
       output.notes = [output.notes, payload.freshness_plan].filter(Boolean).join("; ");
@@ -555,7 +548,6 @@ function antiSignalFallback(output) {
       }
       payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
       output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
-      output.score = capScore(output.score);
     } else {
       const cap = 76;
       payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score, cap);

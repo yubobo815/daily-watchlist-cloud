@@ -58,7 +58,7 @@ MAX_SIGNAL_RISK_PCT = 7.0
 NUMERIC_TOLERANCE = 1e-6
 TICKER_EDGE_MIN_TRADES = 6
 WALK_FORWARD_MIN_TEST_TRADES = 3
-MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "3"))
+MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "0"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
 LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "60"))
@@ -1011,7 +1011,7 @@ def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[
 
     latest_data_date = str(latest_dates.dt.date.max())
     data_age_days = nyse_session_age(latest_data_date)
-    if data_age_days is None or data_age_days > 0:
+    if data_age_days is None or data_age_days > MAX_EXECUTION_DATA_AGE_DAYS:
         return False, (
             f"Latest market data is {data_age_days if data_age_days is not None else 'unknown'} NYSE session(s) old "
             f"({latest_data_date}); not overwriting Supabase snapshots."
@@ -1625,7 +1625,7 @@ def latest_frame_date(df: pd.DataFrame) -> Optional[str]:
 def reject_stale_live_frame(df: pd.DataFrame, ticker: str, provider: str) -> None:
     latest_date = latest_frame_date(df)
     age = nyse_session_age(latest_date)
-    if age is not None and age <= 0:
+    if age is not None and age <= MAX_EXECUTION_DATA_AGE_DAYS:
         return
     raise RuntimeError(
         f"{provider} returned stale data for {display_ticker(ticker)}: "
@@ -1645,7 +1645,7 @@ def apply_data_freshness_gate(row: dict, run_date: str, cached_tickers: set[str]
     data_date = row.get("date") or row.get("data_date") or row.get("history_date")
     data_age_days = nyse_session_age(str(data_date)) if data_date else None
     cached_source = ticker in cached_tickers
-    freshness_block = data_age_days is None or data_age_days > 0
+    freshness_block = data_age_days is None or data_age_days > MAX_EXECUTION_DATA_AGE_DAYS
 
     if freshness_block:
         freshness_status = "STALE_BLOCK"
@@ -1659,7 +1659,6 @@ def apply_data_freshness_gate(row: dict, run_date: str, cached_tickers: set[str]
             row["signal_stage"] = "SETUP"
         if actionable_stale:
             row["adjusted_score"] = min(float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0), 49.0)
-            row["score"] = min(float(numeric_or_none(row.get("score")) or 0), 49.0)
             row["signal_quality"] = "STALE DATA"
             row["transition_label"] = "Data Stale"
             row["transition_score"] = min(float(numeric_or_none(row.get("transition_score")) or 0), -30.0)
@@ -1750,14 +1749,12 @@ def apply_anti_signal_penalty(row: dict) -> dict:
 
     actionable = row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
     adjusted_score = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0)
-    raw_score = float(numeric_or_none(row.get("score")) or 0)
     if level == "BLOCK":
         if row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
             row["action"] = "SETUP FORMING"
             row["signal_stage"] = "SETUP"
         if actionable:
             row["adjusted_score"] = min(adjusted_score, 49.0)
-            row["score"] = min(raw_score, 49.0)
         if row.get("next_day_bias") not in {"AVOID CHASE", "DEFENSIVE / EXIT RISK", "EXECUTION BLOCKED"}:
             row["next_day_bias"] = "EXECUTION BLOCKED"
             row["next_day_plan"] = plan
@@ -5268,13 +5265,11 @@ def apply_latest_signal_context(row: dict, ticker_history: list[dict]) -> dict:
         if latest.get("execution_block") == "YES" and row.get("action") in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
             row["action"] = "SETUP FORMING"
             row["signal_stage"] = "SETUP"
-            row["score"] = min(row_float(row, "score"), 69.0)
             row["adjusted_score"] = min(row_float(row, "adjusted_score", row_float(row, "score")), 49.0)
             append_unique_reason(row, "latest_context_execution_block")
         elif overlay == "VOLATILE TREND HOLD" and row.get("action") == "EXIT PRESSURE":
             row["action"] = "WATCH TREND"
             row["signal_stage"] = "WATCH"
-            row["score"] = max(row_float(row, "score"), 50.0)
             row["adjusted_score"] = max(row_float(row, "adjusted_score", row_float(row, "score")), 50.0)
             append_unique_reason(row, "latest_context_volatile_hold")
     return row
