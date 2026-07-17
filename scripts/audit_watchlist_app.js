@@ -120,8 +120,11 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("function predictionNarrative(row)"), "ticker context must explain prediction evidence in natural language");
   assert(appSource.includes("function recentBehaviorSummary(row, previous)"), "recent behavior must be summarized in natural language");
   assert(appSource.includes("function renderQualityScore(row)"), "watchlist quality must distinguish unavailable evidence from a numeric score");
+  assert(appSource.includes("function qualityConstraintLabel(row)"), "all quality surfaces must share the same constraint semantics");
+  assert(appSource.includes("function qualityDiagnostic(row)"), "ticker diagnostics must separate technical score from adjusted rank");
   assert(appSource.includes('"GATE BLOCK"'), "missing execution evidence must render as a gate block instead of a synthetic number");
-  assert(appSource.includes('antiSignal === "BLOCK"'), "anti-signal blocks must suppress the numeric quality display");
+  assert(appSource.includes('if (antiSignal === "BLOCK") return "BLOCKED"'), "anti-signal blocks must suppress the numeric quality display");
+  assert(!appSource.includes("Trend quality ${fmtConviction(latest)} / 100"), "ticker diagnostics must not present adjusted rank as synthetic trend quality");
   assert(appSource.includes("Context &amp; evidence"), "ticker panel must use the reader-facing context label");
   assert(!appSource.includes("<summary>More context</summary>"), "ticker panel must not expose the old machine-context label");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");

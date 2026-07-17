@@ -812,7 +812,21 @@ function scoreBand(value) {
   return "risk";
 }
 
+function qualityConstraintLabel(row) {
+  if (!row || typeof row !== "object") return "";
+  const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
+  const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
+  const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
+  if (freshnessBlocked) return "STALE";
+  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "GATE BLOCK";
+  if (antiSignal === "BLOCK") return "BLOCKED";
+  if (antiSignal === "CAUTION") return "CAUTION";
+  return "";
+}
+
 function strengthLabel(rowOrScore) {
+  const constraint = qualityConstraintLabel(rowOrScore);
+  if (constraint) return constraint;
   if (typeof rowOrScore === "object" && actionKind(rowOrScore.action) === "exit") return "Exit Risk";
   const band = scoreBand(convictionScore(rowOrScore));
   if (band === "strong") return "High";
@@ -822,6 +836,7 @@ function strengthLabel(rowOrScore) {
 }
 
 function strengthTone(rowOrScore) {
+  if (qualityConstraintLabel(rowOrScore)) return "risk";
   if (typeof rowOrScore === "object" && actionKind(rowOrScore.action) === "exit") return "risk";
   return scoreBand(convictionScore(rowOrScore));
 }
@@ -846,23 +861,20 @@ function fmtConviction(rowOrScore) {
 }
 
 function renderQualityScore(row) {
-  const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
-  const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
-  const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
-  const proofBlocked = quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK");
-  const blockedLabel = freshnessBlocked
-    ? "STALE"
-    : proofBlocked
-      ? "GATE BLOCK"
-      : antiSignal === "BLOCK"
-        ? "BLOCKED"
-        : antiSignal === "CAUTION"
-          ? "CAUTION"
-          : "";
+  const blockedLabel = qualityConstraintLabel(row);
   if (blockedLabel) {
     return `<span class="table-score score-blocked" title="Numeric quality suppressed while execution evidence is constrained">${blockedLabel}</span>`;
   }
   return `<span class="table-score score-${strengthTone(row)}">${escapeHtml(fmtConviction(row))}</span>`;
+}
+
+function qualityDiagnostic(row) {
+  const pattern = setupLabel(row.setup);
+  const constraint = qualityConstraintLabel(row);
+  const raw = fmtNumber(numericValue(row, "score"), 1);
+  const adjusted = fmtNumber(scannerScoreValue(row), 1);
+  if (constraint) return `Pattern ${pattern} · Quality ${constraint} · technical score ${raw} · adjusted rank ${adjusted}`;
+  return `Pattern ${pattern} · execution rank ${adjusted} / 128`;
 }
 
 function fmtRawScore(row) {
@@ -2639,7 +2651,7 @@ function renderLatestHistoryPanel(latest) {
         <div><span>Validation</span><strong>${escapeHtml(validationSummary(latest))}</strong></div>
       </div>
       <p class="latest-rationale">${escapeHtml(whyThisMatters(latest).slice(0, 2).join(" · ") || behaviorDetail(latest))}</p>
-      <details class="detail-diagnostics"><summary>Diagnostics</summary>${renderScoreBreakdown(latest)}<p>${escapeHtml(`Pattern ${setupLabel(latest.setup)} · Trend quality ${fmtConviction(latest)} / 100`)}</p></details>
+      <details class="detail-diagnostics"><summary>Diagnostics</summary>${renderScoreBreakdown(latest)}<p>${escapeHtml(qualityDiagnostic(latest))}</p></details>
     </div>
   `;
 }
