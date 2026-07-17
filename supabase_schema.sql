@@ -328,9 +328,6 @@ create index if not exists watchlist_signal_outcomes_eval_idx
 create index if not exists watchlist_signal_outcomes_ticker_idx
   on public.watchlist_signal_outcomes (ticker, evaluation_run_date desc);
 
-create index if not exists focus_tickers_list_idx
-  on public.focus_tickers (list_id, ticker);
-
 alter table public.watchlist_snapshots add column if not exists signal_stage text;
 alter table public.watchlist_snapshots add column if not exists open numeric;
 alter table public.watchlist_snapshots add column if not exists high numeric;
@@ -543,9 +540,16 @@ set publication_id = coalesce(
 where publication_id is null or publication_id = '';
 
 alter table public.watchlist_signal_outcomes alter column publication_id set not null;
-alter table public.watchlist_signal_outcomes drop constraint if exists watchlist_signal_outcomes_pkey;
-alter table public.watchlist_signal_outcomes
-  add primary key (publication_id, signal_run_date, evaluation_run_date, ticker);
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.watchlist_signal_outcomes'::regclass and contype = 'p'
+  ) then
+    alter table public.watchlist_signal_outcomes
+      add primary key (publication_id, signal_run_date, evaluation_run_date, ticker);
+  end if;
+end $$;
 create index if not exists watchlist_signal_outcomes_publication_idx
   on public.watchlist_signal_outcomes (publication_id, evaluation_run_date desc);
 
@@ -562,16 +566,21 @@ where publication_id is null or publication_id = '';
 alter table public.watchlist_snapshots alter column publication_id set not null;
 alter table public.watchlist_behavior_history alter column publication_id set not null;
 alter table public.watchlist_refresh_runs alter column publication_id set not null;
-alter table public.watchlist_snapshots drop constraint if exists watchlist_snapshots_pkey;
-alter table public.watchlist_snapshots add primary key (publication_id, ticker);
-alter table public.watchlist_behavior_history drop constraint if exists watchlist_behavior_history_pkey;
-alter table public.watchlist_behavior_history add primary key (publication_id, ticker, history_date);
-alter table public.watchlist_refresh_runs drop constraint if exists watchlist_refresh_runs_pkey;
-alter table public.watchlist_refresh_runs add primary key (publication_id);
-create index if not exists watchlist_snapshots_publication_idx
-  on public.watchlist_snapshots (publication_id, ticker);
-create index if not exists watchlist_behavior_history_publication_idx
-  on public.watchlist_behavior_history (publication_id, ticker, history_date desc);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conrelid = 'public.watchlist_snapshots'::regclass and contype = 'p') then
+    alter table public.watchlist_snapshots add primary key (publication_id, ticker);
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.watchlist_behavior_history'::regclass and contype = 'p') then
+    alter table public.watchlist_behavior_history add primary key (publication_id, ticker, history_date);
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.watchlist_refresh_runs'::regclass and contype = 'p') then
+    alter table public.watchlist_refresh_runs add primary key (publication_id);
+  end if;
+end $$;
+drop index if exists public.focus_tickers_list_idx;
+drop index if exists public.watchlist_snapshots_publication_idx;
+drop index if exists public.watchlist_behavior_history_publication_idx;
 create index if not exists watchlist_refresh_runs_validated_idx
   on public.watchlist_refresh_runs (run_date desc, status, updated_at desc);
 

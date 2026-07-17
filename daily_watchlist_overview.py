@@ -879,101 +879,6 @@ def supabase_select(path: str) -> list[dict]:
         raise RuntimeError(f"Supabase select failed with HTTP {exc.code}: {body}") from exc
 
 
-OPTIONAL_SIGNAL_COLUMNS = {
-    "signal_stage",
-    "transition_label",
-    "transition_score",
-    "signal_age_days",
-    "price_progress_since_signal_pct",
-    "freshness_penalty",
-    "adjusted_score",
-    "distance_from_ref_zone_pct",
-    "extension_state",
-    "next_day_bias",
-    "next_day_bias_score",
-    "next_day_plan",
-    "emotion_score",
-    "trend_location_score",
-    "setup_context_score",
-    "transition_edge_score",
-    "personality_weight_label",
-    "personality_weight_emotion",
-    "personality_weight_transition",
-    "personality_weight_setup",
-    "personality_weight_trend",
-    "personality_setup_allowed",
-    "profit_protect_pressure",
-    "hard_exit_pressure",
-    "operator_pressure",
-    "operator_pressure_score",
-    "operator_plan",
-    "operator_state",
-    "operator_state_score",
-    "operator_state_plan",
-    "demand_control_score",
-    "bull_trap_score",
-    "bear_trap_score",
-    "distribution_score",
-    "absorption_score",
-    "short_pressure_proxy",
-    "squeeze_watch",
-    "anti_signal_score",
-    "anti_signal_level",
-    "anti_signal_plan",
-    "last_outcome_label",
-    "last_outcome_score",
-    "last_outcome_reason",
-    "last_outcome_return_pct",
-    "learning_sample_count",
-    "learning_working_rate",
-    "learning_failed_rate",
-    "learning_trap_avoided_rate",
-    "learning_avg_score",
-    "learning_adjustment",
-    "learning_scope",
-    "learning_key_used",
-    "learning_plan",
-    "learning_model_version",
-    "learning_distinct_ticker_count",
-    "learning_evaluation_date_count",
-    "learning_evaluation_date_min",
-    "learning_evaluation_date_max",
-    "learning_window_start",
-    "learning_window_end",
-    "learning_promotion_eligible",
-    "learning_reporting_only",
-    "learning_promotion_state",
-    "prediction_horizon_sessions",
-    "prediction_upside_probability",
-    "prediction_downside_probability",
-    "prediction_no_edge_probability",
-    "prediction_confidence",
-    "prediction_model_version",
-    "prediction_state",
-    "contextual_overlay",
-    "contextual_score_adjustment",
-    "contextual_plan",
-    "execution_block",
-    "data_provider",
-    "data_provider_status",
-    "data_provider_latency_ms",
-    "data_provider_error",
-    "data_age_days",
-    "freshness_status",
-    "freshness_block",
-    "freshness_plan",
-    "buy_tier",
-    "execution_priority",
-    "execution_plan",
-    "feedback_window_days",
-    "feedback_return_pct",
-    "feedback_max_drawdown_pct",
-    "feedback_stop_hit",
-    "feedback_quality",
-    "feedback_plan",
-    "reason_codes",
-}
-
 OPTIONAL_REFRESH_RUN_COLUMNS = {
     "learning_history_rows",
 }
@@ -994,8 +899,11 @@ ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().l
 # 400 sessions covers indicator warm-up plus the 60-session learning replay,
 # while keeping the persistent raw-data layer well below the database budget.
 OHLCV_RETENTION_BARS = int(os.getenv("OHLCV_RETENTION_BARS", "400"))
-OHLCV_MIN_READY_BARS = int(os.getenv("OHLCV_MIN_READY_BARS", "300"))
+OHLCV_MIN_READY_BARS = int(os.getenv("OHLCV_MIN_READY_BARS", str(OHLCV_RETENTION_BARS)))
 OHLCV_INCREMENTAL_YEARS = float(os.getenv("OHLCV_INCREMENTAL_YEARS", "0.1"))
+SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES", "8192"))
+SUPABASE_HISTORY_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_HISTORY_PAYLOAD_MAX_BYTES", "6144"))
+SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES", "2048"))
 
 
 def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[bool, str]:
@@ -1035,7 +943,7 @@ def load_ohlcv_from_supabase(ticker: str) -> pd.DataFrame:
         rows = supabase_select(
             "watchlist_ohlcv?select=data_date,open,high,low,close,adjclose,volume,data_provider"
             f"&ticker=eq.{urllib.parse.quote(display_ticker(ticker))}"
-            "&order=data_date.asc"
+            "&order=data_date.desc"
             f"&limit={OHLCV_RETENTION_BARS}"
         )
     except RuntimeError as exc:
@@ -1047,7 +955,11 @@ def load_ohlcv_from_supabase(ticker: str) -> pd.DataFrame:
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
     for column in ("open", "high", "low", "close", "adjclose", "volume"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    return frame.dropna(subset=["date", "open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    return (
+        frame.dropna(subset=["date", "open", "high", "low", "close", "volume"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
 
 def persist_ohlcv_to_supabase(ticker: str, frame: pd.DataFrame) -> None:
@@ -1099,25 +1011,6 @@ def supabase_upsert_batches(table: str, records: list[dict], conflict_columns: l
         supabase_upsert(table, batch, conflict_columns)
 
 
-def supabase_upsert_with_optional_signal_columns(table: str, records: list[dict], conflict_columns: list[str]) -> None:
-    try:
-        supabase_upsert_batches(table, records, conflict_columns)
-        return
-    except RuntimeError as exc:
-        message = str(exc).lower()
-        schema_cache_error = "could not find" in message or "schema cache" in message or "column" in message
-        has_optional_columns = any(OPTIONAL_SIGNAL_COLUMNS.intersection(record) for record in records)
-        if not schema_cache_error or not has_optional_columns:
-            raise
-
-        stripped_records = [
-            {key: value for key, value in record.items() if key not in OPTIONAL_SIGNAL_COLUMNS}
-            for record in records
-        ]
-        print(f"Supabase {table} optional signal columns unavailable; storing transition fields in payload only.")
-        supabase_upsert_batches(table, stripped_records, conflict_columns)
-
-
 def supabase_upsert_with_optional_outcome_columns(records: list[dict], conflict_columns: list[str]) -> None:
     try:
         supabase_upsert_batches("watchlist_signal_outcomes", records, conflict_columns)
@@ -1161,82 +1054,18 @@ def supabase_upsert_refresh_run(records: list[dict]) -> None:
         supabase_upsert("watchlist_refresh_runs", stripped_records, ["publication_id"])
 
 
-def optional_signal_values(row: dict) -> dict:
-    return {
-        "next_day_bias": row.get("next_day_bias"),
-        "next_day_bias_score": numeric_or_none(row.get("next_day_bias_score")),
-        "next_day_plan": row.get("next_day_plan"),
-        "emotion_score": numeric_or_none(row.get("emotion_score")),
-        "trend_location_score": numeric_or_none(row.get("trend_location_score")),
-        "setup_context_score": numeric_or_none(row.get("setup_context_score")),
-        "operator_pressure": row.get("operator_pressure"),
-        "operator_pressure_score": numeric_or_none(row.get("operator_pressure_score")),
-        "operator_plan": row.get("operator_plan"),
-        "operator_state": row.get("operator_state"),
-        "operator_state_score": numeric_or_none(row.get("operator_state_score")),
-        "operator_state_plan": row.get("operator_state_plan"),
-        "demand_control_score": numeric_or_none(row.get("demand_control_score")),
-        "bull_trap_score": numeric_or_none(row.get("bull_trap_score")),
-        "bear_trap_score": numeric_or_none(row.get("bear_trap_score")),
-        "distribution_score": numeric_or_none(row.get("distribution_score")),
-        "absorption_score": numeric_or_none(row.get("absorption_score")),
-        "short_pressure_proxy": numeric_or_none(row.get("short_pressure_proxy")),
-        "squeeze_watch": row.get("squeeze_watch"),
-        "anti_signal_score": numeric_or_none(row.get("anti_signal_score")),
-        "anti_signal_level": row.get("anti_signal_level"),
-        "anti_signal_plan": row.get("anti_signal_plan"),
-        "last_outcome_label": row.get("last_outcome_label"),
-        "last_outcome_score": numeric_or_none(row.get("last_outcome_score")),
-        "last_outcome_reason": row.get("last_outcome_reason"),
-        "last_outcome_return_pct": numeric_or_none(row.get("last_outcome_return_pct")),
-        "learning_sample_count": numeric_or_none(row.get("learning_sample_count")),
-        "learning_working_rate": numeric_or_none(row.get("learning_working_rate")),
-        "learning_failed_rate": numeric_or_none(row.get("learning_failed_rate")),
-        "learning_trap_avoided_rate": numeric_or_none(row.get("learning_trap_avoided_rate")),
-        "learning_avg_score": numeric_or_none(row.get("learning_avg_score")),
-        "learning_adjustment": numeric_or_none(row.get("learning_adjustment")),
-        "learning_scope": row.get("learning_scope"),
-        "learning_key_used": row.get("learning_key_used"),
-        "learning_plan": row.get("learning_plan"),
-        "learning_model_version": row.get("learning_model_version"),
-        "learning_distinct_ticker_count": numeric_or_none(row.get("learning_distinct_ticker_count")),
-        "learning_evaluation_date_count": numeric_or_none(row.get("learning_evaluation_date_count")),
-        "learning_evaluation_date_min": row.get("learning_evaluation_date_min") or None,
-        "learning_evaluation_date_max": row.get("learning_evaluation_date_max") or None,
-        "learning_window_start": row.get("learning_window_start") or None,
-        "learning_window_end": row.get("learning_window_end") or None,
-        "learning_promotion_eligible": row.get("learning_promotion_eligible"),
-        "learning_reporting_only": row.get("learning_reporting_only"),
-        "learning_promotion_state": row.get("learning_promotion_state"),
-        "prediction_horizon_sessions": numeric_or_none(row.get("prediction_horizon_sessions")),
-        "prediction_upside_probability": numeric_or_none(row.get("prediction_upside_probability")),
-        "prediction_downside_probability": numeric_or_none(row.get("prediction_downside_probability")),
-        "prediction_no_edge_probability": numeric_or_none(row.get("prediction_no_edge_probability")),
-        "prediction_confidence": numeric_or_none(row.get("prediction_confidence")),
-        "prediction_model_version": row.get("prediction_model_version"),
-        "prediction_state": row.get("prediction_state"),
-        "contextual_overlay": row.get("contextual_overlay"),
-        "contextual_score_adjustment": numeric_or_none(row.get("contextual_score_adjustment")),
-        "contextual_plan": row.get("contextual_plan"),
-        "execution_block": row.get("execution_block"),
-        "data_provider": row.get("data_provider"),
-        "data_provider_status": row.get("data_provider_status"),
-        "data_provider_latency_ms": numeric_or_none(row.get("data_provider_latency_ms")),
-        "data_provider_error": row.get("data_provider_error"),
-        "data_age_days": numeric_or_none(row.get("data_age_days")),
-        "freshness_status": row.get("freshness_status"),
-        "freshness_block": row.get("freshness_block"),
-        "freshness_plan": row.get("freshness_plan"),
-        "buy_tier": row.get("buy_tier"),
-        "execution_priority": numeric_or_none(row.get("execution_priority")),
-        "execution_plan": row.get("execution_plan"),
-        "feedback_window_days": numeric_or_none(row.get("feedback_window_days")),
-        "feedback_return_pct": numeric_or_none(row.get("feedback_return_pct")),
-        "feedback_max_drawdown_pct": numeric_or_none(row.get("feedback_max_drawdown_pct")),
-        "feedback_stop_hit": row.get("feedback_stop_hit"),
-        "feedback_quality": row.get("feedback_quality"),
-        "feedback_plan": row.get("feedback_plan"),
+def compact_payload(row: dict, typed_record: dict, *, aliases: tuple[str, ...] = (), max_bytes: int) -> dict:
+    """Keep only non-empty fields not already represented by typed columns."""
+    excluded = set(typed_record).union(aliases, {"payload"})
+    payload = {
+        key: value
+        for key, value in row.items()
+        if key not in excluded and value not in (None, "", [], {})
     }
+    payload_bytes = len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
+    if payload_bytes > max_bytes:
+        raise ValueError(f"Compact Supabase payload is {payload_bytes} bytes; limit is {max_bytes} bytes.")
+    return payload
 
 
 def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
@@ -1281,9 +1110,13 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
             "distance_from_ref_zone_pct": numeric_or_none(row.get("distance_from_ref_zone_pct")),
             "extension_state": row.get("extension_state"),
             "reason_codes": row.get("reason_codes") or [],
-            "payload": row,
         }
-        report_record.update(optional_signal_values(row))
+        report_record["payload"] = compact_payload(
+            row,
+            report_record,
+            aliases=("date",),
+            max_bytes=SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES,
+        )
         report_records.append(report_record)
 
     history_records = []
@@ -1319,17 +1152,20 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
                 "distance_from_ref_zone_pct": numeric_or_none(row.get("distance_from_ref_zone_pct")),
                 "extension_state": row.get("extension_state"),
                 "reason_codes": row.get("reason_codes") or [],
-                "payload": row,
             }
-            history_record.update(optional_signal_values(row))
+            history_record["payload"] = compact_payload(
+                row,
+                history_record,
+                aliases=("date",),
+                max_bytes=SUPABASE_HISTORY_PAYLOAD_MAX_BYTES,
+            )
             history_records.append(history_record)
 
     outcome_records = []
     if not outcomes.empty:
         for record in outcomes.to_dict(orient="records"):
             row = clean_record(record)
-            outcome_records.append(
-                {
+            outcome_record = {
                     "signal_run_date": row.get("signal_run_date"),
                     "evaluation_run_date": row.get("evaluation_run_date"),
                     "ticker": row.get("ticker"),
@@ -1360,9 +1196,13 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
                     "outcome_score": numeric_or_none(row.get("outcome_score")),
                     "outcome_reason": row.get("outcome_reason"),
                     "learning_key": row.get("learning_key"),
-                    "payload": row,
                 }
+            outcome_record["payload"] = compact_payload(
+                row,
+                outcome_record,
+                max_bytes=SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES,
             )
+            outcome_records.append(outcome_record)
 
     if run_metadata:
         try:
@@ -1378,12 +1218,12 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     history_synced = 0
     outcome_synced = 0
     try:
-        supabase_upsert_with_optional_signal_columns("watchlist_snapshots", report_records, ["publication_id", "ticker"])
+        supabase_upsert_batches("watchlist_snapshots", report_records, ["publication_id", "ticker"])
         snapshot_synced = len(report_records)
     except Exception as exc:
         print(f"Supabase snapshot sync skipped: {exc}")
     try:
-        supabase_upsert_with_optional_signal_columns("watchlist_behavior_history", history_records, ["publication_id", "ticker", "history_date"])
+        supabase_upsert_batches("watchlist_behavior_history", history_records, ["publication_id", "ticker", "history_date"])
         history_synced = len(history_records)
     except Exception as exc:
         print(f"Supabase behavior-history sync skipped: {exc}")
@@ -2220,7 +2060,12 @@ def signal_outcome_from_history(row: dict, ticker_history: list[dict]) -> dict:
 
 def merge_payload_row(row: dict) -> dict:
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    merged = {**payload, **{key: value for key, value in row.items() if key != "payload"}}
+    typed_values = {
+        key: value
+        for key, value in row.items()
+        if key != "payload" and value not in (None, "")
+    }
+    merged = {**payload, **typed_values}
     if "date" not in merged:
         merged["date"] = merged.get("data_date") or merged.get("history_date") or merged.get("run_date")
     return merged

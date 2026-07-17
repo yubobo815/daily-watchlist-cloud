@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Deterministic regression checks for bounded database learning storage."""
+
+import datetime as dt
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import daily_watchlist_overview as scanner
+
+
+def assert_ohlcv_window() -> None:
+    assert scanner.OHLCV_RETENTION_BARS == 400
+    assert scanner.OHLCV_MIN_READY_BARS == scanner.OHLCV_RETENTION_BARS
+
+    requested = []
+    newest = dt.date(2026, 7, 16)
+    rows = [
+        {
+            "data_date": str(newest - dt.timedelta(days=offset)),
+            "open": 100 + offset,
+            "high": 101 + offset,
+            "low": 99 + offset,
+            "close": 100.5 + offset,
+            "adjclose": 100.5 + offset,
+            "volume": 1_000_000 + offset,
+            "data_provider": "audit",
+        }
+        for offset in range(400)
+    ]
+    original_select = scanner.supabase_select
+    scanner.supabase_select = lambda path: requested.append(path) or rows
+    try:
+        frame = scanner.load_ohlcv_from_supabase("NVDA")
+    finally:
+        scanner.supabase_select = original_select
+
+    assert "order=data_date.desc" in requested[0]
+    assert "limit=400" in requested[0]
+    assert len(frame) == 400
+    assert frame["date"].is_monotonic_increasing
+    assert frame.iloc[-1]["date"].date() == newest
+
+
+def assert_payload_compaction() -> None:
+    row = {
+        "publication_id": "audit-publication",
+        "ticker": "NVDA",
+        "date": "2026-07-16",
+        "action": "WATCH",
+        "adjusted_score": 61,
+        "learning_scope": "personality",
+        "empty_value": "",
+    }
+    typed = {
+        "publication_id": row["publication_id"],
+        "ticker": row["ticker"],
+        "data_date": row["date"],
+        "action": row["action"],
+    }
+    payload = scanner.compact_payload(row, typed, aliases=("date",), max_bytes=8192)
+    assert payload == {"adjusted_score": 61, "learning_scope": "personality"}
+    merged = scanner.merge_payload_row({**typed, "action": None, "payload": {**payload, "action": "BUY"}})
+    assert merged["action"] == "BUY", "null typed columns must not erase payload fallbacks"
+    assert merged["adjusted_score"] == 61
+    assert merged["date"] == "2026-07-16"
+
+    try:
+        scanner.compact_payload({"large": "x" * 20}, {}, max_bytes=10)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("oversized payloads must fail closed")
+
+
+def assert_capacity_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    guard = (root / "scripts/database_capacity_guard.sh").read_text()
+    workflow = (root / ".github/workflows/daily-watchlist-pages.yml").read_text()
+    schema = (root / "supabase_schema.sql").read_text()
+
+    for contract in (
+        "readonly WARNING_BYTES=175000000",
+        "readonly STAGING_LIMIT_BYTES=220000000",
+        "readonly HARD_LIMIT_BYTES=250000000",
+        "readonly MAX_TICKERS=250",
+        "readonly OHLCV_BARS_PER_TICKER=400",
+        "readonly OHLCV_MAX_ROWS=100000",
+        "readonly LEARNING_SESSIONS=60",
+        "record_storage_metrics",
+        "evaluation_run_date not in",
+    ):
+        assert contract in guard, contract
+    assert "scripts/database_capacity_guard.sh prepare" in workflow
+    assert "scripts/database_capacity_guard.sh staged" in workflow
+    assert "scripts/database_capacity_guard.sh finalize" in workflow
+    assert "scripts/database_capacity_guard.sh rollback" in workflow
+    assert workflow.index("Reserve Supabase publishing headroom") < workflow.index("Refresh watchlist")
+    assert workflow.index("Enforce staged database ceiling") < workflow.index("Deploy to GitHub Pages")
+    assert "drop constraint if exists watchlist_snapshots_pkey" not in schema
+    assert "drop constraint if exists watchlist_behavior_history_pkey" not in schema
+
+
+if __name__ == "__main__":
+    assert_ohlcv_window()
+    assert_payload_compaction()
+    assert_capacity_contract()
+    print("Database capacity audit passed: compact payloads, 400-bar OHLCV, 60-session learning, and transactional guards verified.")

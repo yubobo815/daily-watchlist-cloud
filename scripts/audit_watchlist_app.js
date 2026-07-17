@@ -229,12 +229,18 @@ function auditLearningReadoutUi() {
 
 function auditStorageGuard() {
   const workflow = fs.readFileSync(".github/workflows/daily-watchlist-pages.yml", "utf8");
+  const guard = fs.readFileSync("scripts/database_capacity_guard.sh", "utf8");
   assert(workflow.includes("cancel-in-progress: false"), "refresh must not cancel a run before retention cleanup");
-  assert(workflow.includes("storage_hard_limit_bytes=250000000"), "database hard cap must be 250,000,000 bytes");
-  assert(workflow.includes("delete from public.watchlist_snapshots"), "SQL fallback must retain snapshots");
-  assert(workflow.includes("delete from public.watchlist_refresh_runs"), "SQL fallback must retain refresh runs");
-  assert(workflow.includes("where publication_id <> '$current_publication_id'"), "replay retention must preserve the validated staging publication");
-  return { hardCapBytes: 250000000 };
+  assert(guard.includes("readonly WARNING_BYTES=175000000"), "preflight must reserve publishing headroom");
+  assert(guard.includes("readonly STAGING_LIMIT_BYTES=220000000"), "staged publication must stay below the operational ceiling");
+  assert(guard.includes("readonly HARD_LIMIT_BYTES=250000000"), "database hard cap must be 250,000,000 bytes");
+  assert(guard.includes("readonly OHLCV_BARS_PER_TICKER=400"), "OHLCV retention must preserve the full model window");
+  assert(guard.includes("readonly LEARNING_SESSIONS=60"), "outcome retention must follow the learning window");
+  assert(guard.includes("record_storage_metrics"), "each publication must persist database capacity telemetry");
+  assert(guard.includes("rollback_publication"), "failed staging must remove its hidden publication");
+  assert(!guard.toLowerCase().includes("vacuum full"), "routine capacity correctness must not depend on VACUUM FULL");
+  assert(workflow.includes("if: always() && steps.time_gate.outputs.run == 'true'"), "workflow must attempt rollback on every exit path");
+  return { warningBytes: 175000000, stagingLimitBytes: 220000000, hardCapBytes: 250000000 };
 }
 
 function auditPartialRunStatus() {
@@ -252,7 +258,7 @@ function auditAtomicPublicationContract() {
   const healthAudit = fs.readFileSync("scripts/supabase_learning_health.py", "utf8");
   const schema = fs.readFileSync("supabase_schema.sql", "utf8");
   assert(scanner.includes('final_metadata["status"] = "pending_audit"'), "scanner must keep a synced run hidden until database audit passes");
-  assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Reclaim Supabase replay storage"), "database health audit must precede destructive retention");
+  assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Enforce staged database ceiling"), "database health audit must precede staged capacity enforcement");
   assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy to GitHub Pages"), "an oversized staged publication must roll back before deployment");
   assert(workflow.indexOf("Finalize Supabase publication") < workflow.indexOf("Reclaim Supabase replay storage"), "retention must never mutate a pending publication");
   assert(workflow.indexOf("Deploy to GitHub Pages") < workflow.indexOf("Finalize Supabase publication"), "Supabase publication must not become visible before Pages deployment succeeds");
