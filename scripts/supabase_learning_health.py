@@ -178,12 +178,12 @@ def main(*, finalize: bool = False) -> None:
     publication_filter = f"publication_id=eq.{urllib.parse.quote(expected_publication_id)}"
     history_rows = request_all_json(
         "watchlist_behavior_history"
-        "?select=ticker,history_date,open,high,low,close,payload"
+        "?select=publication_id,ticker,history_date,open,high,low,close,payload"
         f"&{filters}&{publication_filter}&order=ticker.asc,history_date.asc"
     )
     snapshot_rows = request_all_json(
         "watchlist_snapshots"
-        "?select=ticker,open,high,low,close,payload"
+        "?select=publication_id,ticker,open,high,low,close,payload"
         f"&{filters}&{publication_filter}&order=ticker.asc"
     )
 
@@ -205,7 +205,7 @@ def main(*, finalize: bool = False) -> None:
     if publication_id:
         outcome_rows = request_all_json(
             "watchlist_signal_outcomes"
-            "?select=publication_id,ticker,signal_run_date,evaluation_run_date,outcome_label,learning_key,entry_model_version,forecast_learnable,payload"
+            "?select=publication_id,ticker,signal_run_date,evaluation_run_date,outcome_label,learning_key,entry_model_version,forecast_learnable,prior_prediction_upside_probability,prior_prediction_downside_probability,prior_prediction_no_edge_probability,prior_prediction_confidence,prior_prediction_state,prior_prediction_key,prior_prediction_scope,payload"
             f"&publication_id=eq.{urllib.parse.quote(publication_id)}"
             "&order=ticker.asc,signal_run_date.asc"
         )
@@ -351,8 +351,8 @@ def main(*, finalize: bool = False) -> None:
     if not publication_id:
         emit_metrics(metrics)
         fail("Expected run is missing its immutable publication id.")
-    mixed_snapshot_rows = [row for row in snapshot_rows if str((row.get("payload") or {}).get("publication_id") or "") != publication_id]
-    mixed_history_rows = [row for row in history_rows if str((row.get("payload") or {}).get("publication_id") or "") != publication_id]
+    mixed_snapshot_rows = [row for row in snapshot_rows if str(row.get("publication_id") or "") != publication_id]
+    mixed_history_rows = [row for row in history_rows if str(row.get("publication_id") or "") != publication_id]
     if mixed_snapshot_rows or mixed_history_rows:
         emit_metrics(metrics)
         fail("Snapshot/history rows do not belong to one atomic publication.")

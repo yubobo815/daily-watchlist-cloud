@@ -23,7 +23,8 @@ def fixture_rows(*, invalid_promotion: bool = False):
             "high": 102,
             "low": 99,
             "close": 101,
-            "payload": {"publication_id": PUBLICATION_ID},
+            "publication_id": PUBLICATION_ID,
+            "payload": {},
         }
         for ticker in range(40)
         for day in range(1, 31)
@@ -31,7 +32,6 @@ def fixture_rows(*, invalid_promotion: bool = False):
     snapshots = []
     for ticker in range(40):
         payload = {
-            "publication_id": PUBLICATION_ID,
             "learning_sample_count": 30,
             "learning_scope": "exact signal personality",
             "learning_promotion_eligible": False,
@@ -39,21 +39,16 @@ def fixture_rows(*, invalid_promotion: bool = False):
         if invalid_promotion and ticker == 0:
             payload["learning_promotion_eligible"] = True
         snapshots.append({
+            "publication_id": PUBLICATION_ID,
             "ticker": f"T{ticker:02d}", "open": 100, "high": 102, "low": 99, "close": 101,
             "payload": payload,
         })
     outcomes = []
+    prediction_key = "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE"
     for index in range(500):
         payload = {
-            "publication_id": PUBLICATION_ID,
             "label_horizon_sessions": 5,
             "path_status": "SETTLED",
-            "prior_prediction_upside_probability": 0.5,
-            "prior_prediction_downside_probability": 0.25,
-            "prior_prediction_no_edge_probability": 0.25,
-            "prior_prediction_state": "WALK_FORWARD",
-            "prior_prediction_key": "SETUP FORMING|PULLBACK BUY|BALANCED|ACCUMULATION|NONE",
-            "prior_prediction_scope": "exact signal personality",
         }
         outcomes.append({
             "publication_id": PUBLICATION_ID,
@@ -61,9 +56,16 @@ def fixture_rows(*, invalid_promotion: bool = False):
             "signal_run_date": "2026-06-01",
             "evaluation_run_date": "2026-06-08",
             "outcome_label": "WORKING" if index % 2 else "STALE",
-            "learning_key": payload["prior_prediction_key"],
+            "learning_key": prediction_key,
             "entry_model_version": "five-session-r-risk-v4",
             "forecast_learnable": True,
+            "prior_prediction_upside_probability": 0.5,
+            "prior_prediction_downside_probability": 0.25,
+            "prior_prediction_no_edge_probability": 0.25,
+            "prior_prediction_confidence": 0.5,
+            "prior_prediction_state": "WALK_FORWARD",
+            "prior_prediction_key": prediction_key,
+            "prior_prediction_scope": "exact signal personality",
             "payload": payload,
         })
     return history, snapshots, outcomes
