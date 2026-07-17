@@ -10,6 +10,7 @@ const SUPABASE_CONFIG = {
 };
 
 const SNAPSHOT_FIELDS = [
+  "publication_id",
   "run_date",
   "ticker",
   "name",
@@ -32,6 +33,7 @@ const SNAPSHOT_FIELDS = [
 ];
 
 const HISTORY_FIELDS = [
+  "publication_id",
   "run_date",
   "ticker",
   "history_date",
@@ -650,6 +652,7 @@ function runDto(row) {
     max_execution_data_age_days: Number(payload.max_execution_data_age_days || 0),
     publication_id: String(payload.publication_id || ""),
     sync_state: String(payload.sync_state || ""),
+    storage: payload.storage && typeof payload.storage === "object" ? payload.storage : {},
   };
   return output;
 }
@@ -671,7 +674,7 @@ function committedPublicationMatches(run, rows) {
   if (String(run.payload?.sync_state || "") !== "complete") return false;
   const publicationId = String(run.payload?.publication_id || "");
   if (!publicationId || !Array.isArray(rows) || rows.length === 0) return false;
-  return rows.every((row) => String(row?.payload?.publication_id || "") === publicationId);
+  return rows.every((row) => String(row?.publication_id || row?.payload?.publication_id || "") === publicationId);
 }
 
 async function recentRunDates(limit = 2) {

@@ -282,7 +282,9 @@ function auditAtomicPublicationContract() {
   assert(healthAudit.includes("invalid_promotions") && healthAudit.includes("directional_validation_safe"), "health audit must reject under-evidenced model activation");
   const committedRun = { status: "ok", payload: { publication_id: "pub-1", sync_state: "complete" } };
   assert(committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-1" } }]), "matching publication ids must be readable");
+  assert(committedPublicationMatches(committedRun, [{ publication_id: "pub-1", payload: {} }]), "compact rows must use the typed publication id");
   assert(!committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-2" } }]), "mixed same-day publication ids must fail closed");
+  assert(!committedPublicationMatches(committedRun, [{ publication_id: "pub-2", payload: {} }]), "mixed compact publication ids must fail closed");
   assert(!committedPublicationMatches({ status: "pending_audit", payload: { publication_id: "pub-1", sync_state: "complete" } }, [{ payload: { publication_id: "pub-1" } }]), "pending audit runs must remain hidden");
   return { pendingStatus: "pending_audit", validatedStatuses: ["ok", "degraded"] };
 }
