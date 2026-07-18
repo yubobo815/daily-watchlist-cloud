@@ -3346,7 +3346,12 @@ def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_
     return entry, ""
 
 
-def entry_zone_width_pct(setup: str, personality_type: str, atr_pct: float) -> float:
+def entry_zone_width_pct(
+    setup: str,
+    personality_type: str,
+    atr_pct: float,
+    volatility_regime: str = "NORMAL",
+) -> float:
     personality_floor = {
         "ETF": 0.55,
         "COMPOUNDER": 0.75,
@@ -3362,19 +3367,30 @@ def entry_zone_width_pct(setup: str, personality_type: str, atr_pct: float) -> f
         "REVERSAL BUY": 1.18,
     }.get(setup, 1.0)
     atr_component = max(0.0, float(atr_pct or 0.0)) * 0.22
-    width = max(personality_floor, atr_component) * setup_mult
-    cap = 3.20 if str(personality_type or "").upper() == "HIGH_BETA" else 2.45
+    regime_mult = {
+        "TREND VOLATILITY": 1.10,
+        "REVERSAL VOLATILITY": 1.05,
+        "CHAOTIC VOLATILITY": 1.15,
+    }.get(str(volatility_regime or "NORMAL").upper(), 1.0)
+    width = max(personality_floor, atr_component) * setup_mult * regime_mult
+    cap = 3.50 if str(personality_type or "").upper() == "HIGH_BETA" else 2.45
     return clamp_float(width, 0.50, cap)
 
 
-def minimum_stop_pct(personality_type: str) -> float:
-    return {
+def minimum_stop_pct(personality_type: str, volatility_regime: str = "NORMAL") -> float:
+    base = {
         "ETF": 0.75,
         "COMPOUNDER": 0.95,
         "BALANCED": 1.15,
         "RANGE_BOUND": 1.20,
         "HIGH_BETA": 1.60,
     }.get(str(personality_type or "").upper(), 1.10)
+    regime_floor = {
+        "TREND VOLATILITY": 2.00,
+        "REVERSAL VOLATILITY": 1.80,
+        "CHAOTIC VOLATILITY": 2.20,
+    }.get(str(volatility_regime or "NORMAL").upper(), 0.0)
+    return max(base, regime_floor)
 
 
 def latest_pivot(values: pd.Series, left: int = 3, right: int = 3, kind: str = "high") -> float:
@@ -3514,6 +3530,91 @@ def personality_weight_profile(personality_type: object) -> dict:
     return profiles.get(personality, profiles["BALANCED"])
 
 
+def classify_volatility_regime(
+    personality_type: object,
+    atr_pct: float,
+    personality_atr_pct: float,
+    trend_efficiency: float,
+    ema_alignment_clean: bool,
+    slow_slope_up: bool,
+    buyer_score: float,
+    signed_volume_pressure_5: float,
+    demand_days_5: int,
+    supply_days_5: int,
+    accum_vol: bool,
+    breakout_vol: bool,
+    dist_vol: bool,
+    breakdown_vol: bool,
+    transition_buy_setup: bool,
+    fear_rejected: bool,
+    right_side: bool,
+) -> dict:
+    """Separate directional volatility from noise without fragmenting ML samples."""
+    personality = str(personality_type or "BALANCED").upper()
+    current_atr = max(0.0, float(atr_pct or 0.0))
+    normal_atr = max(0.0, float(personality_atr_pct or 0.0))
+    volatile = personality == "HIGH_BETA" or current_atr >= max(5.5, normal_atr * 0.90)
+    if not volatile:
+        return {
+            "regime": "NORMAL",
+            "permission": "ALLOW",
+            "position_size_factor": 1.0,
+            "plan": "Use the standard entry, stop, and position plan for this personality.",
+        }
+
+    reversal_confirmed = (
+        transition_buy_setup
+        and (fear_rejected or right_side)
+        and buyer_score >= 68.0
+        and not dist_vol
+        and not breakdown_vol
+    )
+    reversal_developing = (
+        transition_buy_setup
+        and (fear_rejected or right_side)
+        and not breakdown_vol
+    )
+    trend_structure = ema_alignment_clean and slow_slope_up and trend_efficiency >= 0.18
+    trend_tape = (
+        demand_days_5 >= max(1, supply_days_5 - 1)
+        and signed_volume_pressure_5 >= -0.35
+        and not dist_vol
+        and not breakdown_vol
+    )
+    trend_confirmed = trend_structure and trend_tape and buyer_score >= 60.0 and (
+        accum_vol or breakout_vol or signed_volume_pressure_5 >= 0.0
+    )
+
+    if reversal_developing:
+        return {
+            "regime": "REVERSAL VOLATILITY",
+            "permission": "ALLOW" if reversal_confirmed else "CAUTION",
+            "position_size_factor": 0.50 if reversal_confirmed else 0.35,
+            "plan": (
+                "A volatile reversal is confirmed; use half normal size and enter only near the reclaim zone."
+                if reversal_confirmed
+                else "A volatile reversal is developing; wait for buyer confirmation before entering."
+            ),
+        }
+    if trend_structure and trend_tape:
+        return {
+            "regime": "TREND VOLATILITY",
+            "permission": "ALLOW" if trend_confirmed else "CAUTION",
+            "position_size_factor": 0.70 if trend_confirmed else 0.50,
+            "plan": (
+                "Volatility is directional; use 70% of normal size and avoid entries above the reference zone."
+                if trend_confirmed
+                else "Trend structure exists, but buyer tape is not confirmed; keep it on watch."
+            ),
+        }
+    return {
+        "regime": "CHAOTIC VOLATILITY",
+        "permission": "BLOCK",
+        "position_size_factor": 0.0,
+        "plan": "Volatility is not directional; do not open a new position until trend or reversal evidence forms.",
+    }
+
+
 def personality_setup_execution_allowed(
     personality_type: object,
     setup: str,
@@ -3525,10 +3626,27 @@ def personality_setup_execution_allowed(
     quiet_absorption: bool,
     accum_vol: bool,
     breakout_vol: bool,
+    volatility_regime: str = "NORMAL",
+    volatility_permission: str = "ALLOW",
 ) -> bool:
     personality = str(personality_type or "BALANCED").upper()
     if setup == "NONE":
         return False
+    if volatility_permission != "ALLOW":
+        return False
+    if personality == "HIGH_BETA" and volatility_regime == "REVERSAL VOLATILITY":
+        return (
+            setup in {"REVERSAL BUY", "EARLY PULLBACK BUY"}
+            and transition_buy_setup
+            and buyer_score >= 68.0
+            and (fear_rejected or right_side)
+        )
+    if personality == "HIGH_BETA" and volatility_regime == "TREND VOLATILITY":
+        return (
+            setup in {"BREAKOUT BUY", "MOMENTUM BUY", "PULLBACK BUY", "EARLY PULLBACK BUY"}
+            and buyer_score >= 60.0
+            and (accum_vol or breakout_vol)
+        )
     if personality == "RANGE_BOUND":
         return (
             setup == "REVERSAL BUY"
@@ -4062,6 +4180,29 @@ def classify_and_score(
     )
     setup = next((name for name, flag in selected if flag), "NONE")
     setup_forming = setup != "NONE"
+    volatility_state = classify_volatility_regime(
+        personality_profile["personality_type"],
+        float(row.atr_pct),
+        float(personality_profile["personality_atr_pct"]),
+        float(trend_efficiency),
+        ema_alignment_clean,
+        slow_slope_up,
+        float(buyer_score),
+        signed_volume_pressure_5,
+        demand_days_5,
+        supply_days_5,
+        accum_vol,
+        breakout_vol,
+        dist_vol,
+        breakdown_vol,
+        transition_buy_setup,
+        fear_rejected,
+        right_side,
+    )
+    volatility_regime = str(volatility_state["regime"])
+    volatility_permission = str(volatility_state["permission"])
+    position_size_factor = float(volatility_state["position_size_factor"])
+    volatility_plan = str(volatility_state["plan"])
     if include_setup_stats or include_audit_gates:
         d = ensure_setup_names(d)
     setup_stats = (
@@ -4118,7 +4259,7 @@ def classify_and_score(
     no_chase = range_atr <= 2.5 and close_above_setup_low_atr <= 2.5 and close_above_pivot_pct <= 8.0
     high_beta_no_chase = not high_vol or (range_atr <= 2.5 * (0.90 if is_etf else 0.75) and close_above_setup_low_atr <= 2.5 * (0.90 if is_etf else 0.75))
     personality_entry_ok = mode != "MEAN REVERSION" or fear_rejected or quiet_absorption or buyer_control
-    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and buyer_quality_ok and no_chase and high_beta_no_chase and personality_entry_ok and not avoid and not seller_control and not fomo and not greed_rejected
+    filters_ok = setup_forming and volume_ok and setup_atr_ok and close_ok and buyer_quality_ok and no_chase and high_beta_no_chase and personality_entry_ok and volatility_permission == "ALLOW" and not avoid and not seller_control and not fomo and not greed_rejected
     continuation_ok = (
         setup_forming
         and not filters_ok
@@ -4128,6 +4269,7 @@ def classify_and_score(
         and close_ok
         and high_beta_no_chase
         and personality_entry_ok
+        and volatility_permission == "ALLOW"
         and close > row.ema_fast
         and row.ema_fast >= row.ema_slow
         and row.rsi <= 85
@@ -4189,7 +4331,12 @@ def classify_and_score(
         entry_note = ""
 
     if setup_forming and not math.isnan(entry_est) and float(entry_est) > 0:
-        zone_width_pct = entry_zone_width_pct(setup, str(personality_profile["personality_type"]), float(row.atr_pct))
+        zone_width_pct = entry_zone_width_pct(
+            setup,
+            str(personality_profile["personality_type"]),
+            float(row.atr_pct),
+            volatility_regime,
+        )
         entry_zone_high = float(entry_est)
         entry_zone_low = entry_zone_high * (1 - zone_width_pct / 100)
     else:
@@ -4201,7 +4348,10 @@ def classify_and_score(
     stop_pct = 6.0 if setup == "BREAKOUT BUY" else 4.0 if setup == "MOMENTUM BUY" else 7.0 if setup == "PULLBACK BUY" else 6.0 if setup == "EARLY PULLBACK BUY" else 5.0
     atr_stop_mult = 4.0 if setup in {"BREAKOUT BUY", "MOMENTUM BUY"} else 3.5 if setup == "PULLBACK BUY" else 3.25 if setup == "EARLY PULLBACK BUY" else 3.0
     max_risk_stop = trade_entry * (1 - stop_pct / 100)
-    min_stop_distance_pct = minimum_stop_pct(str(personality_profile["personality_type"]))
+    min_stop_distance_pct = minimum_stop_pct(
+        str(personality_profile["personality_type"]),
+        volatility_regime,
+    )
     min_stop_distance = max(trade_entry * (min_stop_distance_pct / 100), atr_now * 0.20 if atr_now > 0 else 0.0)
     zone_stop_buffer = max(trade_entry * 0.0045, atr_now * 0.18 if atr_now > 0 else 0.0)
     zone_stop = entry_zone_low - zone_stop_buffer if setup_forming and not math.isnan(entry_zone_low) else max_risk_stop
@@ -4324,6 +4474,8 @@ def classify_and_score(
         quiet_absorption,
         accum_vol,
         breakout_vol,
+        volatility_regime,
+        volatility_permission,
     )
 
     if extended_from_zone or profile_extended_from_zone:
@@ -4580,6 +4732,7 @@ def classify_and_score(
         next_day_bias_score >= 70.0
         and execution_safety_ok
         and personality_setup_allowed
+        and volatility_permission == "ALLOW"
         and not operator_blocks_buy
         and not profile_extended_from_zone
         and not extended_from_zone
@@ -4594,6 +4747,15 @@ def classify_and_score(
     elif profile_extended_from_zone or extended_from_zone or fomo or greed_rejected:
         next_day_bias = "AVOID CHASE"
         next_day_plan = "Do not chase strength; wait for price to reset into the reference zone."
+    elif market_permission_value == "BLOCK" or risk_permission == "BLOCK":
+        next_day_bias = "EXECUTION BLOCKED"
+        next_day_plan = "Structure is not enough; market or risk governor blocks fresh execution."
+    elif volatility_permission == "BLOCK":
+        next_day_bias = "EXECUTION BLOCKED"
+        next_day_plan = volatility_plan
+    elif volatility_permission == "CAUTION":
+        next_day_bias = "WATCH TREND"
+        next_day_plan = volatility_plan
     elif next_day_buyable and setup_forming:
         next_day_bias = "BULLISH CONFIRM"
         next_day_plan = "Confirm on Pine chart; prefer entry near the reference zone with the listed stop."
@@ -4603,9 +4765,6 @@ def classify_and_score(
     elif mode in {"POWER TREND", "STEADY TREND"} and next_day_bias_score >= 55.0:
         next_day_bias = "WATCH TREND"
         next_day_plan = "Trend personality is healthy; wait for a cleaner setup or reference-zone entry."
-    elif market_permission_value == "BLOCK" or risk_permission == "BLOCK":
-        next_day_bias = "EXECUTION BLOCKED"
-        next_day_plan = "Structure is not enough; market or risk governor blocks fresh execution."
     else:
         next_day_bias = "NEUTRAL"
         next_day_plan = "No clean next-day edge; wait for stronger buyer tape or cleaner structure."
@@ -4644,6 +4803,7 @@ def classify_and_score(
     score += 3 if squeeze_watch else 0
     score -= 12 if operator_pressure == "SHORT / DISTRIBUTION PRESSURE" else 8 if operator_pressure == "DISTRIBUTION" else 0
     score -= 4 if operator_pressure == "SHORT PRESSURE" else 0
+    score -= 12 if volatility_permission == "BLOCK" else 4 if volatility_permission == "CAUTION" else 0
     if setup_forming and market_permission_value == "BLOCK":
         score -= 12
     legacy_history_caution = ticker_permission in {"BLOCK", "CAUTION"} or walk_forward_permission == "BLOCK"
@@ -4679,6 +4839,8 @@ def classify_and_score(
         notes.append("Risk governor blocked")
     if setup_forming and not personality_setup_allowed:
         notes.append("Personality requires another confirmation before execution")
+    if volatility_regime != "NORMAL":
+        notes.append(volatility_plan)
     if profit_protect_pressure and not exit_pressure:
         notes.append("Profit protect only; structure is not broken")
     if next_day_plan:
@@ -4719,6 +4881,14 @@ def classify_and_score(
         reason_codes.append("profit_protect_pressure")
     if setup_forming and not personality_setup_allowed:
         reason_codes.append("personality_setup_gate")
+    if volatility_regime == "TREND VOLATILITY":
+        reason_codes.append("trend_volatility")
+    elif volatility_regime == "REVERSAL VOLATILITY":
+        reason_codes.append("reversal_volatility")
+    elif volatility_regime == "CHAOTIC VOLATILITY":
+        reason_codes.append("chaotic_volatility")
+    if volatility_permission != "ALLOW":
+        reason_codes.append("volatility_execution_gate")
     if next_day_bias == "BULLISH CONFIRM":
         reason_codes.append("next_day_bullish_confirm")
     elif next_day_bias == "CONSTRUCTIVE PULLBACK":
@@ -4816,6 +4986,10 @@ def classify_and_score(
         "personality_weight_setup": round(float(score_weights["setup"]), 2),
         "personality_weight_trend": round(float(score_weights["trend"]), 2),
         "personality_setup_allowed": bool_text(personality_setup_allowed),
+        "volatility_regime": volatility_regime,
+        "volatility_permission": volatility_permission,
+        "volatility_plan": volatility_plan,
+        "position_size_factor": round(position_size_factor, 2),
         "operator_pressure": operator_pressure,
         "operator_pressure_score": round(float(operator_pressure_score), 1),
         "operator_plan": operator_plan,
@@ -5056,6 +5230,10 @@ LATEST_SIGNAL_FIELDS = [
     "personality_weight_setup",
     "personality_weight_trend",
     "personality_setup_allowed",
+    "volatility_regime",
+    "volatility_permission",
+    "volatility_plan",
+    "position_size_factor",
     "profit_protect_pressure",
     "hard_exit_pressure",
     "operator_pressure",
@@ -5550,6 +5728,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "last_outcome_label", "last_outcome_return_pct",
         "next_day_bias", "next_day_bias_score", "next_day_plan",
         "operator_state", "operator_state_score", "operator_state_plan",
+        "volatility_regime", "volatility_permission", "position_size_factor",
         "data_provider", "data_provider_status",
         "setup", "adaptive_mode", "psychology", "reward_risk",
         "risk_pct_to_stop", "position_value_1k_risk",

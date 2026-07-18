@@ -926,6 +926,87 @@ def audit_personality_exit_separates_profit_protect():
     assert_true(hard_range_exit, "range-bound structural damage must remain a hard EXIT")
 
 
+def volatility_state(**overrides):
+    values = {
+        "personality_type": "HIGH_BETA",
+        "atr_pct": 8.0,
+        "personality_atr_pct": 7.5,
+        "trend_efficiency": 0.28,
+        "ema_alignment_clean": True,
+        "slow_slope_up": True,
+        "buyer_score": 72.0,
+        "signed_volume_pressure_5": 0.18,
+        "demand_days_5": 3,
+        "supply_days_5": 1,
+        "accum_vol": True,
+        "breakout_vol": False,
+        "dist_vol": False,
+        "breakdown_vol": False,
+        "transition_buy_setup": False,
+        "fear_rejected": False,
+        "right_side": False,
+    }
+    values.update(overrides)
+    return dwo.classify_volatility_regime(**values)
+
+
+def audit_normal_volatility_preserves_standard_execution():
+    state = volatility_state(personality_type="COMPOUNDER", atr_pct=3.2, personality_atr_pct=3.5)
+    assert_true(state["regime"] == "NORMAL", "ordinary volatility must keep the standard plan")
+    assert_true(state["permission"] == "ALLOW" and state["position_size_factor"] == 1.0, "normal execution must remain unchanged")
+
+
+def audit_directional_high_volatility_allows_reduced_execution():
+    state = volatility_state()
+    assert_true(state["regime"] == "TREND VOLATILITY", "efficient high-beta demand should be directional volatility")
+    assert_true(state["permission"] == "ALLOW", "confirmed directional volatility should remain executable")
+    assert_true(state["position_size_factor"] == 0.70, "directional volatility must reduce suggested size")
+
+
+def audit_weak_tape_high_volatility_stays_on_watch():
+    state = volatility_state(buyer_score=56.0, accum_vol=False, signed_volume_pressure_5=-0.15)
+    assert_true(state["regime"] == "TREND VOLATILITY", "trend structure and weak tape should remain distinguishable from chaos")
+    assert_true(state["permission"] == "CAUTION", "unconfirmed buyer tape must not upgrade to BUY")
+
+
+def audit_confirmed_volatile_reversal_uses_half_size():
+    state = volatility_state(
+        trend_efficiency=0.08,
+        ema_alignment_clean=False,
+        transition_buy_setup=True,
+        fear_rejected=True,
+        right_side=True,
+    )
+    assert_true(state["regime"] == "REVERSAL VOLATILITY", "confirmed support rejection should be a volatile reversal")
+    assert_true(state["permission"] == "ALLOW" and state["position_size_factor"] == 0.50, "confirmed volatile reversals require half size")
+
+
+def audit_chaotic_volatility_blocks_execution():
+    state = volatility_state(
+        trend_efficiency=0.06,
+        ema_alignment_clean=False,
+        buyer_score=74.0,
+        signed_volume_pressure_5=-0.55,
+        demand_days_5=2,
+        supply_days_5=3,
+        accum_vol=False,
+    )
+    assert_true(state["regime"] == "CHAOTIC VOLATILITY", "high score without directional structure must be classified as noise")
+    assert_true(state["permission"] == "BLOCK" and state["position_size_factor"] == 0.0, "chaotic volatility must never be executable")
+    allowed = dwo.personality_setup_execution_allowed(
+        "HIGH_BETA", "BREAKOUT BUY", "POWER TREND", False, 90, False, False, False, True, True,
+        state["regime"], state["permission"],
+    )
+    assert_true(not allowed, "a strong candle cannot bypass the chaotic-volatility gate")
+
+
+def audit_volatile_zones_and_stops_expand_without_excess():
+    normal_zone = dwo.entry_zone_width_pct("BREAKOUT BUY", "HIGH_BETA", 8.0)
+    volatile_zone = dwo.entry_zone_width_pct("BREAKOUT BUY", "HIGH_BETA", 8.0, "TREND VOLATILITY")
+    assert_true(normal_zone < volatile_zone <= 3.5, "directional volatility should widen the entry band within a cap")
+    assert_true(dwo.minimum_stop_pct("HIGH_BETA", "TREND VOLATILITY") == 2.0, "directional volatility needs a wider minimum stop")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
@@ -981,9 +1062,15 @@ def main():
     audit_risk_off_or_missing_replay_cannot_seed_bullish_learning()
     audit_personality_setup_governor_blocks_range_chase()
     audit_personality_exit_separates_profit_protect()
+    audit_normal_volatility_preserves_standard_execution()
+    audit_directional_high_volatility_allows_reduced_execution()
+    audit_weak_tape_high_volatility_stays_on_watch()
+    audit_confirmed_volatile_reversal_uses_half_size()
+    audit_chaotic_volatility_blocks_execution()
+    audit_volatile_zones_and_stops_expand_without_excess()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 54,
+        "cases": 60,
     })
 
 

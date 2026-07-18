@@ -743,6 +743,27 @@ function auditSupabaseFallback() {
   assert(personalityBlocked.payload.reason_codes.includes("personality_setup_not_allowed"), "personality block must be auditable");
   assert(adjustedScore(personalityBlocked) <= 49, "personality-blocked BUY row must be capped below actionable rank");
 
+  const volatilityBlocked = rowDto({
+    ticker: "VOLATILITY_BLOCKED",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    score: 96,
+    payload: {
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      personality_setup_allowed: "YES",
+      volatility_regime: "CHAOTIC VOLATILITY",
+      volatility_permission: "BLOCK",
+      volatility_plan: "Volatility is not directional; do not open a new position.",
+      data_age_days: 0,
+    },
+  });
+  assert(!isBuyLike(volatilityBlocked), "chaotic-volatility payload must not preserve a BUY-like action");
+  assert(volatilityBlocked.payload.next_day_bias === "EXECUTION BLOCKED", "volatility block must be visible in next-day guidance");
+  assert(volatilityBlocked.payload.reason_codes.includes("volatility_execution_gate"), "volatility block must be auditable");
+  assert(adjustedScore(volatilityBlocked) <= 49, "volatility-blocked BUY row must be capped below actionable rank");
+
   const staleContradiction = rowDto({
     ticker: "STALE",
     action: "BUY CANDIDATE",
@@ -830,6 +851,8 @@ function auditSupabaseFallback() {
     unsafeGateActions: unsafeGates.map(({ dto }) => dto.action),
     personalityBlockedAction: personalityBlocked.action,
     personalityBlockedScore: adjustedScore(personalityBlocked),
+    volatilityBlockedAction: volatilityBlocked.action,
+    volatilityBlockedScore: adjustedScore(volatilityBlocked),
     staleContradictionAction: staleContradiction.action,
     staleContradictionBlock: staleContradiction.payload.freshness_block,
     dateAgeContradictionAction: dateAgeContradiction.action,

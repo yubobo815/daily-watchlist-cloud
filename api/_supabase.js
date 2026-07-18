@@ -209,6 +209,10 @@ const PAYLOAD_FIELDS = [
   "personality_weight_setup",
   "personality_weight_trend",
   "personality_setup_allowed",
+  "volatility_regime",
+  "volatility_permission",
+  "volatility_plan",
+  "position_size_factor",
   "profit_protect_pressure",
   "hard_exit_pressure",
   "trend_location_score",
@@ -383,6 +387,37 @@ function applyPersonalitySetupGate(output, source) {
   output.action = "SETUP FORMING";
   payload.signal_stage = "SETUP";
   output.notes = [output.notes, "Personality setup gate blocks BUY promotion"].filter(Boolean).join("; ");
+  output.payload = payload;
+  return output;
+}
+
+function applyVolatilityGate(output, source) {
+  if (!BUY_LIKE_ACTIONS.has(output.action)) return output;
+
+  const topLevel = normalizeAuditGate(source?.volatility_permission);
+  const nested = normalizeAuditGate(source?.payload?.volatility_permission);
+  const permission = [topLevel, nested].includes("BLOCK")
+    ? "BLOCK"
+    : ([topLevel, nested].includes("CAUTION") ? "CAUTION" : "ALLOW");
+  if (permission === "ALLOW") return output;
+
+  const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  payload.volatility_permission = permission;
+  payload.audit_gate_status = "BLOCKED";
+  payload.signal_quality = permission === "BLOCK" ? "CHAOTIC VOLATILITY" : "VOLATILITY NEEDS CONFIRMATION";
+  payload.transition_label = permission === "BLOCK" ? "Volatility Blocked" : "Volatility Caution";
+  payload.transition_score = capScore(payload.transition_score ?? output.transition_score ?? -20, -20);
+  payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score);
+  output.adjusted_score = capScore(output.adjusted_score ?? payload.adjusted_score ?? output.score);
+  payload.buy_tier = "SETUP ONLY";
+  payload.execution_priority = Math.max(Number(payload.execution_priority || 4), 4);
+  payload.next_day_bias = permission === "BLOCK" ? "EXECUTION BLOCKED" : "WATCH TREND";
+  payload.next_day_plan = payload.volatility_plan || "Wait for directional volatility and buyer confirmation before entering.";
+  payload.execution_plan = payload.next_day_plan;
+  appendReasonCode(payload, "volatility_execution_gate");
+  output.action = "SETUP FORMING";
+  payload.signal_stage = "SETUP";
+  output.notes = [output.notes, payload.next_day_plan].filter(Boolean).join("; ");
   output.payload = payload;
   return output;
 }
@@ -621,11 +656,11 @@ function rowDto(row, options = {}) {
   output.payload = cleanPayload(row);
   if (options.historical) {
     return promotePayloadFields(
-      applyBuyTierFallback(antiSignalFallback(applyOperatorStateFallback(output)))
+      applyBuyTierFallback(antiSignalFallback(applyVolatilityGate(applyOperatorStateFallback(output), row)))
     );
   }
   return promotePayloadFields(
-    applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(applyPersonalitySetupGate(output, row), row)))))
+    applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(applyVolatilityGate(applyPersonalitySetupGate(output, row), row), row)))))
   );
 }
 

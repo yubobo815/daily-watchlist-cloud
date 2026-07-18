@@ -1431,6 +1431,9 @@ function renderScoreBreakdown(row) {
   const market = payloadValue(row, "market_context") || "UNKNOWN";
   const quality = payloadValue(row, "signal_quality") || strengthLabel(row);
   const personality = payloadValue(row, "personality_type") || "BALANCED";
+  const volatilityRegime = payloadValue(row, "volatility_regime") || "NORMAL";
+  const volatilityPermission = payloadValue(row, "volatility_permission") || "ALLOW";
+  const positionSizeFactor = Number(payloadValue(row, "position_size_factor"));
   const entryQuality = entryQualityLabel(row);
   const entryQualityScore = Number(payloadValue(row, "entry_quality_score") || payloadValue(row, "buy_quality_score"));
   const nextDayBias = payloadValue(row, "next_day_bias") || "NEUTRAL";
@@ -1489,6 +1492,8 @@ function renderScoreBreakdown(row) {
       ? `${entryQuality}${Number.isFinite(entryQualityScore) ? ` ${fmtNumber(entryQualityScore, 0)}/100` : ""}`
       : "n/a"],
     ["Personality", String(personality).replace(/_/g, " ")],
+    ["Volatility Regime", `${volatilityRegime}${volatilityPermission !== "ALLOW" ? ` / ${volatilityPermission}` : ""}`],
+    ["Position Guide", Number.isFinite(positionSizeFactor) ? `${fmtNumber(positionSizeFactor * 100, 0)}% of normal size` : "n/a"],
     ["Emotion", Number.isFinite(emotion) ? `${fmtNumber(emotion, 0)}/100` : "n/a"],
     ["MA Location", Number.isFinite(location) ? `${fmtNumber(location, 0)}/100` : "n/a"],
     ["Setup Context", Number.isFinite(setupContext) ? `${fmtNumber(setupContext, 0)}/100` : "n/a"],
