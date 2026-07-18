@@ -418,6 +418,9 @@ const state = {
   selectedTicker: ""
 };
 
+const APP_NOTIFICATION_HISTORY = "daily-watchlist-notification-history";
+const APP_NOTIFICATION_READ = "daily-watchlist-notification-read";
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -2455,6 +2458,125 @@ function attachFocusControls() {
   });
 }
 
+function readStoredList(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredList(key, values) {
+  try {
+    localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    // The notification center remains usable for the current session.
+  }
+}
+
+function notificationForRow(row) {
+  const ticker = normaliseTicker(row.ticker);
+  if (!ticker) return null;
+  const date = String(row.data_date || row.date || row.run_date || "").slice(0, 10);
+  const stage = String(payloadValue(row, "profit_stage") || "").toUpperCase();
+  const overlay = String(payloadValue(row, "contextual_overlay") || "").toUpperCase();
+  const takeProfit1 = payloadNumeric(row, "take_profit_1");
+  const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct") || 33;
+  const protectiveStop = payloadNumeric(row, "active_protective_stop") || payloadNumeric(row, "post_tp1_stop");
+
+  if (stage === "PROTECT REMAINDER" || overlay === "PROFIT PROTECT") {
+    return {
+      id: `${date}:${ticker}:protect-remainder`,
+      date,
+      ticker,
+      kind: "protect",
+      title: `${ticker} · Protect remaining profit`,
+      body: protectiveStop
+        ? `Profit is giving back. Protect the remaining position at ${fmtNumber(protectiveStop, 2)} or follow the current EXIT signal.`
+        : "Profit is giving back or supply is increasing. Reduce risk and follow the current EXIT signal.",
+    };
+  }
+  if (stage === "TP1 REACHED" || overlay === "TAKE PROFIT 1") {
+    return {
+      id: `${date}:${ticker}:take-profit-1`,
+      date,
+      ticker,
+      kind: "profit",
+      title: `${ticker} · Take Profit 1 reached`,
+      body: `Trim ${fmtNumber(reducePct, 0)}%${takeProfit1 ? ` near ${fmtNumber(takeProfit1, 2)}` : ""}${protectiveStop ? ` and protect the balance at ${fmtNumber(protectiveStop, 2)} or higher` : ""}.`,
+    };
+  }
+  if (row.action === "EXIT PRESSURE" && state.focusTickers.includes(ticker)) {
+    return {
+      id: `${date}:${ticker}:exit-pressure`,
+      date,
+      ticker,
+      kind: "exit",
+      title: `${ticker} · Exit risk`,
+      body: "This Focus List name has structural exit pressure. Review the stop and current seller evidence.",
+    };
+  }
+  return null;
+}
+
+function notificationHistory() {
+  const stored = readStoredList(APP_NOTIFICATION_HISTORY)
+    .filter((item) => item && item.id && item.ticker && item.title);
+  const current = state.rows.map(notificationForRow).filter(Boolean);
+  const merged = new Map(stored.map((item) => [item.id, item]));
+  current.forEach((item) => merged.set(item.id, item));
+  const items = [...merged.values()]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
+    .slice(0, 50);
+  writeStoredList(APP_NOTIFICATION_HISTORY, items);
+  return items;
+}
+
+function markNotificationsRead(ids) {
+  const read = new Set(readStoredList(APP_NOTIFICATION_READ));
+  ids.forEach((id) => read.add(id));
+  writeStoredList(APP_NOTIFICATION_READ, [...read].slice(-200));
+}
+
+function renderNotificationCenter() {
+  const mount = document.querySelector("#profit-alerts");
+  if (!mount) return;
+  const items = notificationHistory();
+  const read = new Set(readStoredList(APP_NOTIFICATION_READ));
+  const unread = items.filter((item) => !read.has(item.id));
+  mount.innerHTML = `
+    <details class="notification-center">
+      <summary>
+        <span><strong>Notification Center</strong><small>TP1, profit protection, and Focus List exits</small></span>
+        <span class="notification-count ${unread.length ? "has-unread" : ""}">${unread.length ? `${unread.length} unread` : "All read"}</span>
+      </summary>
+      <div class="notification-body">
+        <div class="notification-toolbar">
+          <span>${items.length ? `${items.length} recent alert${items.length === 1 ? "" : "s"}` : "No profit or Focus List exit alerts yet"}</span>
+          ${unread.length ? '<button type="button" id="mark-notifications-read">Mark all read</button>' : ""}
+        </div>
+        <div class="notification-list">
+          ${items.length ? items.map((item) => `
+            <a class="notification-item tone-${escapeHtml(item.kind)} ${read.has(item.id) ? "read" : "unread"}" href="./ticker.html?ticker=${encodeURIComponent(item.ticker)}" data-notification-id="${escapeHtml(item.id)}">
+              <span class="notification-dot" aria-hidden="true"></span>
+              <span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.body)}</small></span>
+              <time>${escapeHtml(item.date || "Latest")}</time>
+            </a>
+          `).join("") : '<div class="notification-empty">TP1 and profit-protection events will appear here after the daily refresh.</div>'}
+        </div>
+      </div>
+    </details>
+  `;
+  document.querySelector("#mark-notifications-read")?.addEventListener("click", () => {
+    markNotificationsRead(items.map((item) => item.id));
+    renderNotificationCenter();
+  });
+  mount.querySelectorAll("[data-notification-id]").forEach((link) => {
+    link.addEventListener("click", () => markNotificationsRead([link.dataset.notificationId]));
+  });
+}
+
 function renderWatchlist() {
   const counts = { buy: 0, continue: 0, setup: 0, watch: 0, exit: 0, avoid: 0 };
   state.rows.forEach((row) => {
@@ -2466,6 +2588,7 @@ function renderWatchlist() {
   renderSignalChanges();
   renderPriceMovers();
   renderFocusList();
+  renderNotificationCenter();
 
   const needle = state.query.trim().toLowerCase();
   const searchActive = Boolean(needle);

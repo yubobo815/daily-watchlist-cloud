@@ -128,6 +128,14 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("Context &amp; evidence"), "ticker panel must use the reader-facing context label");
   assert(!appSource.includes("<summary>More context</summary>"), "ticker panel must not expose the old machine-context label");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
+  assert(pageSource.includes('id="profit-alerts"'), "watchlist must provide an in-app notification center mount");
+  assert(appSource.includes("function notificationForRow(row)"), "notification center must derive alerts from current scanner rows");
+  assert(appSource.includes('stage === "TP1 REACHED"'), "notification center must detect first-profit events");
+  assert(appSource.includes('stage === "PROTECT REMAINDER"'), "notification center must detect profit-protection events");
+  assert(appSource.includes('row.action === "EXIT PRESSURE" && state.focusTickers.includes(ticker)'), "exit alerts must be limited to saved Focus List names");
+  assert(appSource.includes("function markNotificationsRead(ids)"), "notification center must persist read state");
+  assert(appSource.includes(".slice(0, 50)"), "notification history must remain storage-bounded");
+  assert(!appSource.includes("Notification.requestPermission"), "in-app notifications must not request browser notification permission");
   assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
   assert(!pageSource.includes("Execution tier first"), "watchlist must not retain execution-tier sorting copy");
   assert(!tickerSource.includes("Execution plan"), "ticker detail must not retain execution-plan copy");
