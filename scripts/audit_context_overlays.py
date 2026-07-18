@@ -67,6 +67,56 @@ def audit_profit_protect_requires_giveback_or_supply():
     assert_true(result["next_day_bias"] == "DEFENSIVE / EXIT RISK", "hard profit protect must be defensive")
 
 
+def audit_profit_plan_adapts_to_volatility_regime():
+    trend = dwo.profit_management_plan(100, 94, 124, 8, "HIGH_BETA", "TREND VOLATILITY")
+    reversal = dwo.profit_management_plan(100, 94, 124, 8, "HIGH_BETA", "REVERSAL VOLATILITY")
+    assert_true(trend["take_profit_1"] == 109, "trend volatility should take first profit at 1.5R")
+    assert_true(trend["take_profit_1_reduce_pct"] == 30, "trend volatility should retain more participation")
+    assert_true(reversal["take_profit_1"] == 106, "volatile reversal should take first profit at 1R")
+    assert_true(reversal["take_profit_1_reduce_pct"] == 50, "volatile reversal should de-risk more aggressively")
+
+
+def audit_tp1_hit_trims_without_forcing_full_exit():
+    result = latest([
+        row(
+            "D1", "BUY CANDIDATE", 100, high=101, setup="MOMENTUM BUY",
+            entry_zone_high=100, stop_est=94, take_profit_1=109,
+            take_profit_1_reduce_pct=30, post_tp1_stop=100,
+        ),
+        row("D2", "WATCH TREND", 108, high=110),
+    ])
+    assert_true(result["contextual_overlay"] == "TAKE PROFIT 1", "first target touch must create a distinct profit stage")
+    assert_true(result["profit_stage"] == "TP1 REACHED", "TP1 stage must be exposed to the UI")
+    assert_true(result["next_day_bias"] == "PROFIT MANAGEMENT", "TP1 should manage profit rather than claim structural EXIT")
+
+
+def audit_tp1_giveback_protects_remainder():
+    result = latest([
+        row(
+            "D1", "BUY CANDIDATE", 100, high=101, setup="MOMENTUM BUY",
+            entry_zone_high=100, stop_est=94, take_profit_1=109,
+            take_profit_1_reduce_pct=30, post_tp1_stop=100,
+            volatility_regime="TREND VOLATILITY",
+        ),
+        row("D2", "WATCH TREND", 109, high=111),
+        row("D3", "WATCH TREND", 105, high=108),
+    ])
+    assert_true(result["contextual_overlay"] == "PROFIT PROTECT", "material R giveback after TP1 must protect the remainder")
+    assert_true(result["profit_stage"] == "PROTECT REMAINDER", "giveback must expose the remainder-protection stage")
+
+
+def audit_buy_bar_high_cannot_fake_tp1_hit():
+    result = latest([
+        row(
+            "D1", "BUY CANDIDATE", 100, high=120, setup="MOMENTUM BUY",
+            entry_zone_high=100, stop_est=94, take_profit_1=109,
+            take_profit_1_reduce_pct=30, post_tp1_stop=100,
+        ),
+        row("D2", "WATCH TREND", 100, high=101),
+    ])
+    assert_true(not result.get("contextual_overlay"), "BUY-bar high must not count as a later TP1 hit when intraday order is unknown")
+
+
 def audit_post_exit_cooldown_sees_short_pressure():
     result = latest([
         row("D1", "EXIT PRESSURE", 100, score=20, next_day_bias="DEFENSIVE / EXIT RISK", distribution_score=60),
@@ -1010,6 +1060,10 @@ def audit_volatile_zones_and_stops_expand_without_excess():
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
+    audit_profit_plan_adapts_to_volatility_regime()
+    audit_tp1_hit_trims_without_forcing_full_exit()
+    audit_tp1_giveback_protects_remainder()
+    audit_buy_bar_high_cannot_fake_tp1_hit()
     audit_post_exit_cooldown_sees_short_pressure()
     audit_post_exit_risk_persistence_keeps_exit_pressure()
     audit_post_exit_risk_persistence_allows_strong_reclaim()
@@ -1070,7 +1124,7 @@ def main():
     audit_volatile_zones_and_stops_expand_without_excess()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 60,
+        "cases": 64,
     })
 
 

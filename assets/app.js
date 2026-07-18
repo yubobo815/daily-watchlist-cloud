@@ -925,10 +925,14 @@ function contextSummary(row) {
   const entry = formatEntryZone(row);
   const stop = numericValue(row, "stop_est");
   const target = numericValue(row, "target_est");
+  const takeProfit1 = payloadNumeric(row, "take_profit_1");
+  const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct");
+  const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
   const operator = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure");
   const validation = validationSummary(row);
   const parts = [naturalActionSentence(row), `The tape suggests ${operatorNarrative(operator)}.`];
   if (entry) parts.push(`The preferred entry area is ${entry}${stop ? `, with a stop near ${fmtNumber(stop, 2)}` : ""}.`);
+  if (takeProfit1) parts.push(`At ${fmtNumber(takeProfit1, 2)}, trim ${fmtNumber(reducePct || 33, 0)}% and raise the remaining stop to at least ${fmtNumber(postTp1Stop, 2)}.`);
   if (target) parts.push(`The scanner's reference target is ${fmtNumber(target, 2)}; it is a planning level, not a forecast.`);
   parts.push(predictionNarrative(row));
   if (validation !== "All available validation gates allow") parts.push(`Current constraint: ${validation}.`);
@@ -1434,6 +1438,8 @@ function renderScoreBreakdown(row) {
   const volatilityRegime = payloadValue(row, "volatility_regime") || "NORMAL";
   const volatilityPermission = payloadValue(row, "volatility_permission") || "ALLOW";
   const positionSizeFactor = Number(payloadValue(row, "position_size_factor"));
+  const profitStage = payloadValue(row, "profit_stage") || "PLANNED";
+  const profitPeakR = Number(payloadValue(row, "profit_peak_r"));
   const entryQuality = entryQualityLabel(row);
   const entryQualityScore = Number(payloadValue(row, "entry_quality_score") || payloadValue(row, "buy_quality_score"));
   const nextDayBias = payloadValue(row, "next_day_bias") || "NEUTRAL";
@@ -1494,6 +1500,7 @@ function renderScoreBreakdown(row) {
     ["Personality", String(personality).replace(/_/g, " ")],
     ["Volatility Regime", `${volatilityRegime}${volatilityPermission !== "ALLOW" ? ` / ${volatilityPermission}` : ""}`],
     ["Position Guide", Number.isFinite(positionSizeFactor) ? `${fmtNumber(positionSizeFactor * 100, 0)}% of normal size` : "n/a"],
+    ["Profit Stage", `${profitStage}${Number.isFinite(profitPeakR) ? ` / peak ${fmtNumber(profitPeakR, 2)}R` : ""}`],
     ["Emotion", Number.isFinite(emotion) ? `${fmtNumber(emotion, 0)}/100` : "n/a"],
     ["MA Location", Number.isFinite(location) ? `${fmtNumber(location, 0)}/100` : "n/a"],
     ["Setup Context", Number.isFinite(setupContext) ? `${fmtNumber(setupContext, 0)}/100` : "n/a"],
@@ -2090,6 +2097,9 @@ function renderTickerDetailPanel() {
   const kind = actionKind(row.action);
   const risk = payloadNumeric(row, "risk_pct_to_stop");
   const target = numericValue(row, "target_est");
+  const takeProfit1 = payloadNumeric(row, "take_profit_1");
+  const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct");
+  const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
   panel.innerHTML = `
     <div class="detail-panel-head"><div><span class="eyebrow">Selected plan</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open</a></div>
     <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
@@ -2097,6 +2107,9 @@ function renderTickerDetailPanel() {
     <dl class="execution-sheet">
       <div><dt>Entry zone</dt><dd>${escapeHtml(formatEntryZone(row) || "Unavailable")}</dd></div>
       <div><dt>Stop</dt><dd>${escapeHtml(fmtNumber(row.stop_est, 2) || "Unavailable")}</dd></div>
+      <div><dt>Take profit 1</dt><dd>${takeProfit1 ? `${escapeHtml(fmtNumber(takeProfit1, 2))} · trim ${escapeHtml(fmtNumber(reducePct || 33, 0))}%` : "Unavailable"}</dd></div>
+      <div><dt>After TP1</dt><dd>${postTp1Stop ? `Protect at ${escapeHtml(fmtNumber(postTp1Stop, 2))} or higher` : "Unavailable"}</dd></div>
+      <div><dt>Final target</dt><dd>${target ? escapeHtml(fmtNumber(target, 2)) : "Unavailable"}</dd></div>
       <div><dt>Risk</dt><dd class="risk-value">${risk ? `-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%` : "Unavailable"}</dd></div>
       <div><dt>Validation</dt><dd>${escapeHtml(validationSummary(row))}</dd></div>
     </dl>
@@ -2652,6 +2665,9 @@ function renderLatestHistoryPanel(latest) {
         <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
         <div><span>Entry Zone</span><strong>${escapeHtml(formatEntryZone(latest) || "Unavailable")}</strong></div>
         <div><span>Stop</span><strong>${fmtNumber(latest.stop_est, 2) || "-"}</strong></div>
+        <div><span>Take Profit 1</span><strong>${payloadNumeric(latest, "take_profit_1") ? `${fmtNumber(payloadNumeric(latest, "take_profit_1"), 2)} · trim ${fmtNumber(payloadNumeric(latest, "take_profit_1_reduce_pct") || 33, 0)}%` : "-"}</strong></div>
+        <div><span>After TP1</span><strong>${payloadNumeric(latest, "post_tp1_stop") ? `Protect ${fmtNumber(payloadNumeric(latest, "post_tp1_stop"), 2)}+` : "-"}</strong></div>
+        <div><span>Final Target</span><strong>${fmtNumber(latest.target_est, 2) || "-"}</strong></div>
         <div><span>Risk</span><strong>${payloadNumeric(latest, "risk_pct_to_stop") ? `-${fmtNumber(Math.abs(payloadNumeric(latest, "risk_pct_to_stop")), 1)}%` : "Unavailable"}</strong></div>
         <div><span>Validation</span><strong>${escapeHtml(validationSummary(latest))}</strong></div>
       </div>

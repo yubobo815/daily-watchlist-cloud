@@ -1834,20 +1834,40 @@ def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[
         buy_row = history_rows[buy_index]
         if buy_row.get("action") not in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
             continue
-        buy_close = row_float(buy_row, "close")
-        if buy_close <= 0:
+        trade_entry = (
+            row_float(buy_row, "entry_zone_high")
+            or row_float(buy_row, "entry_est")
+            or row_float(buy_row, "close")
+        )
+        if trade_entry <= 0:
             continue
-        closes = [row_float(item, "close") for item in history_rows[buy_index : index + 1]]
-        peak_close = max([value for value in closes if value > 0], default=0.0)
-        if peak_close <= 0:
+        # The BUY bar cannot establish whether entry or target happened first.
+        # Profit management starts from the next complete daily bar.
+        post_entry_rows = history_rows[buy_index + 1 : index + 1]
+        highs = [row_float(item, "high") or row_float(item, "close") for item in post_entry_rows]
+        peak_price = max([value for value in highs if value > 0], default=0.0)
+        if peak_price <= 0:
             continue
-        peak_gain_pct = (peak_close / buy_close - 1) * 100
-        giveback_pct = (current_close / peak_close - 1) * 100
+        stop = row_float(buy_row, "stop_est")
+        risk = trade_entry - stop if 0 < stop < trade_entry else 0.0
+        take_profit_1 = row_float(buy_row, "take_profit_1")
+        peak_gain_pct = (peak_price / trade_entry - 1) * 100
+        giveback_pct = (current_close / peak_price - 1) * 100
         context = {
             "buy_index": buy_index,
             "buy_date": buy_row.get("date"),
+            "trade_entry": trade_entry,
+            "risk": risk,
+            "peak_price": peak_price,
             "peak_gain_pct": peak_gain_pct,
             "giveback_pct": giveback_pct,
+            "peak_gain_r": (peak_price - trade_entry) / risk if risk > 0 else 0.0,
+            "giveback_r": (current_close - peak_price) / risk if risk > 0 else 0.0,
+            "take_profit_1": take_profit_1,
+            "take_profit_1_hit": take_profit_1 > trade_entry and peak_price >= take_profit_1,
+            "take_profit_1_reduce_pct": row_float(buy_row, "take_profit_1_reduce_pct"),
+            "post_tp1_stop": row_float(buy_row, "post_tp1_stop"),
+            "volatility_regime": str(buy_row.get("volatility_regime") or "NORMAL").upper(),
         }
         if not best_context or peak_gain_pct > float(best_context["peak_gain_pct"]):
             best_context = context
@@ -1856,14 +1876,25 @@ def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[
 
 def profit_context_candidate(row: dict, history_rows: list[dict], index: int) -> Optional[dict]:
     context = recent_buy_profit_context(history_rows, index)
-    if not context or float(context["peak_gain_pct"]) < PROFIT_PROTECT_TRIGGER_GAIN_PCT:
+    if not context or (
+        not context["take_profit_1_hit"]
+        and float(context["peak_gain_pct"]) < PROFIT_PROTECT_TRIGGER_GAIN_PCT
+    ):
         return None
 
     action = row.get("action")
     giveback_pct = float(context["giveback_pct"])
+    giveback_r = float(context["giveback_r"])
+    volatility_regime = str(context["volatility_regime"])
+    giveback_r_limit = -0.50 if volatility_regime == "REVERSAL VOLATILITY" else -0.75 if volatility_regime == "TREND VOLATILITY" else -0.65
+    giveback_pct_limit = -3.0 if volatility_regime == "REVERSAL VOLATILITY" else -5.0 if volatility_regime == "TREND VOLATILITY" else -PROFIT_PROTECT_GIVEBACK_PCT
     supply_score = supply_risk_score(row)
+    post_tp1_stop = float(context["post_tp1_stop"])
+    protective_stop_breached = context["take_profit_1_hit"] and post_tp1_stop > 0 and row_float(row, "close") <= post_tp1_stop
     hard_protect = (
-        giveback_pct <= -PROFIT_PROTECT_GIVEBACK_PCT
+        giveback_pct <= giveback_pct_limit
+        or (float(context["risk"]) > 0 and giveback_r <= giveback_r_limit)
+        or protective_stop_breached
         or supply_score >= PROFIT_PROTECT_SUPPLY_SCORE
         or (action == "EXIT PRESSURE" and supply_score >= 35.0)
         or (row.get("extension_state") == "EXTENDED" and supply_score >= 25.0)
@@ -1880,9 +1911,40 @@ def profit_context_candidate(row: dict, history_rows: list[dict], index: int) ->
             "force_action": "SETUP FORMING" if action in {"BUY CANDIDATE", "STRONG CONTINUATION"} else None,
             "execution_block": "YES" if action in {"BUY CANDIDATE", "STRONG CONTINUATION"} else None,
             "reason_code": "profit_protect",
+            "profit_stage": "PROTECT REMAINDER",
+            "take_profit_1_hit": bool_text(bool(context["take_profit_1_hit"])),
+            "profit_peak_r": round(float(context["peak_gain_r"]), 2),
+            "profit_giveback_r": round(giveback_r, 2),
+            "active_protective_stop": round(post_tp1_stop, 2) if post_tp1_stop > 0 else "",
             "plan": (
-                f"Recent BUY from {context['buy_date']} reached +{float(context['peak_gain_pct']):.1f}% "
-                f"and is now showing {giveback_pct:.1f}% giveback or supply risk; protect gains before adding exposure."
+                f"Recent BUY from {context['buy_date']} reached {float(context['peak_gain_r']):.2f}R "
+                f"and is now showing {giveback_r:.2f}R giveback or supply risk; protect the remaining position."
+            ),
+        }
+
+    if context["take_profit_1_hit"]:
+        reduce_pct = float(context["take_profit_1_reduce_pct"] or 33.0)
+        return {
+            "priority": 65,
+            "label": "TAKE PROFIT 1",
+            "adjustment": -6.0,
+            "transition_label": "First Profit Taken",
+            "next_day_bias": "PROFIT MANAGEMENT",
+            "next_day_plan": (
+                f"TP1 was reached; trim {reduce_pct:.0f}% and protect the balance at or above "
+                f"{post_tp1_stop:.2f}."
+            ),
+            "force_action": "SETUP FORMING" if action in {"BUY CANDIDATE", "STRONG CONTINUATION"} else None,
+            "execution_block": "YES" if action in {"BUY CANDIDATE", "STRONG CONTINUATION"} else None,
+            "reason_code": "take_profit_1_hit",
+            "profit_stage": "TP1 REACHED",
+            "take_profit_1_hit": "YES",
+            "profit_peak_r": round(float(context["peak_gain_r"]), 2),
+            "profit_giveback_r": round(giveback_r, 2),
+            "active_protective_stop": round(post_tp1_stop, 2),
+            "plan": (
+                f"Recent BUY from {context['buy_date']} reached TP1 at {float(context['take_profit_1']):.2f}; "
+                f"trim {reduce_pct:.0f}% and manage the remainder with the raised stop."
             ),
         }
 
@@ -1895,6 +1957,11 @@ def profit_context_candidate(row: dict, history_rows: list[dict], index: int) ->
         "adjustment": 0.0,
         "transition_label": None,
         "reason_code": "profit_active",
+        "profit_stage": "PROFIT ACTIVE",
+        "take_profit_1_hit": "NO",
+        "profit_peak_r": round(float(context["peak_gain_r"]), 2) if float(context["risk"]) > 0 else "",
+        "profit_giveback_r": round(giveback_r, 2) if float(context["risk"]) > 0 else "",
+        "active_protective_stop": "",
         "plan": f"Recent BUY from {context['buy_date']} reached +{float(context['peak_gain_pct']):.1f}%; avoid fresh chase, but no hard exit pressure yet.",
     }
 
@@ -1963,6 +2030,15 @@ def resolve_context_overlay(row: dict, history_rows: list[dict], index: int, pri
         row["next_day_plan"] = selected["next_day_plan"]
     if selected.get("execution_block"):
         row["execution_block"] = selected["execution_block"]
+    for field in (
+        "profit_stage",
+        "take_profit_1_hit",
+        "profit_peak_r",
+        "profit_giveback_r",
+        "active_protective_stop",
+    ):
+        if selected.get(field) not in (None, ""):
+            row[field] = selected[field]
     reason_code = selected.get("reason_code")
     if reason_code:
         append_unique_reason(row, str(reason_code))
@@ -3393,6 +3469,52 @@ def minimum_stop_pct(personality_type: str, volatility_regime: str = "NORMAL") -
     return max(base, regime_floor)
 
 
+def profit_management_plan(
+    trade_entry: float,
+    stop: float,
+    target: float,
+    atr_now: float,
+    personality_type: object,
+    volatility_regime: object,
+) -> dict:
+    risk = float(trade_entry) - float(stop)
+    if trade_entry <= 0 or risk <= 0 or target <= trade_entry:
+        return {
+            "take_profit_1": np.nan,
+            "take_profit_1_r": np.nan,
+            "take_profit_1_reduce_pct": np.nan,
+            "post_tp1_stop": np.nan,
+            "profit_management_plan": "",
+        }
+
+    personality = str(personality_type or "BALANCED").upper()
+    regime = str(volatility_regime or "NORMAL").upper()
+    if regime == "REVERSAL VOLATILITY":
+        tp1_r, reduce_pct, trail_atr = 1.0, 50.0, 1.0
+    elif regime == "TREND VOLATILITY":
+        tp1_r, reduce_pct, trail_atr = 1.5, 30.0, 1.5
+    elif personality == "HIGH_BETA":
+        tp1_r, reduce_pct, trail_atr = 1.25, 33.0, 1.25
+    else:
+        tp1_r, reduce_pct, trail_atr = 1.5, 33.0, 1.25
+
+    take_profit_1 = min(float(target), float(trade_entry) + risk * tp1_r)
+    effective_tp1_r = (take_profit_1 - float(trade_entry)) / risk
+    atr_trail = float(atr_now) * trail_atr if atr_now > 0 else 0.0
+    post_tp1_stop = max(float(trade_entry), take_profit_1 - atr_trail)
+    plan = (
+        f"At {take_profit_1:.2f} ({effective_tp1_r:.2f}R), trim {reduce_pct:.0f}% and raise the remaining stop "
+        f"to at least {post_tp1_stop:.2f}; keep the balance for {float(target):.2f} while structure holds."
+    )
+    return {
+        "take_profit_1": take_profit_1,
+        "take_profit_1_r": effective_tp1_r,
+        "take_profit_1_reduce_pct": reduce_pct,
+        "post_tp1_stop": post_tp1_stop,
+        "profit_management_plan": plan,
+    }
+
+
 def latest_pivot(values: pd.Series, left: int = 3, right: int = 3, kind: str = "high") -> float:
     if len(values) < left + right + 1:
         return np.nan
@@ -4358,6 +4480,14 @@ def classify_and_score(
     atr_stop = trade_entry - atr_now * atr_stop_mult if atr_now > 0 else max_risk_stop
     stop = max(max_risk_stop, min(zone_stop, atr_stop, trade_entry - min_stop_distance))
     target = trade_entry + atr_now * 3.0 if atr_now > 0 else trade_entry * (1 + (12.0 if setup == "MOMENTUM BUY" else 10.0 if "PULLBACK" in setup else 8.0) / 100)
+    profit_plan = profit_management_plan(
+        trade_entry,
+        stop,
+        target,
+        atr_now,
+        personality_profile["personality_type"],
+        volatility_regime,
+    )
     reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
     risk_pct_to_stop = (trade_entry - stop) / trade_entry * 100 if trade_entry > stop else np.nan
     position_value_1k_risk = SCANNER_RISK_DOLLARS / (risk_pct_to_stop / 100) if not math.isnan(risk_pct_to_stop) and risk_pct_to_stop > 0 else np.nan
@@ -5014,6 +5144,11 @@ def classify_and_score(
         "entry_zone_plan": "Buy only inside the zone; gap-through below the zone requires reclaim confirmation." if setup_forming and not math.isnan(entry_zone_low) else "",
         "stop_est": round(float(stop), 2) if setup_forming else "",
         "target_est": round(float(target), 2) if setup_forming else "",
+        "take_profit_1": round(float(profit_plan["take_profit_1"]), 2) if setup_forming and not math.isnan(profit_plan["take_profit_1"]) else "",
+        "take_profit_1_r": round(float(profit_plan["take_profit_1_r"]), 2) if setup_forming and not math.isnan(profit_plan["take_profit_1_r"]) else "",
+        "take_profit_1_reduce_pct": round(float(profit_plan["take_profit_1_reduce_pct"]), 0) if setup_forming and not math.isnan(profit_plan["take_profit_1_reduce_pct"]) else "",
+        "post_tp1_stop": round(float(profit_plan["post_tp1_stop"]), 2) if setup_forming and not math.isnan(profit_plan["post_tp1_stop"]) else "",
+        "profit_management_plan": profit_plan["profit_management_plan"] if setup_forming else "",
         "reward_risk": round(float(reward_risk), 2) if setup_forming and not math.isnan(reward_risk) else "",
         "risk_pct_to_stop": round(float(risk_pct_to_stop), 2) if setup_forming and not math.isnan(risk_pct_to_stop) else "",
         "position_value_1k_risk": round(float(position_value_1k_risk), 0) if setup_forming and not math.isnan(position_value_1k_risk) else "",
@@ -5234,6 +5369,16 @@ LATEST_SIGNAL_FIELDS = [
     "volatility_permission",
     "volatility_plan",
     "position_size_factor",
+    "take_profit_1",
+    "take_profit_1_r",
+    "take_profit_1_reduce_pct",
+    "post_tp1_stop",
+    "profit_management_plan",
+    "profit_stage",
+    "take_profit_1_hit",
+    "profit_peak_r",
+    "profit_giveback_r",
+    "active_protective_stop",
     "profit_protect_pressure",
     "hard_exit_pressure",
     "operator_pressure",
@@ -5380,6 +5525,8 @@ def apply_quality_overlays(row: dict, market_context: dict) -> dict:
         signal_quality = "EXIT RISK"
     elif overlay == "PROFIT PROTECT":
         signal_quality = "PROFIT PROTECT"
+    elif overlay == "TAKE PROFIT 1":
+        signal_quality = "TAKE PROFIT 1"
     elif overlay == "PROFIT ACTIVE":
         signal_quality = "PROFIT ACTIVE"
     elif overlay == "VOLATILE TREND HOLD":
