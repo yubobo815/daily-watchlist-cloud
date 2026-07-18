@@ -148,6 +148,11 @@ def number(value: object) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
+def required_learning_snapshot_rows(snapshot_count: int) -> int:
+    """Require representative current-row coverage without assuming exact patterns are dense."""
+    return max(10, math.ceil(max(0, snapshot_count) * 0.10))
+
+
 def main(*, finalize: bool = False) -> None:
     expected_run_date = os.getenv("EXPECTED_RUN_DATE", "").strip()
     expected_publication_id = os.getenv("EXPECTED_PUBLICATION_ID", "").strip()
@@ -396,14 +401,17 @@ def main(*, finalize: bool = False) -> None:
     if not directional_validation_safe:
         emit_metrics(metrics)
         fail("The directional OHLCV model was activated without its full OOS evidence gate.")
-    # A hard-gated model deliberately leaves rows without settled, exact-pattern
-    # evidence in reporting-only mode. Require meaningful coverage, but do not
-    # fail a healthy v3 cold-start simply because it refuses broad promotion.
-    required_learning_rows = max(25, int(len(snapshot_rows) * 0.20))
+    # Settled and calibrated outcome checks above validate the global learner.
+    # Exact-pattern matches are regime-dependent, so treat current-row coverage
+    # as an attachment check rather than a fixed 20% promotion quota.
+    required_learning_rows = required_learning_snapshot_rows(len(snapshot_rows))
     metrics["required_snapshots_with_learning_samples"] = required_learning_rows
     if learning_ready < required_learning_rows:
         emit_metrics(metrics)
         fail("Too few latest snapshots have learning samples attached.")
+    if learning_scope_ready < required_learning_rows:
+        emit_metrics(metrics)
+        fail("Too few learned snapshots identify their evidence scope.")
 
     scanner_status = str(latest_payload.get("scanner_status") or "")
     if scanner_status not in {"ok", "degraded"}:

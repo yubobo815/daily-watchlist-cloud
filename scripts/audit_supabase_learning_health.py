@@ -14,7 +14,7 @@ RUN_DATE = "2026-07-17"
 PUBLICATION_ID = "pub-test"
 
 
-def fixture_rows(*, invalid_promotion: bool = False):
+def fixture_rows(*, invalid_promotion: bool = False, learning_rows: int = 40):
     history = [
         {
             "ticker": f"T{ticker:02d}",
@@ -32,8 +32,8 @@ def fixture_rows(*, invalid_promotion: bool = False):
     snapshots = []
     for ticker in range(40):
         payload = {
-            "learning_sample_count": 30,
-            "learning_scope": "exact signal personality",
+            "learning_sample_count": 30 if ticker < learning_rows else 0,
+            "learning_scope": "exact signal personality" if ticker < learning_rows else "none",
             "learning_promotion_eligible": False,
         }
         if invalid_promotion and ticker == 0:
@@ -71,8 +71,11 @@ def fixture_rows(*, invalid_promotion: bool = False):
     return history, snapshots, outcomes
 
 
-def run_fixture(*, finalize: bool, invalid_promotion: bool = False) -> int:
-    history, snapshots, outcomes = fixture_rows(invalid_promotion=invalid_promotion)
+def run_fixture(*, finalize: bool, invalid_promotion: bool = False, learning_rows: int = 40) -> int:
+    history, snapshots, outcomes = fixture_rows(
+        invalid_promotion=invalid_promotion,
+        learning_rows=learning_rows,
+    )
     run = {
         "publication_id": PUBLICATION_ID,
         "run_date": RUN_DATE,
@@ -124,15 +127,25 @@ def run_fixture(*, finalize: bool, invalid_promotion: bool = False) -> int:
 
 
 def main() -> None:
+    assert health.required_learning_snapshot_rows(185) == 19
+    assert health.required_learning_snapshot_rows(250) == 25
+    assert health.required_learning_snapshot_rows(40) == 10
     assert run_fixture(finalize=False) == 0, "validation must not expose the staged publication"
     assert run_fixture(finalize=True) == 1, "finalization must perform exactly one CAS promotion"
+    assert run_fixture(finalize=False, learning_rows=10) == 0, "representative sparse learning coverage must publish"
+    try:
+        run_fixture(finalize=False, learning_rows=9)
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("insufficient current-row learning coverage must fail closed")
     try:
         run_fixture(finalize=False, invalid_promotion=True)
     except SystemExit as exc:
         assert exc.code == 1
     else:
         raise AssertionError("an under-evidenced promotion must fail closed")
-    print({"supabaseLearningHealthAudit": "ok", "cases": 3})
+    print({"supabaseLearningHealthAudit": "ok", "cases": 5})
 
 
 if __name__ == "__main__":
