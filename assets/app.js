@@ -28,10 +28,10 @@ const UI_LABELS = {
     ticker: "Ticker",
     action: "Signal",
     score: "Quality",
-    entry_est: "Entry zone",
-    stop_est: "Stop",
-    risk_pct_to_stop: "Risk",
-    trade_context: "Signal rationale",
+    entry_est: "Reference zone",
+    stop_est: "Protection",
+    risk_pct_to_stop: "Downside",
+    trade_context: "What it means",
   },
   text: {
     watchlist: "Watchlist",
@@ -136,7 +136,7 @@ const REASON_LABELS = {
   walk_forward_insufficient: "Walk-forward insufficient",
   risk_governor_block: "Risk governor block",
   missing_audit_gates: "Audit gates pending",
-  missing_execution_proof: "Execution proof pending"
+  missing_execution_proof: "Historical confirmation is incomplete"
 };
 
 const APP_DISCLAIMER = "This tool is intended for reference and analysis only. Do not consider this as financial or investment advice.";
@@ -165,7 +165,7 @@ function watchlistColumns() {
 
 function executionQueues(counts) {
   return [
-    { key: "buy", filter: "buy", label: "BUY", count: counts.buy || 0, detail: "Pine-confirmed entry only" },
+    { key: "buy", filter: "buy", label: "BUY", count: counts.buy || 0, detail: "Entry-ready candidates" },
     {
       key: "building",
       filter: "building",
@@ -517,6 +517,7 @@ function renderCompanyBrief(profile) {
   const website = safeWebsite(profile?.website);
   const industry = [profile?.sector, profile?.industry].filter(Boolean).join(" · ");
   const source = String(profile?.profile_source || "Company profile").trim();
+  const summaryPreview = summary.length > 260 ? `${summary.slice(0, 257).replace(/\s+\S*$/, "")}...` : summary;
 
   if (!summary && !highlights && !nextReport && !website && !industry) {
     target.innerHTML = `
@@ -531,10 +532,11 @@ function renderCompanyBrief(profile) {
     <details class="company-brief">
       <summary>
         ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
-        ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
-        ${summary && summary.length > 120 ? `<span class="company-toggle" data-open="Show less" data-closed="Show more"></span>` : ""}
+        ${summaryPreview ? `<p>${escapeHtml(summaryPreview)}</p>` : ""}
+        ${summary && summary.length > summaryPreview.length ? `<span class="company-toggle" data-open="Show less" data-closed="Show company details"></span>` : ""}
       </summary>
       <div class="company-facts">
+        ${summary && summary.length > summaryPreview.length ? `<div><span>Business overview</span><strong>${escapeHtml(summary)}</strong></div>` : ""}
         ${highlights ? `<div><span>Latest report</span><strong>${escapeHtml(highlights)}</strong></div>` : ""}
         ${nextReport ? `<div><span>Next report</span><strong>${escapeHtml(nextReport)}</strong></div>` : ""}
         ${website ? `<div><span>Website</span><strong><a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(new URL(website).hostname.replace(/^www\./, ""))}</a></strong></div>` : ""}
@@ -820,10 +822,10 @@ function qualityConstraintLabel(row) {
   const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
   const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
   const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
-  if (freshnessBlocked) return "STALE";
-  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "GATE BLOCK";
-  if (antiSignal === "BLOCK") return "BLOCKED";
-  if (antiSignal === "CAUTION") return "CAUTION";
+  if (freshnessBlocked) return "DATA OLD";
+  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "PENDING";
+  if (antiSignal === "BLOCK") return "AVOID";
+  if (antiSignal === "CAUTION") return "USE CAUTION";
   return "";
 }
 
@@ -866,32 +868,9 @@ function fmtConviction(rowOrScore) {
 function renderQualityScore(row) {
   const blockedLabel = qualityConstraintLabel(row);
   if (blockedLabel) {
-    return `<span class="table-score score-blocked" title="Numeric quality suppressed while execution evidence is constrained">${blockedLabel}</span>`;
+    return `<span class="table-score score-blocked" title="A numeric score would be misleading until the required checks are clear">${blockedLabel}</span>`;
   }
   return `<span class="table-score score-${strengthTone(row)}">${escapeHtml(fmtConviction(row))}</span>`;
-}
-
-function qualityDiagnostic(row) {
-  const pattern = setupLabel(row.setup);
-  const constraint = qualityConstraintLabel(row);
-  const raw = fmtNumber(numericValue(row, "score"), 1);
-  const adjusted = fmtNumber(scannerScoreValue(row), 1);
-  if (constraint) return `Pattern ${pattern} · Quality ${constraint} · technical score ${raw} · adjusted rank ${adjusted}`;
-  return `Pattern ${pattern} · execution rank ${adjusted} / 128`;
-}
-
-function fmtRawScore(row) {
-  return fmtNumber(numericValue(row, "score"), 1);
-}
-
-function operatorNarrative(value) {
-  const state = String(value || "").toUpperCase();
-  if (state.includes("ACCUMULATION") || state.includes("ABSORPTION")) return "buyers are absorbing available supply";
-  if (state.includes("MARKUP") || state.includes("DEMAND CONTROL")) return "demand is still in control";
-  if (state.includes("BEAR_TRAP") || state.includes("SQUEEZE")) return "selling pressure has been rejected, but follow-through still matters";
-  if (state.includes("BULL_TRAP")) return "the recent strength may be a failed breakout";
-  if (state.includes("DISTRIBUTION") || state.includes("SHORT")) return "sellers are taking control";
-  return "buyers and sellers are currently balanced";
 }
 
 function naturalActionSentence(row) {
@@ -903,6 +882,59 @@ function naturalActionSentence(row) {
   if (kind === "watch") return "There is no clean entry yet; wait for either a stronger breakout or a controlled pullback.";
   if (kind === "exit") return "The trend is under pressure; protect capital rather than looking for a new entry.";
   return "There is no favourable setup at the moment.";
+}
+
+function executionChecksClear(row) {
+  const permissions = ["market_permission", "risk_permission", "ticker_permission", "walk_forward_permission"]
+    .map((key) => String(payloadValue(row, key) || "").toUpperCase())
+    .filter(Boolean);
+  const personalityAllowed = String(payloadValue(row, "personality_setup_allowed") || "").toUpperCase();
+  return !qualityConstraintLabel(row)
+    && permissions.every((value) => value === "ALLOW")
+    && personalityAllowed !== "NO";
+}
+
+function referenceZonePosition(row) {
+  const close = numericValue(row, "close");
+  const low = payloadNumeric(row, "entry_zone_low");
+  const high = payloadNumeric(row, "entry_zone_high") || numericValue(row, "entry_est");
+  if (!close || !high) return "";
+  if (close > high) return `${fmtNumber(((close / high) - 1) * 100, 1)}% above the reference zone`;
+  if (low && close < low) return `${fmtNumber((1 - (close / low)) * 100, 1)}% below the reference zone`;
+  return "inside the reference zone";
+}
+
+function decisionHeadline(row) {
+  const kind = actionKind(row.action);
+  const clear = executionChecksClear(row);
+  const position = referenceZonePosition(row);
+  if (kind === "exit") return "Protect capital";
+  if (kind === "avoid") return "Avoid new entries";
+  if (!clear) return "Wait for stronger confirmation";
+  if (kind === "setup" || kind === "watch") return "Wait for the setup to mature";
+  if (kind === "continue") return position.includes("above") ? "Hold, but do not chase" : "Trend remains constructive";
+  if (kind === "buy" && position.includes("above")) return "Do not chase above the entry zone";
+  if (kind === "buy" && position.includes("inside")) return "Entry candidate is in range";
+  return kind === "buy" ? "Watch for entry confirmation" : "Wait";
+}
+
+function decisionNarrative(row) {
+  const kind = actionKind(row.action);
+  const close = numericValue(row, "close");
+  const move = numericValue(row, "day_change_pct");
+  const position = referenceZonePosition(row);
+  const priceLead = close
+    ? `Closed at ${fmtNumber(close, 2)}${Number.isFinite(move) ? ` after ${move >= 0 ? "rising" : "falling"} ${fmtNumber(Math.abs(move), 1)}%` : ""}`
+    : "Latest price is unavailable";
+  if (kind === "exit") return `${priceLead}. The trend is under pressure; reduce exposure or follow the existing stop rather than opening a new position.`;
+  if (kind === "avoid") return `${priceLead}. There is no favourable setup, so keep this name off the entry list.`;
+  if (!executionChecksClear(row)) {
+    const location = position ? ` Price is ${position}.` : "";
+    return `${priceLead}.${location} ${validationSummary(row)}`;
+  }
+  if (kind === "setup" || kind === "watch") return `${priceLead}. ${naturalActionSentence(row)}${position ? ` Price is ${position}.` : ""}`;
+  if (kind === "buy" && position.includes("above")) return `${priceLead}. Price is ${position}; wait for a controlled pullback or a new base instead of chasing.`;
+  return `${priceLead}. ${naturalActionSentence(row)}${position ? ` Price is ${position}.` : ""}`;
 }
 
 function predictionNarrative(row) {
@@ -921,25 +953,7 @@ function predictionNarrative(row) {
     return `Using the validated OHLCV model, the next ${horizon} sessions are estimated at ${fmtNumber(upside * 100, 0)}% for a meaningful rise, ${fmtNumber(downside * 100, 0)}% for a meaningful decline, and ${fmtNumber(noEdge * 100, 0)}% for no decisive move. Confidence is ${certainty}.`;
   }
   const message = `Among comparable filled ${horizon}-session trade plans, the model estimates ${fmtNumber(upside * 100, 0)}% target reached, ${fmtNumber(downside * 100, 0)}% stop reached, and ${fmtNumber(noEdge * 100, 0)}% unresolved. Confidence is ${certainty}.`;
-  return state === "CALIBRATED" ? message : `${message} This conditional history remains reporting-only until the evidence and execution gates qualify.`;
-}
-
-function contextSummary(row) {
-  const entry = formatEntryZone(row);
-  const stop = numericValue(row, "stop_est");
-  const target = numericValue(row, "target_est");
-  const takeProfit1 = payloadNumeric(row, "take_profit_1");
-  const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct");
-  const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
-  const operator = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure");
-  const validation = validationSummary(row);
-  const parts = [naturalActionSentence(row), `The tape suggests ${operatorNarrative(operator)}.`];
-  if (entry) parts.push(`The preferred entry area is ${entry}${stop ? `, with a stop near ${fmtNumber(stop, 2)}` : ""}.`);
-  if (takeProfit1) parts.push(`At ${fmtNumber(takeProfit1, 2)}, trim ${fmtNumber(reducePct || 33, 0)}% and raise the remaining stop to at least ${fmtNumber(postTp1Stop, 2)}.`);
-  if (target) parts.push(`The scanner's reference target is ${fmtNumber(target, 2)}; it is a planning level, not a forecast.`);
-  parts.push(predictionNarrative(row));
-  if (validation !== "All available validation gates allow") parts.push(`Current constraint: ${validation}.`);
-  return parts.join(" ");
+  return state === "CALIBRATED" ? message : `${message} Validation is incomplete, so this estimate does not change today's decision.`;
 }
 
 function recentBehaviorSummary(row, previous) {
@@ -1010,53 +1024,33 @@ function payloadValue(row, key) {
 function learningReadout(row) {
   const samples = Number(payloadValue(row, "learning_sample_count"));
   const adjustment = Number(payloadValue(row, "learning_adjustment"));
-  const scope = payloadValue(row, "learning_scope");
   const action = String(row?.action || "").toUpperCase();
   const defensiveAction = action === "WAIT" || action === "WAIT / AVOID" || action === "EXIT PRESSURE";
-  const evidenceDetails = learningEvidenceDetails(row, samples, scope);
-
-  if (!Number.isFinite(samples) || samples <= 0) {
-    return `pending: no settled peer signal samples yet${evidenceDetails}`;
-  }
-
-  const sampleText = `${fmtNumber(samples, 0)} peer signal samples`;
-  const scopeText = scope ? ` / ${scope}` : "";
-  if (defensiveAction) {
-    return `${sampleText} / defensive only; no bullish promotion${scopeText}${evidenceDetails}`;
-  }
-
-  const adjustmentText = Number.isFinite(adjustment) ? ` / ${fmtSignedNumber(adjustment, 1)} pts` : "";
-  return `${sampleText}${adjustmentText}${scopeText}${evidenceDetails}`;
-}
-
-function learningEvidenceDetails(row, samples, scope) {
   const distinctTickers = Number(payloadValue(row, "learning_distinct_ticker_count"));
   const evaluationDates = Number(payloadValue(row, "learning_evaluation_date_count"));
-  const dateMin = payloadValue(row, "learning_evaluation_date_min");
-  const dateMax = payloadValue(row, "learning_evaluation_date_max");
-  const windowStart = payloadValue(row, "learning_window_start");
-  const windowEnd = payloadValue(row, "learning_window_end");
-  const modelVersion = payloadValue(row, "learning_model_version") || payloadValue(row, "entry_model_version") || payloadValue(row, "model_version");
-  const plan = String(payloadValue(row, "learning_plan") || "").toLowerCase();
   const promotionEligible = learningBoolean(payloadValue(row, "learning_promotion_eligible"));
   const reportingOnly = learningBoolean(payloadValue(row, "learning_reporting_only"));
   const promotionState = String(payloadValue(row, "learning_promotion_state") || "").trim().toUpperCase();
-  const details = [];
-  if (Number.isFinite(distinctTickers)) details.push(`${fmtNumber(distinctTickers, 0)} tickers`);
-  if (Number.isFinite(evaluationDates)) details.push(`${fmtNumber(evaluationDates, 0)} dates`);
-  if (dateMin || dateMax) details.push(`range ${dateMin || "?"} to ${dateMax || "?"}`);
-  if ((windowStart || windowEnd) && (windowStart !== dateMin || windowEnd !== dateMax)) details.push(`window ${windowStart || "?"} to ${windowEnd || "?"}`);
-  if (modelVersion) details.push(`model ${modelVersion}`);
-  else details.push("model version pending");
-  if (samples > 0 || Number.isFinite(distinctTickers) || Number.isFinite(evaluationDates) || plan) {
-    // Counts describe evidence, but only the producer can approve a promotion.
-    const eligible = Boolean(modelVersion)
-      && promotionEligible === true
-      && reportingOnly !== true
-      && promotionState !== "REPORTING_ONLY";
-    details.push(eligible ? "promotion evidence eligible" : "reporting-only");
+  const modelVersion = payloadValue(row, "learning_model_version") || payloadValue(row, "entry_model_version") || payloadValue(row, "model_version");
+
+  if (!Number.isFinite(samples) || samples <= 0) {
+    return "Not enough settled comparable signals yet. Learning is not changing today's decision.";
   }
-  return details.length ? ` / ${details.join(" · ")}` : "";
+
+  const coverage = `${fmtNumber(samples, 0)} comparable settled signals${Number.isFinite(distinctTickers) ? ` from ${fmtNumber(distinctTickers, 0)} stocks` : ""}${Number.isFinite(evaluationDates) ? ` over ${fmtNumber(evaluationDates, 0)} market dates` : ""}`;
+  if (defensiveAction) {
+    return `Reviewed ${coverage}. This evidence supports risk control only; it cannot upgrade the stock to a buy.`;
+  }
+
+  const eligible = Boolean(modelVersion)
+    && promotionEligible === true
+    && reportingOnly !== true
+    && promotionState !== "REPORTING_ONLY";
+  if (!eligible) return `Reviewed ${coverage}. Validation is incomplete, so learning did not improve today's recommendation.`;
+  const adjustmentText = Number.isFinite(adjustment) && Math.abs(adjustment) >= 0.05
+    ? ` It adjusted confidence by ${fmtSignedNumber(adjustment, 1)} points.`
+    : " It did not materially change confidence.";
+  return `Reviewed ${coverage}.${adjustmentText}`;
 }
 
 function learningBoolean(value) {
@@ -1242,7 +1236,7 @@ function isStaleMarketDate(runDate, rows) {
 function historyDateSummary(rows) {
   const dates = [...new Set(rows.map((row) => row.history_date || row.date).filter(Boolean))].sort();
   if (!dates.length) return "";
-  return `History range: ${dates[0]} to ${dates.at(-1)}`;
+  return `History: ${dates[0]} to ${dates.at(-1)}`;
 }
 
 function rowByTicker(rows) {
@@ -1366,160 +1360,44 @@ function currentDayMoverItems(rows) {
     .slice(0, 8);
 }
 
-function gaugePoint(score, radius = 58) {
-  const clamped = Math.max(0, Math.min(100, score));
-  const angle = Math.PI + (clamped / 100) * Math.PI;
-  return {
-    x: 90 + radius * Math.cos(angle),
-    y: 84 + radius * Math.sin(angle)
-  };
-}
-
-function gaugePointerPath(point) {
-  const base = { x: 90, y: 63 };
-  const dx = point.x - base.x;
-  const dy = point.y - base.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length;
-  const uy = dy / length;
-  const px = -uy;
-  const py = ux;
-  const tip = {
-    x: base.x + ux * Math.max(0, length - 4),
-    y: base.y + uy * Math.max(0, length - 4)
-  };
-  const head = {
-    x: tip.x - ux * 9,
-    y: tip.y - uy * 9
-  };
-  const shaftWidth = 2.4;
-  const headWidth = 6.2;
-  return [
-    `M ${(base.x + px * shaftWidth).toFixed(1)} ${(base.y + py * shaftWidth).toFixed(1)}`,
-    `L ${(head.x + px * shaftWidth).toFixed(1)} ${(head.y + py * shaftWidth).toFixed(1)}`,
-    `L ${(head.x + px * headWidth).toFixed(1)} ${(head.y + py * headWidth).toFixed(1)}`,
-    `L ${tip.x.toFixed(1)} ${tip.y.toFixed(1)}`,
-    `L ${(head.x - px * headWidth).toFixed(1)} ${(head.y - py * headWidth).toFixed(1)}`,
-    `L ${(head.x - px * shaftWidth).toFixed(1)} ${(head.y - py * shaftWidth).toFixed(1)}`,
-    `L ${(base.x - px * shaftWidth).toFixed(1)} ${(base.y - py * shaftWidth).toFixed(1)}`,
-    "Z"
-  ].join(" ");
-}
-
-function renderGauge(row) {
-  const gauge = convictionScore(row);
-  const point = gaugePoint(gauge);
-  const band = scoreBand(gauge);
-  const pointer = gaugePointerPath(point);
-  return `
-    <div class="conviction-gauge score-${band}">
-      <svg viewBox="0 0 180 104" role="img" aria-label="Trend quality ${strengthLabel(row)}">
-        <path class="gauge-track" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <path class="gauge-zone zone-risk" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <path class="gauge-zone zone-weak" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <path class="gauge-zone zone-constructive" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <path class="gauge-zone zone-strong" pathLength="100" d="M 24 84 A 66 66 0 0 1 156 84" />
-        <path class="gauge-pointer" d="${pointer}" />
-        <circle class="gauge-hub" cx="90" cy="63" r="4.2" />
-      </svg>
-      <div class="gauge-readout">
-        <strong>${escapeHtml(strengthLabel(row))}</strong>
-        <small>raw ${escapeHtml(fmtRawScore(row))}</small>
-      </div>
-    </div>
-  `;
-}
-
 function renderScoreBreakdown(row) {
-  const atrPct = Number(payloadValue(row, "atr_pct"));
   const buyer = Number(payloadValue(row, "buyer_score"));
   const seller = Number(payloadValue(row, "seller_score"));
-  const volume = payloadValue(row, "volume_state") || "NEUTRAL";
-  const market = payloadValue(row, "market_context") || "UNKNOWN";
-  const quality = payloadValue(row, "signal_quality") || strengthLabel(row);
-  const personality = payloadValue(row, "personality_type") || "BALANCED";
-  const volatilityRegime = payloadValue(row, "volatility_regime") || "NORMAL";
-  const volatilityPermission = payloadValue(row, "volatility_permission") || "ALLOW";
-  const positionSizeFactor = Number(payloadValue(row, "position_size_factor"));
-  const profitStage = payloadValue(row, "profit_stage") || "PLANNED";
-  const profitPeakR = Number(payloadValue(row, "profit_peak_r"));
-  const entryQuality = entryQualityLabel(row);
-  const entryQualityScore = Number(payloadValue(row, "entry_quality_score") || payloadValue(row, "buy_quality_score"));
-  const nextDayBias = payloadValue(row, "next_day_bias") || "NEUTRAL";
-  const nextDayScore = Number(payloadValue(row, "next_day_bias_score"));
-  const emotion = Number(payloadValue(row, "emotion_score"));
-  const location = Number(payloadValue(row, "trend_location_score"));
-  const setupContext = Number(payloadValue(row, "setup_context_score"));
-  const transitionEdge = Number(payloadValue(row, "transition_edge_score"));
-  const personalityWeightLabel = payloadValue(row, "personality_weight_label") || "balanced transition";
-  const personalityWeightEmotion = Number(payloadValue(row, "personality_weight_emotion"));
-  const personalityWeightTransition = Number(payloadValue(row, "personality_weight_transition"));
-  const personalityWeightSetup = Number(payloadValue(row, "personality_weight_setup"));
-  const personalityWeightTrend = Number(payloadValue(row, "personality_weight_trend"));
-  const operatorPressure = payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL";
-  const operatorScore = Number(payloadValue(row, "operator_state_score") ?? payloadValue(row, "operator_pressure_score"));
-  const demandControl = Number(payloadValue(row, "demand_control_score"));
-  const bullTrap = Number(payloadValue(row, "bull_trap_score"));
-  const bearTrap = Number(payloadValue(row, "bear_trap_score"));
-  const distribution = Number(payloadValue(row, "distribution_score"));
-  const absorption = Number(payloadValue(row, "absorption_score"));
-  const shortProxy = Number(payloadValue(row, "short_pressure_proxy"));
-  const buyTier = payloadValue(row, "buy_tier") || "n/a";
-  const contextualOverlayRaw = payloadValue(row, "contextual_overlay");
-  const contextualOverlay = contextualOverlayRaw ? String(contextualOverlayRaw) : "Base read";
-  const contextualAdjustment = Number(payloadValue(row, "contextual_score_adjustment"));
-  const freshnessStatus = payloadValue(row, "freshness_status") || "UNKNOWN";
-  const dataAge = Number(payloadValue(row, "data_age_days"));
-  const feedbackQuality = payloadValue(row, "feedback_quality") || "NO HISTORY";
-  const feedbackReturn = Number(payloadValue(row, "feedback_return_pct"));
-  const feedbackDrawdown = Number(payloadValue(row, "feedback_max_drawdown_pct"));
-  const antiLevel = payloadValue(row, "anti_signal_level") || "NONE";
-  const antiScore = Number(payloadValue(row, "anti_signal_score"));
-  const lastOutcome = payloadValue(row, "last_outcome_label") || "n/a";
-  const lastOutcomeReturn = Number(payloadValue(row, "last_outcome_return_pct"));
-  const dataProvider = payloadValue(row, "data_provider") || "unknown";
-  const dataProviderStatus = payloadValue(row, "data_provider_status") || "unknown";
+  const volume = String(payloadValue(row, "volume_state") || "NEUTRAL").toUpperCase();
+  const market = String(payloadValue(row, "market_context") || "UNKNOWN").toUpperCase();
+  const volatility = String(payloadValue(row, "volatility_regime") || "NORMAL").replaceAll("_", " ").toLowerCase();
+  const nextDayBias = String(payloadValue(row, "next_day_bias") || "NEUTRAL").toUpperCase();
+  const tape = Number.isFinite(buyer) && Number.isFinite(seller)
+    ? buyer >= seller + 12
+      ? `Buyers controlled the latest candle${volume === "DEMAND" ? " with supportive volume" : ""}.`
+      : seller >= buyer + 12
+        ? `Sellers controlled the latest candle${volume === "SUPPLY" ? " with elevated supply" : ""}.`
+        : "The latest candle shows balanced buying and selling pressure."
+    : "The latest candle does not show a decisive buyer or seller advantage.";
+  const relativeTrend = market === "LEADING"
+    ? "The stock is outperforming its market benchmarks over the recent comparison window."
+    : market === "LAGGING"
+      ? "The stock is lagging SPY/QQQ over the recent comparison window."
+      : "Relative performance versus the market is mixed.";
+  const nearTerm = nextDayBias.includes("BULLISH")
+    ? "The latest OHLCV pattern supports possible upside follow-through, but it is not a buy signal by itself."
+    : nextDayBias.includes("BEARISH")
+      ? "The latest OHLCV pattern points to near-term downside risk."
+      : "The latest OHLCV pattern has no clear next-session edge.";
   const items = [
-    ["Scanner Rank", buyTier],
-    ["Context", `${contextualOverlay}${contextualOverlayRaw && Number.isFinite(contextualAdjustment) ? ` ${fmtSignedNumber(contextualAdjustment, 1)} pts` : ""}`],
-    ["Anti-Signal", `${antiLevel}${Number.isFinite(antiScore) ? ` ${fmtNumber(antiScore, 0)}/100` : ""}`],
-    ["Self-Score", `${lastOutcome}${Number.isFinite(lastOutcomeReturn) ? ` ${fmtSignedNumber(lastOutcomeReturn, 1)}%` : ""}`],
-    ["Learning", learningReadout(row)],
-    ["Data Source", `${dataProvider} / ${dataProviderStatus}`],
-    ["Freshness", `${freshnessStatus}${Number.isFinite(dataAge) ? ` ${fmtNumber(dataAge, 0)}d` : ""}`],
-    ["Next Day", `${nextDayBias}${Number.isFinite(nextDayScore) ? ` ${fmtNumber(nextDayScore, 0)}/100` : ""}`],
-    ["Operator", `${operatorPressure}${Number.isFinite(operatorScore) ? ` ${fmtNumber(operatorScore, 0)}/100` : ""}`],
-    ["Transition Edge", Number.isFinite(transitionEdge) ? `${fmtNumber(transitionEdge, 0)}/100` : "n/a"],
-    ["Weight Model", `${personalityWeightLabel}${Number.isFinite(personalityWeightEmotion) ? ` E${fmtNumber(personalityWeightEmotion * 100, 0)} T${fmtNumber(personalityWeightTransition * 100, 0)} S${fmtNumber(personalityWeightSetup * 100, 0)} M${fmtNumber(personalityWeightTrend * 100, 0)}` : ""}`],
-    ["Feedback", `${feedbackQuality}${Number.isFinite(feedbackReturn) ? ` ${fmtSignedNumber(feedbackReturn, 1)}%` : ""}${Number.isFinite(feedbackDrawdown) ? ` / DD ${fmtNumber(feedbackDrawdown, 1)}%` : ""}`],
-    ["Trend", row.adaptive_mode || "Mixed"],
-    ["Candle", buyer >= seller ? `Buyer ${fmtNumber(buyer, 0)}` : `Seller ${fmtNumber(seller, 0)}`],
-    ["Volume", volume],
-    ["Market", market],
-    ["Quality", quality],
-    ["Entry Quality", entryQuality
-      ? `${entryQuality}${Number.isFinite(entryQualityScore) ? ` ${fmtNumber(entryQualityScore, 0)}/100` : ""}`
-      : "n/a"],
-    ["Personality", String(personality).replace(/_/g, " ")],
-    ["Volatility Regime", `${volatilityRegime}${volatilityPermission !== "ALLOW" ? ` / ${volatilityPermission}` : ""}`],
-    ["Position Guide", Number.isFinite(positionSizeFactor) ? `${fmtNumber(positionSizeFactor * 100, 0)}% of normal size` : "n/a"],
-    ["Profit Stage", `${profitStage}${Number.isFinite(profitPeakR) ? ` / peak ${fmtNumber(profitPeakR, 2)}R` : ""}`],
-    ["Emotion", Number.isFinite(emotion) ? `${fmtNumber(emotion, 0)}/100` : "n/a"],
-    ["MA Location", Number.isFinite(location) ? `${fmtNumber(location, 0)}/100` : "n/a"],
-    ["Setup Context", Number.isFinite(setupContext) ? `${fmtNumber(setupContext, 0)}/100` : "n/a"],
-    ["Demand Control", Number.isFinite(demandControl) ? `${fmtNumber(demandControl, 0)}/100` : "n/a"],
-    ["Distribution", Number.isFinite(distribution) ? `${fmtNumber(distribution, 0)}/100` : "n/a"],
-    ["Absorption", Number.isFinite(absorption) ? `${fmtNumber(absorption, 0)}/100` : "n/a"],
-    ["Bull Trap", Number.isFinite(bullTrap) ? `${fmtNumber(bullTrap, 0)}/100` : "n/a"],
-    ["Bear Trap", Number.isFinite(bearTrap) ? `${fmtNumber(bearTrap, 0)}/100` : "n/a"],
-    ["Short Proxy", Number.isFinite(shortProxy) ? `${fmtNumber(shortProxy, 0)}/100` : "n/a"],
-    ["Volatility", Number.isFinite(atrPct) ? `ATR ${fmtNumber(atrPct, 1)}%` : "n/a"]
+    ["Price action", tape],
+    ["Relative trend", relativeTrend],
+    ["Near-term read", nearTerm],
+    ["Five-session outlook", predictionNarrative(row)],
+    ["Stock personality", `This stock is currently behaving like a ${volatility} name; position sizing should reflect that variability.`],
+    ["Historical learning", learningReadout(row)],
+    ["Risk checks", validationSummary(row)]
   ];
   return `
     <div class="score-explainer">
       <div class="score-explainer-head">
-        <span>Scanner Read</span>
-        <strong>${escapeHtml(behaviorDetail(row))}</strong>
+        <span>Evidence behind this read</span>
+        <strong>${escapeHtml(decisionNarrative(row))}</strong>
       </div>
       <div class="score-factors">
         ${items.map(([label, value]) => `
@@ -1529,32 +1407,36 @@ function renderScoreBreakdown(row) {
           </div>
         `).join("")}
       </div>
-      ${renderGauge(row)}
     </div>
   `;
 }
 
 function renderHistoryChangeChips(row, previous) {
-  if (!previous) return `<span class="change-chip quiet">Latest state</span>`;
+  if (!previous) return `<span class="change-chip quiet">First recorded day</span>`;
   const chips = [];
   if (row.action !== previous.action) {
-    chips.push(`<span class="change-chip signal">${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} <b>→</b> ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`);
+    chips.push(`<span class="change-chip signal">Signal changed from ${escapeHtml(ACTION_LABELS[previous.action] || previous.action)} to ${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>`);
   }
   if (row.setup !== previous.setup) {
-    chips.push(`<span class="change-chip setup">${escapeHtml(setupLabel(previous.setup))} <b>→</b> ${escapeHtml(setupLabel(row.setup))}</span>`);
+    const previousSetup = setupLabel(previous.setup);
+    const currentSetup = setupLabel(row.setup);
+    chips.push(`<span class="change-chip setup">Pattern changed from ${escapeHtml(previousSetup === "None" ? "no clear setup" : previousSetup)} to ${escapeHtml(currentSetup === "None" ? "no clear setup" : currentSetup)}</span>`);
   }
   const scoreMove = convictionScore(row) - convictionScore(previous);
-  if (Math.abs(scoreMove) >= 4) {
-    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Quality ${fmtSignedNumber(scoreMove, 0)}</span>`);
+  if (Math.abs(scoreMove) >= 8) {
+    chips.push(`<span class="change-chip ${moveClass(scoreMove)}">Confidence ${scoreMove > 0 ? "improved" : "weakened"} ${Math.abs(scoreMove) >= 20 ? "sharply" : "modestly"}</span>`);
   }
-  return chips.join(" ") || `<span class="change-chip quiet">Steady</span>`;
+  return chips.join(" ") || `<span class="change-chip quiet">No meaningful change</span>`;
 }
 
 function setStatus(message, ok = true) {
   const status = document.querySelector("#status");
   const runStatus = document.querySelector("#run-status");
   if (status) status.textContent = message;
-  if (runStatus) runStatus.classList.toggle("bad", !ok);
+  if (runStatus) {
+    runStatus.classList.toggle("bad", !ok);
+    runStatus.classList.toggle("loading", ok && String(message).toLowerCase().includes("loading"));
+  }
 }
 
 function runHealthSummary(runInfo) {
@@ -1562,14 +1444,9 @@ function runHealthSummary(runInfo) {
   const parts = [];
   const failed = Number(runInfo.symbols_failed || 0);
   const stale = Number(runInfo.symbols_stale_cache || 0);
-  const liveOk = runInfo.live_access_ok;
-  if (liveOk === false) parts.push("source degraded");
-  const providerCounts = runInfo.payload?.data_provider_counts || {};
-  const providerSummary = Object.entries(providerCounts).map(([provider, count]) => `${provider} ${count}`).join(", ");
-  if (providerSummary) parts.push(`data ${providerSummary}`);
-  if (stale) parts.push(`${stale} cached`);
-  if (failed) parts.push(`${failed} failed`);
-  if (runInfo.scanner_version) parts.push(`scanner ${runInfo.scanner_version}`);
+  if (runInfo.live_access_ok === false) parts.push("live source unavailable");
+  if (stale) parts.push(`${stale} stocks use recent cached data`);
+  if (failed) parts.push(`${failed} stocks unavailable`);
   return parts.length ? ` · ${parts.join(" · ")}` : "";
 }
 
@@ -1609,21 +1486,25 @@ function runHealthStatus(runInfo, rows = []) {
   const failed = Number(runInfo?.symbols_failed || 0);
   const stale = Number(runInfo?.symbols_stale_cache || 0);
   const staleBlocks = Number(runInfo?.payload?.stale_execution_blocks || 0);
-  const pendingGates = auditGatePendingCount(rows);
   const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
   const total = Number(runInfo?.symbols_total || rows.length || 0);
   const liveOk = runInfo?.live_access_ok;
   const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
   const hasRows = rows.length > 0 || analyzed > 0;
-  const hasIssue = liveOk === false || failed > 0 || stale > 0 || pendingGates > 0 || staleBlocks > 0;
+  const hasIssue = liveOk === false || failed > 0 || stale > 0 || staleBlocks > 0;
   const tone = !hasRows || staleBlocks > 0 ? "bad" : hasIssue ? "warn" : "ok";
-  const label = tone === "bad" ? "Execution blocked" : tone === "warn" ? "Data caution" : "Live data healthy";
+  const label = tone === "bad"
+    ? "Data not safe to use"
+    : failed > 0
+      ? "Partial coverage"
+      : stale > 0 || liveOk === false
+        ? "Some data may lag"
+        : "Data current";
   const caveats = [
     staleBlocks ? `${staleBlocks} stale-data blocks` : "",
-    pendingGates ? `${pendingGates} execution proof pending` : "",
-    stale ? `${stale} cached` : "",
-    failed ? `${failed} failed` : "",
-    liveOk === false ? "source degraded" : "",
+    stale ? `${stale} stocks use recent cached data` : "",
+    failed ? `${failed} stocks unavailable` : "",
+    liveOk === false ? "live data source unavailable" : "",
   ].filter(Boolean);
   const detail = [
     `${analyzed || total || rows.length} analyzed`,
@@ -1653,19 +1534,17 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const runStatus = document.querySelector("#run-status");
   if (runStatus) {
     const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
-    const pendingGates = auditGatePendingCount(rows);
-    const gateSummary = pendingGates ? ` · ${pendingGates} execution proof pending` : "";
-    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}${gateSummary}`;
+    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
     runStatus.classList.toggle("warn", Boolean(
       runInfo && (
         runInfo.live_access_ok === false
         || Number(runInfo.symbols_failed || 0)
         || Number(runInfo.symbols_stale_cache || 0)
         || Number(runInfo.payload?.stale_execution_blocks || 0)
-        || auditGatePendingCount(rows)
       )
     ));
     runStatus.classList.toggle("bad", Boolean(runInfo && Number(runInfo.payload?.stale_execution_blocks || 0)));
+    runStatus.classList.remove("loading");
   }
   if (status) status.textContent = "";
   if (disclaimer) disclaimer.textContent = APP_DISCLAIMER;
@@ -1890,11 +1769,13 @@ function renderWatchlistCell(row, key) {
   if (key === "score") return renderQualityScore(row);
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (key === "risk_pct_to_stop") {
+    if (!executionChecksClear(row) || !["buy", "continue"].includes(actionKind(row.action))) return "-";
     const risk = payloadNumeric(row, "risk_pct_to_stop");
     return risk ? `<span class="risk-value">-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%</span>` : "-";
   }
   if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
   if (key === "entry_est") return escapeHtml(formatEntryZone(row) || "-");
+  if (key === "stop_est" && (!executionChecksClear(row) || !["buy", "continue"].includes(actionKind(row.action)))) return "-";
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }
@@ -1908,11 +1789,9 @@ function formatEntryZone(row) {
 
 function renderDecisionSummary(row) {
   const kind = actionKind(row.action);
-  const tier = payloadValue(row, "buy_tier") || (row.action === "BUY CANDIDATE" ? "BUY WATCH" : "");
   return `
     <span class="decision-stack">
       <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-      ${tier ? `<small>${escapeHtml(String(tier))}</small>` : ""}
     </span>
   `;
 }
@@ -1933,12 +1812,12 @@ function renderPriceSummary(row) {
 }
 
 function renderTradeContext(row) {
-  const reason = whyThisMatters(row).at(0) || behaviorDetail(row);
-  const details = [
-    strengthLabel(row),
-    row.setup && row.setup !== "NONE" ? setupLabel(row.setup) : "",
-    entryQualityLabel(row)
-  ].filter(Boolean).join(" · ");
+  const position = referenceZonePosition(row);
+  const reason = position ? `Price is ${position}.` : decisionHeadline(row);
+  const validation = validationSummary(row);
+  const details = executionChecksClear(row)
+    ? naturalActionSentence(row)
+    : `${validation.split(". ")[0].replace(/\.$/, "")}.`;
   return `
     <span class="read-stack">
       <strong>${escapeHtml(reason)}</strong>
@@ -1956,17 +1835,17 @@ function riskSummaryLabel(row) {
   const tickerPermission = String(payloadValue(row, "ticker_permission") || "").toUpperCase();
   const walkForwardPermission = String(payloadValue(row, "walk_forward_permission") || "").toUpperCase();
   const personalityAllowed = String(payloadValue(row, "personality_setup_allowed") || "").toUpperCase();
-  if (kind === "exit") return ["risk", "EXIT RISK"];
-  if (kind === "avoid") return ["risk", "AVOID"];
-  if (row.action === "WAIT") return ["watch", "NO EDGE"];
-  if (payloadValue(row, "freshness_block") === "YES") return ["risk", "STALE DATA"];
-  if (antiLevel === "BLOCK") return ["risk", "BLOCKED"];
-  if (antiLevel === "CAUTION") return ["watch", "CAUTION"];
-  if (payloadValue(row, "extension_state") === "EXTENDED") return ["watch", "EXTENDED"];
-  if (riskPermission !== "ALLOW" || marketPermission !== "ALLOW" || tickerPermission !== "ALLOW" || walkForwardPermission !== "ALLOW" || personalityAllowed === "NO") return ["risk", "GATE BLOCK"];
+  if (kind === "exit") return ["risk", "PROTECT CAPITAL"];
+  if (kind === "avoid") return ["risk", "NO ENTRY"];
+  if (row.action === "WAIT") return ["watch", "NO CLEAR EDGE"];
+  if (payloadValue(row, "freshness_block") === "YES") return ["risk", "DATA TOO OLD"];
+  if (antiLevel === "BLOCK") return ["risk", "DO NOT ENTER"];
+  if (antiLevel === "CAUTION") return ["watch", "USE CAUTION"];
+  if (payloadValue(row, "extension_state") === "EXTENDED") return ["watch", "DO NOT CHASE"];
+  if (riskPermission !== "ALLOW" || marketPermission !== "ALLOW" || tickerPermission !== "ALLOW" || walkForwardPermission !== "ALLOW" || personalityAllowed === "NO") return ["risk", "WAIT"];
   if (operator.includes("BULL_TRAP") || operator.includes("DISTRIBUTION") || operator.includes("SHORT")) return ["risk", shortOperatorPressure(operator)];
   if (operator.includes("ACCUMULATION") || operator.includes("ABSORPTION") || operator.includes("BEAR_TRAP") || operator.includes("SQUEEZE")) return ["constructive", shortOperatorPressure(operator)];
-  return ["strong", "OK"];
+  return ["strong", "CHECKS CLEAR"];
 }
 
 function renderRiskSummary(row) {
@@ -2040,11 +1919,13 @@ function renderMobileWatchlistSummary(row) {
   const kind = actionKind(row.action);
   const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
   const [riskTone, riskLabel] = riskSummaryLabel(row);
-  const reasons = whyThisMatters(row).slice(0, 1);
   const isRisk = ["exit", "avoid"].includes(kind);
+  const activePlan = executionChecksClear(row) && ["buy", "continue"].includes(kind);
   const execution = isRisk
-    ? riskLabel
-    : `Entry ${formatEntryZone(row) || "-"} · Stop ${fmtNumber(row.stop_est, 2) || "-"}${payloadNumeric(row, "risk_pct_to_stop") ? ` · Risk ${fmtNumber(Math.abs(payloadNumeric(row, "risk_pct_to_stop")), 1)}%` : ""}`;
+    ? decisionHeadline(row)
+    : activePlan
+      ? `Entry ${formatEntryZone(row) || "-"} · Protect below ${fmtNumber(row.stop_est, 2) || "-"}`
+      : `Reference zone ${formatEntryZone(row) || "unavailable"} · not an active entry`;
   return `
     <span class="mobile-watch-shell">
       <a class="mobile-watch-row" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
@@ -2054,7 +1935,7 @@ function renderMobileWatchlistSummary(row) {
           <span class="mobile-watch-signal">
             <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
             <span class="badge entry-pill entry-${riskTone}">${escapeHtml(riskLabel)}</span>
-            <span>${escapeHtml(reasons[0] || behaviorDetail(row))}</span>
+            <span>${escapeHtml(decisionHeadline(row))}</span>
           </span>
           <span class="mobile-execution">${escapeHtml(execution)}</span>
         </span>
@@ -2079,16 +1960,41 @@ function validationSummary(row) {
     ["Ticker", payloadValue(row, "ticker_permission")],
     ["Walk-forward", payloadValue(row, "walk_forward_permission")],
   ].filter(([, value]) => value && String(value).toUpperCase() !== "ALLOW");
-  const validationWord = (value) => {
+  const validationSentence = (label, value) => {
     const state = String(value || "").replaceAll("_", " ").toLowerCase();
-    if (state === "block") return "not supportive";
-    if (state === "caution") return "mixed";
-    if (state === "insufficient" || state === "none") return "not yet proven";
-    return state || "not available";
+    if (label === "Market") return state === "block"
+      ? "The broader market is not supportive."
+      : "The broader market backdrop is mixed.";
+    if (label === "Risk") return "Risk controls do not allow a new position yet.";
+    if (label === "Ticker") return state === "insufficient" || state === "none"
+      ? "This stock does not yet have enough reliable historical examples."
+      : "Past setups in this stock have not been reliable enough.";
+    return state === "insufficient" || state === "none"
+      ? "The pattern has not yet been proven across enough historical periods."
+      : "The pattern has not held up consistently in historical testing.";
   };
   return items.length
-    ? items.map(([label, value]) => `${label.toLowerCase()} evidence is ${validationWord(value)}`).join("; ")
-    : "Market, ticker, risk and historical checks are clear";
+    ? items.map(([label, value]) => validationSentence(label, value)).join(" ")
+    : "Market, stock-specific, risk and historical checks are clear.";
+}
+
+function renderReferenceLevels(row, { active = false } = {}) {
+  const risk = payloadNumeric(row, "risk_pct_to_stop");
+  const target = numericValue(row, "target_est");
+  const takeProfit1 = payloadNumeric(row, "take_profit_1");
+  const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct");
+  const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
+  const rows = [
+    [active ? "Entry zone" : "Reference zone", formatEntryZone(row) || "Unavailable"],
+    [active ? "Protect below" : "Reference stop", fmtNumber(row.stop_est, 2) || "Unavailable"],
+    ...(active ? [
+      ["First profit review", takeProfit1 ? `${fmtNumber(takeProfit1, 2)} · consider trimming ${fmtNumber(reducePct || 33, 0)}%` : "Unavailable"],
+      ["After first target", postTp1Stop ? `Raise protection to ${fmtNumber(postTp1Stop, 2)} or higher` : "Unavailable"],
+      ["Longer-term reference", target ? fmtNumber(target, 2) : "Unavailable"],
+      ["Planned downside", risk ? `${fmtNumber(Math.abs(risk), 1)}%` : "Unavailable"]
+    ] : [])
+  ];
+  return `<dl class="execution-sheet">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
 }
 
 function renderTickerDetailPanel() {
@@ -2098,26 +2004,16 @@ function renderTickerDetailPanel() {
   if (!row) { panel.innerHTML = ""; return; }
   state.selectedTicker = row.ticker;
   const kind = actionKind(row.action);
-  const risk = payloadNumeric(row, "risk_pct_to_stop");
-  const target = numericValue(row, "target_est");
-  const takeProfit1 = payloadNumeric(row, "take_profit_1");
-  const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct");
-  const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
+  const activePlan = executionChecksClear(row) && ["buy", "continue"].includes(kind);
   panel.innerHTML = `
-    <div class="detail-panel-head"><div><span class="eyebrow">Selected plan</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open</a></div>
+    <div class="detail-panel-head"><div><span class="eyebrow">Selected stock</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open details</a></div>
     <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
     <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-    <dl class="execution-sheet">
-      <div><dt>Entry zone</dt><dd>${escapeHtml(formatEntryZone(row) || "Unavailable")}</dd></div>
-      <div><dt>Stop</dt><dd>${escapeHtml(fmtNumber(row.stop_est, 2) || "Unavailable")}</dd></div>
-      <div><dt>Take profit 1</dt><dd>${takeProfit1 ? `${escapeHtml(fmtNumber(takeProfit1, 2))} · trim ${escapeHtml(fmtNumber(reducePct || 33, 0))}%` : "Unavailable"}</dd></div>
-      <div><dt>After TP1</dt><dd>${postTp1Stop ? `Protect at ${escapeHtml(fmtNumber(postTp1Stop, 2))} or higher` : "Unavailable"}</dd></div>
-      <div><dt>Final target</dt><dd>${target ? escapeHtml(fmtNumber(target, 2)) : "Unavailable"}</dd></div>
-      <div><dt>Risk</dt><dd class="risk-value">${risk ? `-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%` : "Unavailable"}</dd></div>
-      <div><dt>Validation</dt><dd>${escapeHtml(validationSummary(row))}</dd></div>
-    </dl>
-    <section class="detail-rationale"><span class="eyebrow">Why this state</span><p>${escapeHtml(whyThisMatters(row).slice(0, 2).join(" · ") || behaviorDetail(row))}</p></section>
-    <details class="detail-diagnostics"><summary>Context &amp; evidence</summary><p>${escapeHtml(contextSummary(row))}</p></details>
+    <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do now</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
+    ${activePlan
+      ? `<section class="active-plan"><span class="eyebrow">Active trade plan</span>${renderReferenceLevels(row, { active: true })}</section>`
+      : `<div class="inactive-plan">No active entry plan. These levels are context only.</div><details class="reference-levels"><summary>Reference levels (inactive)</summary>${renderReferenceLevels(row)}</details>`}
+    <details class="detail-diagnostics"><summary>Evidence behind this read</summary>${renderScoreBreakdown(row)}</details>
   `;
 }
 
@@ -2548,7 +2444,7 @@ function renderNotificationCenter() {
   mount.innerHTML = `
     <details class="notification-center">
       <summary>
-        <span><strong>Notification Center</strong><small>TP1, profit protection, and Focus List exits</small></span>
+        <span><strong>Notification Center</strong><small>Action alerts for saved positions</small></span>
         <span class="notification-count ${unread.length ? "has-unread" : ""}">${unread.length ? `${unread.length} unread` : "All read"}</span>
       </summary>
       <div class="notification-body">
@@ -2614,6 +2510,10 @@ function renderWatchlist() {
       }
       return (Number(a[sortKey] || 0) - Number(b[sortKey] || 0)) * multiplier;
     });
+
+  if (searchActive && state.visibleRows.length === 1) {
+    state.selectedTicker = state.visibleRows[0].ticker;
+  }
 
   const columns = watchlistColumns();
   document.querySelector("#watchlist-head").innerHTML = `<tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>`;
@@ -2778,24 +2678,20 @@ function renderLatestHistoryPanel(latest) {
     panel.innerHTML = "";
     return;
   }
+  const kind = actionKind(latest.action);
+  const activePlan = executionChecksClear(latest) && ["buy", "continue"].includes(kind);
   panel.innerHTML = `
     <div class="latest-card tone-${actionKind(latest.action)}">
       <div class="latest-head">
         <span class="latest-label">Current read</span>
-        <span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
+        <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
       </div>
-      <div class="latest-metrics">
-        <div><span>Close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
-        <div><span>Entry Zone</span><strong>${escapeHtml(formatEntryZone(latest) || "Unavailable")}</strong></div>
-        <div><span>Stop</span><strong>${fmtNumber(latest.stop_est, 2) || "-"}</strong></div>
-        <div><span>Take Profit 1</span><strong>${payloadNumeric(latest, "take_profit_1") ? `${fmtNumber(payloadNumeric(latest, "take_profit_1"), 2)} · trim ${fmtNumber(payloadNumeric(latest, "take_profit_1_reduce_pct") || 33, 0)}%` : "-"}</strong></div>
-        <div><span>After TP1</span><strong>${payloadNumeric(latest, "post_tp1_stop") ? `Protect ${fmtNumber(payloadNumeric(latest, "post_tp1_stop"), 2)}+` : "-"}</strong></div>
-        <div><span>Final Target</span><strong>${fmtNumber(latest.target_est, 2) || "-"}</strong></div>
-        <div><span>Risk</span><strong>${payloadNumeric(latest, "risk_pct_to_stop") ? `-${fmtNumber(Math.abs(payloadNumeric(latest, "risk_pct_to_stop")), 1)}%` : "Unavailable"}</strong></div>
-        <div><span>Validation</span><strong>${escapeHtml(validationSummary(latest))}</strong></div>
-      </div>
-      <p class="latest-rationale">${escapeHtml(whyThisMatters(latest).slice(0, 2).join(" · ") || behaviorDetail(latest))}</p>
-      <details class="detail-diagnostics"><summary>Diagnostics</summary>${renderScoreBreakdown(latest)}<p>${escapeHtml(qualityDiagnostic(latest))}</p></details>
+      <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
+      <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do now</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
+      ${activePlan
+        ? `<section class="active-plan"><span class="eyebrow">Active trade plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
+        : `<div class="inactive-plan">No active entry plan. Reference levels are hidden until the setup is ready.</div><details class="reference-levels"><summary>Reference levels (inactive)</summary>${renderReferenceLevels(latest)}</details>`}
+      <details class="detail-diagnostics"><summary>Evidence behind this read</summary>${renderScoreBreakdown(latest)}</details>
     </div>
   `;
 }
@@ -2927,7 +2823,7 @@ function renderHistoryRows() {
   const lookbackRows = state.historyRows.slice(recentRows.length);
 
   timeline.innerHTML = `
-    <h3>Recent Behavior</h3>
+    <h3>Recent changes</h3>
     ${recentRows.map((row, index) => `
       <div class="moment-card tone-${actionKind(row.action)}">
         <div class="moment-date">${index === 0 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</div>
@@ -2980,8 +2876,9 @@ async function loadHistory(ticker) {
   document.title = state.ticker;
   window.history.replaceState(null, "", `./ticker.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
-  document.querySelector("#run-status").textContent = "No history loaded";
-  document.querySelector("#run-status").classList.add("bad");
+  document.querySelector("#run-status").textContent = "Loading current data...";
+  document.querySelector("#run-status").classList.remove("bad", "warn");
+  document.querySelector("#run-status").classList.add("loading");
   try {
     const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`, { fresh: true, ttl: 0 });
     const latest = tickerPayload.latest;

@@ -81,6 +81,7 @@ function auditSearchBehavior() {
   const source = fs.readFileSync("assets/app.js", "utf8");
   assert(source.includes("function exactTickerSearchNeedle"), "watchlist search must include exact ticker matching");
   assert(source.includes("rowMatchesSearch(row, state.query, exactTickerNeedle)"), "watchlist render must use ticker-aware search matching");
+  assert(source.includes("if (searchActive && state.visibleRows.length === 1)"), "a unique search result must become the selected ticker");
 
   const rows = staticLatestPayload().rows || [];
   const muNeedle = exactTickerSearchNeedle("MU", rows);
@@ -116,17 +117,21 @@ function auditDecisionFunnelUi() {
   assert(stylesSource.includes("#market-activity .focus-unlock input"), "saved-name controls must use the shared light palette");
   assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker scanner review panel");
   assert(!appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must not repeat the removed Pine confirmation copy");
-  assert(appSource.includes("function contextSummary(row)"), "ticker context must be summarized in natural language");
+  assert(appSource.includes("function decisionHeadline(row)"), "ticker context must lead with a clear user decision");
+  assert(appSource.includes("function decisionNarrative(row)"), "ticker context must explain the decision in natural language");
   assert(appSource.includes("function predictionNarrative(row)"), "ticker context must explain prediction evidence in natural language");
   assert(appSource.includes("function recentBehaviorSummary(row, previous)"), "recent behavior must be summarized in natural language");
   assert(appSource.includes("function renderQualityScore(row)"), "watchlist quality must distinguish unavailable evidence from a numeric score");
   assert(appSource.includes("function qualityConstraintLabel(row)"), "all quality surfaces must share the same constraint semantics");
-  assert(appSource.includes("function qualityDiagnostic(row)"), "ticker diagnostics must separate technical score from adjusted rank");
-  assert(appSource.includes('"GATE BLOCK"'), "missing execution evidence must render as a gate block instead of a synthetic number");
-  assert(appSource.includes('if (antiSignal === "BLOCK") return "BLOCKED"'), "anti-signal blocks must suppress the numeric quality display");
+  assert(appSource.includes("function renderReferenceLevels(row"), "reference levels must be separated from active trade plans");
+  assert(appSource.includes('return "PENDING"'), "missing execution evidence must use a reader-facing status instead of a gate label");
+  assert(appSource.includes('if (antiSignal === "BLOCK") return "AVOID"'), "anti-signal blocks must suppress the numeric quality display with an actionable label");
+  assert(!appSource.includes('"GATE BLOCK"'), "reader-facing UI must not expose the internal gate-block label");
   assert(!appSource.includes("Trend quality ${fmtConviction(latest)} / 100"), "ticker diagnostics must not present adjusted rank as synthetic trend quality");
-  assert(appSource.includes("Context &amp; evidence"), "ticker panel must use the reader-facing context label");
-  assert(!appSource.includes("<summary>More context</summary>"), "ticker panel must not expose the old machine-context label");
+  assert(appSource.includes("Evidence behind this read"), "ticker panel must use a reader-facing evidence label");
+  assert(!appSource.includes("<summary>Diagnostics</summary>"), "ticker panel must not expose an internal diagnostics label");
+  assert(!appSource.includes("Weight Model"), "ticker detail must not expose internal model-weight shorthand");
+  assert(!appSource.includes("Transition Edge"), "ticker detail must not expose unexplained transition scores");
   assert(pageSource.includes('id="ticker-detail-panel"'), "watchlist page must provide the selected ticker panel mount");
   assert(pageSource.includes('id="profit-alerts"'), "watchlist must provide an in-app notification center mount");
   assert(appSource.includes("function notificationForRow(row)"), "notification center must derive alerts from current scanner rows");
@@ -139,13 +144,15 @@ function auditDecisionFunnelUi() {
   assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
   assert(!pageSource.includes("Execution tier first"), "watchlist must not retain execution-tier sorting copy");
   assert(!tickerSource.includes("Execution plan"), "ticker detail must not retain execution-plan copy");
-  assert(pageSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "watchlist must show the permanent scanner boundary legend");
-  assert(tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must show the permanent scanner boundary legend");
+  assert(!pageSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "watchlist must not repeat a generic BUY disclaimer");
+  assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
+  assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
+  assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
   assert(tickerSource.includes("calm-paper-20260716"), "ticker detail must load the current shared application bundle");
   assert(pageSource.includes('data-mobile-filter="building"'), "mobile Building filter must use the aggregate queue");
   assert(pageSource.includes('data-mobile-filter="risk"'), "mobile Risk filter must use the aggregate queue");
   assert(!appSource.includes('if (state.query.trim()) state.filter = "all"'), "search must preserve the selected decision queue");
-  return { executionQueues: 3, activityTarget: "market-activity", scannerLegend: true };
+  return { executionQueues: 3, activityTarget: "market-activity", naturalDecisionCopy: true };
 }
 
 function auditMarketSessionFreshness() {
@@ -199,8 +206,8 @@ function auditLearningReadoutUi() {
   const end = source.indexOf("function cacheKeyFor");
   assert(start >= 0 && end > start, "learning readout must remain independently testable");
   assert(source.includes("learning_distinct_ticker_count"), "learning readout must surface diversity when present");
-  assert(source.includes("learning_evaluation_date_min"), "learning readout must surface date range when present");
-  assert(source.includes("entry_model_version"), "learning readout must surface model version when present");
+  assert(source.includes("learning_evaluation_date_count"), "learning readout must surface evaluation breadth when present");
+  assert(source.includes("entry_model_version"), "learning readout must require a versioned model before claiming an adjustment");
   const learningReadout = new Function("fmtNumber", "fmtSignedNumber", `${source.slice(start, end)}; return learningReadout;`)(
     (value) => String(value),
     (value) => `${Number(value) >= 0 ? "+" : ""}${value}`
@@ -225,13 +232,12 @@ function auditLearningReadoutUi() {
     learning_evaluation_date_count: 6, learning_promotion_eligible: true,
   } });
   const basic = learningReadout({ action: "BUY CANDIDATE", payload: { learning_sample_count: 3 } });
-  assert(rich.includes("4 tickers") && rich.includes("range 2026-06-01 to 2026-07-15"), "learning readout must show diversity and date range");
-  assert(rich.includes("window 2026-05-15 to 2026-07-15"), "learning readout must show the learning window when it differs from evaluation bounds");
-  assert(rich.includes("model zone-v2") && rich.includes("promotion evidence eligible"), "learning readout must show model and promotion eligibility");
-  assert(explicitFalse.includes("reporting-only") && !explicitFalse.includes("promotion evidence eligible"), "explicit false learning promotion eligibility must override inferred eligibility");
-  assert(missingProducerEligibility.includes("reporting-only") && !missingProducerEligibility.includes("promotion evidence eligible"), "learning readout must not infer eligibility from counts or promotion state without producer approval");
-  assert(missingModelVersion.includes("model version pending") && !missingModelVersion.includes("promotion evidence eligible"), "learning readout must keep promotion pending without a model version");
-  assert(!basic.includes("tickers") && !basic.includes("range") && basic.includes("model version pending") && basic.includes("reporting-only"), "learning readout must mark incomplete learning evidence as pending reporting-only");
+  assert(rich.includes("8 comparable settled signals") && rich.includes("4 stocks") && rich.includes("4 market dates"), "learning readout must explain evidence coverage in reader-facing language");
+  assert(rich.includes("adjusted confidence by +2.4 points"), "eligible learning must explain its practical score effect");
+  assert(explicitFalse.includes("Validation is incomplete") && !explicitFalse.includes("adjusted confidence"), "explicit false learning eligibility must prevent a claimed promotion");
+  assert(missingProducerEligibility.includes("Validation is incomplete") && !missingProducerEligibility.includes("adjusted confidence"), "learning readout must not infer eligibility from counts or model state");
+  assert(missingModelVersion.includes("Validation is incomplete") && !missingModelVersion.includes("adjusted confidence"), "learning readout must keep promotion pending without a model version");
+  assert(basic.includes("3 comparable settled signals") && basic.includes("Validation is incomplete"), "incomplete learning evidence must be explained without internal model terminology");
   return { rich, explicitFalse, missingProducerEligibility, missingModelVersion, basic };
 }
 
