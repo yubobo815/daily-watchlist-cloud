@@ -103,6 +103,16 @@ const PAYLOAD_FIELDS = [
   "emotion_score",
   "event_risk",
   "execution_block",
+  "execution_style",
+  "execution_window_sessions",
+  "execution_fill_sample_count",
+  "execution_fill_distinct_ticker_count",
+  "execution_fill_evaluation_date_count",
+  "execution_fill_rate",
+  "execution_fill_probability",
+  "execution_fill_scope",
+  "execution_fill_state",
+  "execution_fill_model_version",
   "execution_plan",
   "execution_priority",
   "extension_state",
@@ -514,6 +524,30 @@ function applyFreshnessFallback(output) {
   return output;
 }
 
+function applyFillabilityFallback(output) {
+  if (!['BUY CANDIDATE', 'STRONG CONTINUATION'].includes(output.action)) return output;
+  const payload = output.payload && typeof output.payload === 'object' ? { ...output.payload } : {};
+  const state = String(payload.execution_fill_state || '').toUpperCase();
+  const probability = Number(payload.execution_fill_probability);
+  const proven = state === 'VALIDATED' && Number.isFinite(probability) && probability >= 0.45;
+  if (!proven) {
+    output.action = 'SETUP FORMING';
+    payload.signal_stage = 'SETUP';
+    payload.buy_tier = 'SETUP ONLY';
+    payload.execution_priority = 4;
+    payload.execution_fill_state = state || 'INSUFFICIENT';
+    payload.adjusted_score = capScore(payload.adjusted_score ?? output.adjusted_score ?? output.score, 79);
+    output.adjusted_score = payload.adjusted_score;
+    payload.next_day_plan = state === 'LOW'
+      ? 'Comparable entry plans were filled too rarely; keep this as a setup.'
+      : 'Entry fillability is not yet proven; keep this as a setup.';
+    payload.execution_plan = payload.next_day_plan;
+    appendReasonCode(payload, state === 'LOW' ? 'fillability_below_threshold' : 'fillability_evidence_insufficient');
+  }
+  output.payload = payload;
+  return output;
+}
+
 function antiSignalFallback(output) {
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
   const operatorState = String(payload.operator_state || "").toUpperCase();
@@ -670,7 +704,7 @@ function rowDto(row, options = {}) {
     );
   }
   return promotePayloadFields(
-    applyBuyTierFallback(antiSignalFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(applyVolatilityGate(applyPersonalitySetupGate(output, row), row), row)))))
+    applyBuyTierFallback(antiSignalFallback(applyFillabilityFallback(applyFreshnessFallback(applyOperatorStateFallback(applyAuditGateFallback(applyVolatilityGate(applyPersonalitySetupGate(output, row), row), row))))))
   );
 }
 

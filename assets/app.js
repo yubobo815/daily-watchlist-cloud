@@ -28,7 +28,7 @@ const UI_LABELS = {
     ticker: "Ticker",
     action: "Signal",
     score: "Quality",
-    entry_est: "Reference zone",
+    entry_est: "Entry plan",
     stop_est: "Protection",
     risk_pct_to_stop: "Downside",
     trade_context: "What it means",
@@ -876,7 +876,9 @@ function renderQualityScore(row) {
 function naturalActionSentence(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
-  if (kind === "buy") return `${pattern} conditions are in place; wait for price to trade within the planned entry zone.`;
+  const style = String(payloadValue(row, "execution_style") || "").toUpperCase();
+  if (kind === "buy" && style === "BREAKOUT TRIGGER") return `${pattern} conditions are in place; enter only if price reaches the trigger band without running above the maximum entry.`;
+  if (kind === "buy") return `${pattern} conditions are in place; use a limit entry only inside the pullback zone and require it to hold.`;
   if (kind === "continue") return "The existing trend remains constructive, but a new entry should avoid chasing strength.";
   if (kind === "setup") return `${pattern} is taking shape, but it still needs confirmation before it becomes a buy.`;
   if (kind === "watch") return "There is no clean entry yet; wait for either a stronger breakout or a controlled pullback.";
@@ -889,9 +891,22 @@ function executionChecksClear(row) {
     .map((key) => String(payloadValue(row, key) || "").toUpperCase())
     .filter(Boolean);
   const personalityAllowed = String(payloadValue(row, "personality_setup_allowed") || "").toUpperCase();
+  const kind = actionKind(row?.action);
+  const fillState = String(payloadValue(row, "execution_fill_state") || "").toUpperCase();
+  const fillProbability = Number(payloadValue(row, "execution_fill_probability"));
+  const fillabilityClear = !["buy", "continue"].includes(kind)
+    || (fillState === "VALIDATED" && Number.isFinite(fillProbability) && fillProbability >= 0.45);
   return !qualityConstraintLabel(row)
     && permissions.every((value) => value === "ALLOW")
-    && personalityAllowed !== "NO";
+    && personalityAllowed !== "NO"
+    && fillabilityClear;
+}
+
+function entryPlanLabel(row, { active = false } = {}) {
+  const style = String(payloadValue(row, "execution_style") || "").toUpperCase();
+  if (style === "BREAKOUT TRIGGER") return active ? "Trigger band" : "Reference trigger band";
+  if (style === "PULLBACK LIMIT") return active ? "Pullback zone" : "Reference pullback zone";
+  return active ? "Entry zone" : "Reference zone";
 }
 
 function referenceZonePosition(row) {
@@ -899,9 +914,10 @@ function referenceZonePosition(row) {
   const low = payloadNumeric(row, "entry_zone_low");
   const high = payloadNumeric(row, "entry_zone_high") || numericValue(row, "entry_est");
   if (!close || !high) return "";
-  if (close > high) return `${fmtNumber(((close / high) - 1) * 100, 1)}% above the reference zone`;
-  if (low && close < low) return `${fmtNumber((1 - (close / low)) * 100, 1)}% below the reference zone`;
-  return "inside the reference zone";
+  const label = entryPlanLabel(row).replace(/^Reference /, "").toLowerCase();
+  if (close > high) return `${fmtNumber(((close / high) - 1) * 100, 1)}% above the ${label}`;
+  if (low && close < low) return `${fmtNumber((1 - (close / low)) * 100, 1)}% below the ${label}`;
+  return `inside the ${label}`;
 }
 
 function decisionHeadline(row) {
@@ -913,6 +929,7 @@ function decisionHeadline(row) {
   if (!clear) return "Wait for stronger confirmation";
   if (kind === "setup" || kind === "watch") return "Wait for the setup to mature";
   if (kind === "continue") return position.includes("above") ? "Hold, but do not chase" : "Trend remains constructive";
+  if (kind === "buy" && String(payloadValue(row, "execution_style") || "").toUpperCase() === "BREAKOUT TRIGGER") return "Wait for the breakout trigger";
   if (kind === "buy" && position.includes("above")) return "Do not chase above the entry zone";
   if (kind === "buy" && position.includes("inside")) return "Entry candidate is in range";
   return kind === "buy" ? "Watch for entry confirmation" : "Wait";
@@ -933,6 +950,9 @@ function decisionNarrative(row) {
     return `${priceLead}.${location} ${validationSummary(row)}`;
   }
   if (kind === "setup" || kind === "watch") return `${priceLead}. ${naturalActionSentence(row)}${position ? ` Price is ${position}.` : ""}`;
+  if (kind === "buy" && String(payloadValue(row, "execution_style") || "").toUpperCase() === "BREAKOUT TRIGGER") {
+    return `${priceLead}. This is a conditional breakout plan, not a market order. Enter only inside the trigger band and skip the trade if price opens or runs above the maximum entry.`;
+  }
   if (kind === "buy" && position.includes("above")) return `${priceLead}. Price is ${position}; wait for a controlled pullback or a new base instead of chasing.`;
   return `${priceLead}. ${naturalActionSentence(row)}${position ? ` Price is ${position}.` : ""}`;
 }
@@ -1051,6 +1071,18 @@ function learningReadout(row) {
     ? ` It adjusted confidence by ${fmtSignedNumber(adjustment, 1)} points.`
     : " It did not materially change confidence.";
   return `Reviewed ${coverage}.${adjustmentText}`;
+}
+
+function fillabilityReadout(row) {
+  const samples = Number(payloadValue(row, "execution_fill_sample_count"));
+  const probability = Number(payloadValue(row, "execution_fill_probability"));
+  const state = String(payloadValue(row, "execution_fill_state") || "INSUFFICIENT").toUpperCase();
+  const style = String(payloadValue(row, "execution_style") || "entry plan").toLowerCase();
+  if (!Number.isFinite(samples) || samples <= 0 || !Number.isFinite(probability)) {
+    return "Comparable entry plans have not produced enough fill evidence, so this cannot be presented as an executable buy.";
+  }
+  const summary = `${fmtNumber(probability * 100, 0)}% estimated chance that the ${style} trades within five sessions, based on ${fmtNumber(samples, 0)} comparable plans.`;
+  return state === "VALIDATED" ? summary : `${summary} Evidence is still insufficient for a BUY.`;
 }
 
 function learningBoolean(value) {
@@ -1388,6 +1420,7 @@ function renderScoreBreakdown(row) {
     ["Price action", tape],
     ["Relative trend", relativeTrend],
     ["Near-term read", nearTerm],
+    ["Entry fillability", fillabilityReadout(row)],
     ["Five-session outlook", predictionNarrative(row)],
     ["Stock personality", `This stock is currently behaving like a ${volatility} name; position sizing should reflect that variability.`],
     ["Historical learning", learningReadout(row)],
@@ -1924,8 +1957,8 @@ function renderMobileWatchlistSummary(row) {
   const execution = isRisk
     ? decisionHeadline(row)
     : activePlan
-      ? `Entry ${formatEntryZone(row) || "-"} · Protect below ${fmtNumber(row.stop_est, 2) || "-"}`
-      : `Reference zone ${formatEntryZone(row) || "unavailable"} · not an active entry`;
+      ? `${entryPlanLabel(row, { active: true })} ${formatEntryZone(row) || "-"} · Protect below ${fmtNumber(row.stop_est, 2) || "-"}`
+      : `${entryPlanLabel(row)} ${formatEntryZone(row) || "unavailable"} · not an active entry`;
   return `
     <span class="mobile-watch-shell">
       <a class="mobile-watch-row" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
@@ -1960,6 +1993,12 @@ function validationSummary(row) {
     ["Ticker", payloadValue(row, "ticker_permission")],
     ["Walk-forward", payloadValue(row, "walk_forward_permission")],
   ].filter(([, value]) => value && String(value).toUpperCase() !== "ALLOW");
+  const kind = actionKind(row?.action);
+  const fillState = String(payloadValue(row, "execution_fill_state") || "").toUpperCase();
+  const fillProbability = Number(payloadValue(row, "execution_fill_probability"));
+  if (["buy", "continue"].includes(kind) && (fillState !== "VALIDATED" || !Number.isFinite(fillProbability) || fillProbability < 0.45)) {
+    items.push(["Fillability", fillState || "INSUFFICIENT"]);
+  }
   const validationSentence = (label, value) => {
     const state = String(value || "").replaceAll("_", " ").toLowerCase();
     if (label === "Market") return state === "block"
@@ -1969,6 +2008,9 @@ function validationSummary(row) {
     if (label === "Ticker") return state === "insufficient" || state === "none"
       ? "This stock does not yet have enough reliable historical examples."
       : "Past setups in this stock have not been reliable enough.";
+    if (label === "Fillability") return state === "low"
+      ? "Comparable entry plans were filled too rarely."
+      : "Comparable entry plans do not yet have enough fill evidence.";
     return state === "insufficient" || state === "none"
       ? "The pattern has not yet been proven across enough historical periods."
       : "The pattern has not held up consistently in historical testing.";
@@ -1985,7 +2027,8 @@ function renderReferenceLevels(row, { active = false } = {}) {
   const reducePct = payloadNumeric(row, "take_profit_1_reduce_pct");
   const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
   const rows = [
-    [active ? "Entry zone" : "Reference zone", formatEntryZone(row) || "Unavailable"],
+    [entryPlanLabel(row, { active }), formatEntryZone(row) || "Unavailable"],
+    ...(active ? [["Execution rule", payloadValue(row, "entry_zone_plan") || "Use only the stated entry plan."]] : []),
     [active ? "Protect below" : "Reference stop", fmtNumber(row.stop_est, 2) || "Unavailable"],
     ...(active ? [
       ["First profit review", takeProfit1 ? `${fmtNumber(takeProfit1, 2)} · consider trimming ${fmtNumber(reducePct || 33, 0)}%` : "Unavailable"],
@@ -2011,8 +2054,8 @@ function renderTickerDetailPanel() {
     <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
     <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do now</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
     ${activePlan
-      ? `<section class="active-plan"><span class="eyebrow">Active trade plan</span>${renderReferenceLevels(row, { active: true })}</section>`
-      : `<div class="inactive-plan">No active entry plan. These levels are context only.</div><details class="reference-levels"><summary>Reference levels (inactive)</summary>${renderReferenceLevels(row)}</details>`}
+      ? `<section class="active-plan"><span class="eyebrow">Conditional entry plan</span>${renderReferenceLevels(row, { active: true })}</section>`
+      : `<div class="inactive-plan">No executable entry plan. These levels are context only.</div><details class="reference-levels"><summary>Planning levels (inactive)</summary>${renderReferenceLevels(row)}</details>`}
     <details class="detail-diagnostics"><summary>Evidence behind this read</summary>${renderScoreBreakdown(row)}</details>
   `;
 }
@@ -2689,8 +2732,8 @@ function renderLatestHistoryPanel(latest) {
       <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do now</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
       ${activePlan
-        ? `<section class="active-plan"><span class="eyebrow">Active trade plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
-        : `<div class="inactive-plan">No active entry plan. Reference levels are hidden until the setup is ready.</div><details class="reference-levels"><summary>Reference levels (inactive)</summary>${renderReferenceLevels(latest)}</details>`}
+        ? `<section class="active-plan"><span class="eyebrow">Conditional entry plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
+        : `<div class="inactive-plan">No executable entry plan. Planning levels are hidden until the setup is ready.</div><details class="reference-levels"><summary>Planning levels (inactive)</summary>${renderReferenceLevels(latest)}</details>`}
       <details class="detail-diagnostics"><summary>Evidence behind this read</summary>${renderScoreBreakdown(latest)}</details>
     </div>
   `;

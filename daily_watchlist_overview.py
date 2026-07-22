@@ -40,8 +40,8 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.07.22-climax-reclaim"
-LEARNING_MODEL_VERSION = "five-session-r-risk-v5"
+SCANNER_VERSION = "2026.07.22-execution-fillability"
+LEARNING_MODEL_VERSION = "five-session-execution-v6"
 INCREMENTAL_STATE_VERSION = "incremental-state-v1"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
 CALIBRATION_ARTIFACT_VERSION = "calibration-artifact-v1"
@@ -93,6 +93,10 @@ SELF_SCORE_FAILED_RETURN_PCT = -2.0
 SELF_SCORE_EXIT_AVOIDED_RETURN_PCT = -1.0
 LEARNING_MIN_SAMPLES = int(os.getenv("LEARNING_MIN_SAMPLES", "3"))
 LEARNING_ADJUSTMENT_CAP = float(os.getenv("LEARNING_ADJUSTMENT_CAP", "10"))
+FILLABILITY_MIN_SAMPLES = int(os.getenv("FILLABILITY_MIN_SAMPLES", "8"))
+FILLABILITY_MIN_DISTINCT_TICKERS = int(os.getenv("FILLABILITY_MIN_DISTINCT_TICKERS", "4"))
+FILLABILITY_MIN_EVALUATION_DATES = int(os.getenv("FILLABILITY_MIN_EVALUATION_DATES", "4"))
+FILLABILITY_MIN_RATE = float(os.getenv("FILLABILITY_MIN_RATE", "0.45"))
 LEARNING_CONFIRM_MIN_SAMPLES = int(os.getenv("LEARNING_CONFIRM_MIN_SAMPLES", "30"))
 LEARNING_CONFIRM_MIN_WORKING_RATE = float(os.getenv("LEARNING_CONFIRM_MIN_WORKING_RATE", "0.60"))
 LEARNING_CONFIRM_MAX_FAILED_RATE = float(os.getenv("LEARNING_CONFIRM_MAX_FAILED_RATE", "0.25"))
@@ -2755,6 +2759,7 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
         "prior_action": prior_action,
         "prior_setup": prior.get("setup"),
         "prior_buy_tier": prior.get("buy_tier"),
+        "prior_execution_style": prior.get("execution_style") or execution_style_for_setup(prior.get("setup")),
         "prior_operator_state": prior.get("operator_state"),
         "prior_anti_signal_level": prior.get("anti_signal_level"),
         # Freeze the forecast made at signal time. Later learning must never
@@ -2814,6 +2819,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_action": prior_action,
         "prior_setup": prior.get("setup"),
         "prior_buy_tier": prior.get("buy_tier"),
+        "prior_execution_style": prior.get("execution_style") or execution_style_for_setup(prior.get("setup")),
         "prior_operator_state": prior.get("operator_state"),
         "prior_anti_signal_level": prior.get("anti_signal_level"),
         "prior_personality_type": prior.get("personality_type"),
@@ -3081,6 +3087,7 @@ def rebuild_canonical_signal_outcomes(
             "action": outcome.get("prior_action"),
             "setup": outcome.get("prior_setup"),
             "buy_tier": outcome.get("prior_buy_tier"),
+            "execution_style": outcome.get("prior_execution_style") or execution_style_for_setup(outcome.get("prior_setup")),
             "operator_state": outcome.get("prior_operator_state"),
             "anti_signal_level": outcome.get("prior_anti_signal_level"),
             "personality_type": outcome.get("prior_personality_type"),
@@ -3470,6 +3477,131 @@ def build_learning_stats(
                 "brier_score": brier_score,
             }
     return stats
+
+
+def fillability_key(execution_style: object, setup: object, personality: object = "ANY") -> str:
+    return "|".join([
+        str(execution_style or "NONE").upper(),
+        str(setup or "NONE").upper(),
+        str(personality or "ANY").upper(),
+    ])
+
+
+def fillability_key_candidates(row: dict) -> list[tuple[str, str]]:
+    style = row.get("execution_style") or row.get("prior_execution_style") or execution_style_for_setup(
+        row.get("setup") or row.get("prior_setup")
+    )
+    setup = row.get("setup") or row.get("prior_setup") or "NONE"
+    personality = row.get("personality_type") or row.get("prior_personality_type") or "ANY"
+    return [
+        (fillability_key(style, setup, personality), "setup/personality"),
+        (fillability_key(style, setup), "setup family"),
+        (fillability_key(style, "ANY"), "execution style"),
+    ]
+
+
+def build_fillability_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
+    """Learn whether a structurally valid entry plan trades, including NOT_FILLED.
+
+    Fillability is an execution property, not a directional forecast. SETUP
+    plans therefore provide valid evidence when the market, ticker, risk, and
+    personality gates allowed the plan, even if walk-forward direction evidence
+    was still accumulating. This avoids a cold-start loop where BUY needs proven
+    fillability but fillability could previously learn only from existing BUYs.
+    """
+    required = {"entry_model_version", "path_status", "prior_action", "ticker", "signal_run_date"}
+    if outcome_history is None or outcome_history.empty or not required.issubset(outcome_history.columns):
+        return {}
+    usable = outcome_history[
+        (outcome_history["entry_model_version"].astype(str) == LEARNING_MODEL_VERSION)
+        & outcome_history["prior_action"].astype(str).isin({"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"})
+        & outcome_history["path_status"].astype(str).str.upper().isin({"SETTLED", "NOT_FILLED"})
+    ].copy()
+    for gate in ("prior_market_permission", "prior_ticker_permission", "prior_risk_permission"):
+        if gate not in usable.columns:
+            return {}
+        usable = usable[usable[gate].astype(str).str.upper() == "ALLOW"]
+    if "prior_personality_setup_allowed" not in usable.columns:
+        return {}
+    usable = usable[usable["prior_personality_setup_allowed"].map(is_affirmative)]
+    if usable.empty:
+        return {}
+    usable["_style"] = usable.apply(
+        lambda row: row.get("prior_execution_style") or execution_style_for_setup(row.get("prior_setup")),
+        axis=1,
+    )
+    usable["_filled"] = usable["path_status"].astype(str).str.upper() == "SETTLED"
+    usable["_key_exact"] = usable.apply(
+        lambda row: fillability_key(row.get("_style"), row.get("prior_setup"), row.get("prior_personality_type")), axis=1
+    )
+    usable["_key_setup"] = usable.apply(
+        lambda row: fillability_key(row.get("_style"), row.get("prior_setup")), axis=1
+    )
+    usable["_key_style"] = usable.apply(
+        lambda row: fillability_key(row.get("_style"), "ANY"), axis=1
+    )
+    stats: dict[str, dict] = {}
+    for column, scope in (("_key_exact", "setup/personality"), ("_key_setup", "setup family"), ("_key_style", "execution style")):
+        for key, group in usable.groupby(column):
+            total = int(len(group))
+            filled = int(group["_filled"].sum())
+            evaluation_dates = int(pd.to_datetime(group["signal_run_date"], errors="coerce").dropna().dt.normalize().nunique())
+            tickers = int(group["ticker"].dropna().astype(str).str.upper().nunique())
+            stats[str(key)] = {
+                "sample_count": total,
+                "filled_count": filled,
+                "not_filled_count": total - filled,
+                "fill_rate": filled / total if total else 0.0,
+                "fill_probability": (filled + 2.0) / (total + 4.0),
+                "distinct_ticker_count": tickers,
+                "evaluation_date_count": evaluation_dates,
+                "scope": scope,
+                "model_version": LEARNING_MODEL_VERSION,
+            }
+    return stats
+
+
+def apply_fillability_adjustments(rows: list[dict], fillability_stats: dict[str, dict]) -> None:
+    for row in rows:
+        candidates = fillability_key_candidates(row)
+        available = [(key, scope, fillability_stats[key]) for key, scope in candidates if key in fillability_stats]
+        qualified = next((item for item in available if (
+            int(item[2].get("sample_count", 0)) >= FILLABILITY_MIN_SAMPLES
+            and int(item[2].get("distinct_ticker_count", 0)) >= FILLABILITY_MIN_DISTINCT_TICKERS
+            and int(item[2].get("evaluation_date_count", 0)) >= FILLABILITY_MIN_EVALUATION_DATES
+        )), None)
+        selected = qualified or (max(available, key=lambda item: int(item[2].get("sample_count", 0))) if available else None)
+        stats = selected[2] if selected else {}
+        probability = float(stats.get("fill_probability", 0.0)) if stats else 0.0
+        row["execution_fill_sample_count"] = int(stats.get("sample_count", 0)) if stats else 0
+        row["execution_fill_distinct_ticker_count"] = int(stats.get("distinct_ticker_count", 0)) if stats else 0
+        row["execution_fill_evaluation_date_count"] = int(stats.get("evaluation_date_count", 0)) if stats else 0
+        row["execution_fill_rate"] = round(float(stats.get("fill_rate", 0.0)), 3) if stats else ""
+        row["execution_fill_probability"] = round(probability, 3) if stats else ""
+        row["execution_fill_scope"] = selected[1] if selected else "none"
+        row["execution_fill_model_version"] = LEARNING_MODEL_VERSION
+        row["execution_fill_state"] = "VALIDATED" if qualified else "INSUFFICIENT"
+
+        if str(row.get("action") or "") not in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
+            continue
+        adjusted = float(numeric_or_none(row.get("adjusted_score")) or numeric_or_none(row.get("score")) or 0.0)
+        if not qualified:
+            row["action"] = "SETUP FORMING"
+            row["signal_stage"] = signal_stage("SETUP FORMING")
+            row["adjusted_score"] = min(adjusted, 79.0)
+            row["execution_fill_state"] = "INSUFFICIENT"
+            row["next_day_plan"] = "Direction is constructive, but historical entry fillability is not proven; keep this as a setup."
+            append_unique_reason(row, "fillability_evidence_insufficient")
+        elif probability < FILLABILITY_MIN_RATE:
+            row["action"] = "SETUP FORMING"
+            row["signal_stage"] = signal_stage("SETUP FORMING")
+            row["adjusted_score"] = min(adjusted, 76.0)
+            row["execution_fill_state"] = "LOW"
+            row["next_day_plan"] = "Comparable entry plans were filled too rarely; do not present this as an executable BUY."
+            append_unique_reason(row, "fillability_below_threshold")
+        else:
+            row["execution_fill_state"] = "VALIDATED"
+            row["execution_plan"] = row.get("entry_zone_plan") or row.get("next_day_plan")
 
 
 def attach_walk_forward_predictions(outcomes: pd.DataFrame) -> pd.DataFrame:
@@ -4123,6 +4255,41 @@ def clamp_entry_to_current_zone(entry: float, close: float, atr_now: float, max_
     return entry, ""
 
 
+def execution_style_for_setup(setup: str) -> str:
+    if str(setup or "").upper() in {"BREAKOUT BUY", "MOMENTUM BUY"}:
+        return "BREAKOUT TRIGGER"
+    if str(setup or "").upper() in {"PULLBACK BUY", "EARLY PULLBACK BUY", "REVERSAL BUY"}:
+        return "PULLBACK LIMIT"
+    return "NONE"
+
+
+def breakout_trigger_band(
+    close: float,
+    high: float,
+    atr_now: float,
+    personality_type: str,
+    volatility_regime: str,
+) -> tuple[float, float]:
+    """Create a next-session trigger band without paying an unlimited gap."""
+    buffer = max(close * 0.001, atr_now * 0.05 if atr_now > 0 else 0.0)
+    trigger = max(close, high) + buffer
+    personality_width = {
+        "ETF": 0.22,
+        "COMPOUNDER": 0.28,
+        "BALANCED": 0.34,
+        "RANGE_BOUND": 0.28,
+        "HIGH_BETA": 0.40,
+    }.get(str(personality_type or "").upper(), 0.34)
+    regime_multiplier = {
+        "TREND VOLATILITY": 1.10,
+        "REVERSAL VOLATILITY": 0.85,
+        "CHAOTIC VOLATILITY": 0.0,
+    }.get(str(volatility_regime or "NORMAL").upper(), 1.0)
+    width = max(trigger * 0.0025, atr_now * personality_width * regime_multiplier)
+    width = min(width, trigger * (0.018 if str(personality_type or "").upper() == "HIGH_BETA" else 0.012))
+    return trigger, trigger + max(0.0, width)
+
+
 def entry_zone_width_pct(
     setup: str,
     personality_type: str,
@@ -4425,7 +4592,7 @@ def classify_volatility_regime(
             "permission": "ALLOW" if trend_confirmed else "CAUTION",
             "position_size_factor": 0.70 if trend_confirmed else 0.50,
             "plan": (
-                "Volatility is directional; use 70% of normal size and avoid entries above the reference zone."
+                "Volatility is directional; use 70% of normal size and do not exceed the plan's maximum entry."
                 if trend_confirmed
                 else "Trend structure exists, but buyer tape is not confirmed; keep it on watch."
             ),
@@ -5160,7 +5327,20 @@ def classify_and_score(
         entry_est = np.nan
         entry_note = ""
 
-    if setup_forming and not math.isnan(entry_est) and float(entry_est) > 0:
+    execution_style = execution_style_for_setup(setup)
+    entry_zone_plan = ""
+    if setup_forming and execution_style == "BREAKOUT TRIGGER":
+        entry_zone_low, entry_zone_high = breakout_trigger_band(
+            close,
+            high,
+            atr_now,
+            str(personality_profile["personality_type"]),
+            volatility_regime,
+        )
+        entry_est = entry_zone_high
+        zone_width_pct = (entry_zone_high / entry_zone_low - 1) * 100 if entry_zone_low > 0 else np.nan
+        entry_zone_plan = "Enter only after price reaches the trigger band; skip the trade if it opens or runs above the maximum entry."
+    elif setup_forming and not math.isnan(entry_est) and float(entry_est) > 0:
         zone_width_pct = entry_zone_width_pct(
             setup,
             str(personality_profile["personality_type"]),
@@ -5169,10 +5349,12 @@ def classify_and_score(
         )
         entry_zone_high = float(entry_est)
         entry_zone_low = entry_zone_high * (1 - zone_width_pct / 100)
+        entry_zone_plan = "Use a limit entry inside the pullback zone; require the zone to hold and do not chase above it."
     else:
         zone_width_pct = np.nan
         entry_zone_high = np.nan
         entry_zone_low = np.nan
+        execution_style = "NONE"
 
     trade_entry = entry_zone_high if setup_forming and not math.isnan(entry_zone_high) else close
     stop_pct = 6.0 if setup == "BREAKOUT BUY" else 4.0 if setup == "MOMENTUM BUY" else 7.0 if setup == "PULLBACK BUY" else 6.0 if setup == "EARLY PULLBACK BUY" else 5.0
@@ -5502,7 +5684,7 @@ def classify_and_score(
         operator_plan = "Supply is in control; treat rallies as suspect until close and volume improve."
     elif absorption_score >= 60.0:
         operator_pressure = "ACCUMULATION / ABSORPTION"
-        operator_plan = "Buyers are absorbing supply; watch pullback or reclaim entries near the reference zone."
+        operator_plan = "Buyers are absorbing supply; wait for either a controlled pullback or a confirmed trigger."
     elif short_pressure_proxy >= 38.0:
         operator_pressure = "SHORT PRESSURE"
         operator_plan = "Short-pressure proxy is elevated; require a stronger reclaim before treating it as buyable."
@@ -5534,7 +5716,7 @@ def classify_and_score(
     elif demand_control_score >= 58.0:
         operator_state = "MARKUP / DEMAND CONTROL"
         operator_state_score = max(demand_control_score, next_day_bias_score, buyer_score)
-        operator_state_plan = "Demand is controlling the markup phase; avoid late chase, but favor controlled pullback or Pine-confirmed reclaim entries."
+        operator_state_plan = "Demand is controlling the markup phase; avoid late chase and require the planned trigger or pullback entry."
     elif absorption_score >= 55.0:
         operator_state = "ACCUMULATION"
         operator_state_score = absorption_score
@@ -5594,7 +5776,11 @@ def classify_and_score(
         next_day_plan = "The prior momentum event has not confirmed or failed; keep execution paused."
     elif profile_extended_from_zone or extended_from_zone or fomo or greed_rejected:
         next_day_bias = "AVOID CHASE"
-        next_day_plan = "Do not chase strength; wait for price to reset into the reference zone."
+        next_day_plan = (
+            "Do not chase strength; wait for a new breakout base and trigger."
+            if execution_style == "BREAKOUT TRIGGER"
+            else "Do not chase strength; wait for price to reset into the pullback zone."
+        )
     elif market_permission_value == "BLOCK" or risk_permission == "BLOCK":
         next_day_bias = "EXECUTION BLOCKED"
         next_day_plan = "Structure is not enough; market or risk governor blocks fresh execution."
@@ -5606,13 +5792,21 @@ def classify_and_score(
         next_day_plan = volatility_plan
     elif next_day_buyable and setup_forming:
         next_day_bias = "BULLISH CONFIRM"
-        next_day_plan = "Confirm on Pine chart; prefer entry near the reference zone with the listed stop."
+        next_day_plan = (
+            "Use the breakout trigger band and skip any move above the maximum entry."
+            if execution_style == "BREAKOUT TRIGGER"
+            else "Use a limit entry only inside the pullback zone and require that zone to hold."
+        )
     elif next_day_constructive and setup_forming:
         next_day_bias = "CONSTRUCTIVE PULLBACK"
-        next_day_plan = "Setup is forming; wait for reclaim or a controlled pullback into the reference zone."
+        next_day_plan = (
+            "Setup is forming; wait for price to confirm the trigger without exceeding the maximum entry."
+            if execution_style == "BREAKOUT TRIGGER"
+            else "Setup is forming; wait for a controlled pullback into the planned limit zone."
+        )
     elif mode in {"POWER TREND", "STEADY TREND"} and next_day_bias_score >= 55.0:
         next_day_bias = "WATCH TREND"
-        next_day_plan = "Trend personality is healthy; wait for a cleaner setup or reference-zone entry."
+        next_day_plan = "Trend personality is healthy; wait for a cleaner trigger or pullback plan."
     else:
         next_day_bias = "NEUTRAL"
         next_day_plan = "No clean next-day edge; wait for stronger buyer tape or cleaner structure."
@@ -5676,7 +5870,11 @@ def classify_and_score(
     if entry_note:
         notes.append(entry_note)
     if setup_forming and not math.isnan(entry_zone_low) and not math.isnan(entry_zone_high):
-        notes.append("Entry zone uses personality-adjusted pullback band")
+        notes.append(
+            "Execution uses a personality-adjusted breakout trigger band"
+            if execution_style == "BREAKOUT TRIGGER"
+            else "Execution uses a personality-adjusted pullback limit zone"
+        )
     if profile_extended_from_zone:
         notes.append("Personality-adjusted zone is extended")
     if high_quality_entry_override:
@@ -5880,7 +6078,9 @@ def classify_and_score(
         "entry_zone_low": round(float(entry_zone_low), 2) if setup_forming and not math.isnan(entry_zone_low) else "",
         "entry_zone_high": round(float(entry_zone_high), 2) if setup_forming and not math.isnan(entry_zone_high) else "",
         "entry_zone_width_pct": round(float(zone_width_pct), 2) if setup_forming and not math.isnan(zone_width_pct) else "",
-        "entry_zone_plan": "Buy only inside the zone; gap-through below the zone requires reclaim confirmation." if setup_forming and not math.isnan(entry_zone_low) else "",
+        "entry_zone_plan": entry_zone_plan,
+        "execution_style": execution_style,
+        "execution_window_sessions": 5 if setup_forming else "",
         "stop_est": round(float(stop), 2) if setup_forming else "",
         "target_est": round(float(target), 2) if setup_forming else "",
         "take_profit_1": round(float(profit_plan["take_profit_1"]), 2) if setup_forming and not math.isnan(profit_plan["take_profit_1"]) else "",
@@ -7368,6 +7568,8 @@ def main() -> None:
     )
     learning_stats = build_learning_stats(learning_history, today, args.learning_lookback_days)
     apply_learning_adjustments(rows, learning_stats)
+    fillability_stats = build_fillability_stats(learning_history)
+    apply_fillability_adjustments(rows, fillability_stats)
     calibration_artifact = None
     calibration_artifact_id = ""
     if effective_mode == "weekly_rebuild":

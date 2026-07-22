@@ -124,6 +124,11 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("function renderQualityScore(row)"), "watchlist quality must distinguish unavailable evidence from a numeric score");
   assert(appSource.includes("function qualityConstraintLabel(row)"), "all quality surfaces must share the same constraint semantics");
   assert(appSource.includes("function renderReferenceLevels(row"), "reference levels must be separated from active trade plans");
+  assert(appSource.includes('return active ? "Trigger band" : "Reference trigger band"'), "breakout plans must use trigger language instead of a retrospective zone");
+  assert(appSource.includes("This is a conditional breakout plan, not a market order."), "BUY guidance must explain that a breakout signal is conditional");
+  assert(appSource.includes("skip the trade if price opens or runs above the maximum entry"), "BUY guidance must state the no-chase rule");
+  assert(appSource.includes("function fillabilityReadout(row)"), "entry fillability must be explained in natural language");
+  assert(appSource.includes("Conditional entry plan"), "active levels must be labeled as a conditional plan");
   assert(appSource.includes('return "PENDING"'), "missing execution evidence must use a reader-facing status instead of a gate label");
   assert(appSource.includes('if (antiSignal === "BLOCK") return "AVOID"'), "anti-signal blocks must suppress the numeric quality display with an actionable label");
   assert(!appSource.includes('"GATE BLOCK"'), "reader-facing UI must not expose the internal gate-block label");
@@ -186,6 +191,9 @@ function auditMarketSessionFreshness() {
       ticker_permission: "ALLOW",
       walk_forward_permission: "ALLOW",
       risk_permission: "ALLOW",
+      personality_setup_allowed: "YES",
+      execution_fill_state: "VALIDATED",
+      execution_fill_probability: 0.68,
     },
   });
   assert(dto.payload.data_age_days === 0, "API DTO must agree with the scanner for the latest completed session");
@@ -647,6 +655,10 @@ function auditSupabaseFallback() {
       squeeze_watch: "NO",
       buy_tier: "A+ BUY",
       execution_priority: 1,
+      execution_style: "BREAKOUT TRIGGER",
+      execution_fill_state: "VALIDATED",
+      execution_fill_probability: 0.68,
+      execution_fill_sample_count: 37,
       freshness_status: "LIVE_OR_CURRENT",
       freshness_block: "NO",
       data_age_days: 0,
@@ -694,6 +706,36 @@ function auditSupabaseFallback() {
   });
   assert(gated.payload.data_provider === "polygon", "execution-gated BUY row must keep data provider");
   assert(gated.payload.data_provider_status === "LIVE_OK", "execution-gated BUY row must keep data provider status");
+
+  const unprovenFill = rowDto({
+    ticker: "UNPROVEN",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    setup: "MOMENTUM BUY",
+    score: 96,
+    payload: {
+      market_permission: "ALLOW", ticker_permission: "ALLOW", walk_forward_permission: "ALLOW", risk_permission: "ALLOW",
+      personality_setup_allowed: "YES", data_age_days: 0, freshness_block: "NO",
+      execution_style: "BREAKOUT TRIGGER", execution_fill_state: "INSUFFICIENT",
+    },
+  });
+  assert(unprovenFill.action === "SETUP FORMING", "BUY without proven fillability must be downgraded");
+  assert(unprovenFill.payload.reason_codes.includes("fillability_evidence_insufficient"), "unproven fillability must retain its downgrade reason");
+
+  const lowFill = rowDto({
+    ticker: "LOWFILL",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    setup: "BREAKOUT BUY",
+    score: 96,
+    payload: {
+      market_permission: "ALLOW", ticker_permission: "ALLOW", walk_forward_permission: "ALLOW", risk_permission: "ALLOW",
+      personality_setup_allowed: "YES", data_age_days: 0, freshness_block: "NO",
+      execution_style: "BREAKOUT TRIGGER", execution_fill_state: "LOW", execution_fill_probability: 0.31,
+    },
+  });
+  assert(lowFill.action === "SETUP FORMING", "BUY with low fillability must be downgraded");
+  assert(lowFill.payload.reason_codes.includes("fillability_below_threshold"), "low fillability must retain its downgrade reason");
 
   const unsafeGates = [
     {
@@ -863,6 +905,8 @@ function auditSupabaseFallback() {
     gatedAction: gated.action,
     gatedGates: gateValues(gated),
     gatedProvider: gated.payload.data_provider,
+    unprovenFillAction: unprovenFill.action,
+    lowFillAction: lowFill.action,
     unsafeGateActions: unsafeGates.map(({ dto }) => dto.action),
     personalityBlockedAction: personalityBlocked.action,
     personalityBlockedScore: adjustedScore(personalityBlocked),

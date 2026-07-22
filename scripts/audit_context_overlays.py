@@ -1120,6 +1120,80 @@ def audit_momentum_climax_does_not_penalize_stable_personality():
     assert_true(state["state"] == "NONE", "a stable personality must not inherit the high-beta climax gate")
 
 
+def fillability_outcome(
+    index: int,
+    filled: bool,
+    *,
+    setup: str = "MOMENTUM BUY",
+    personality: str = "HIGH_BETA",
+    action: str = "BUY CANDIDATE",
+    walk_forward_permission: str = "ALLOW",
+) -> dict:
+    return {
+        "entry_model_version": dwo.LEARNING_MODEL_VERSION,
+        "path_status": "SETTLED" if filled else "NOT_FILLED",
+        "prior_action": action,
+        "prior_setup": setup,
+        "prior_execution_style": dwo.execution_style_for_setup(setup),
+        "prior_personality_type": personality,
+        "prior_market_permission": "ALLOW",
+        "prior_ticker_permission": "ALLOW",
+        "prior_risk_permission": "ALLOW",
+        "prior_walk_forward_permission": walk_forward_permission,
+        "prior_personality_setup_allowed": "YES",
+        "ticker": f"T{index % 4}",
+        "signal_run_date": f"2026-06-{index + 1:02d}",
+    }
+
+
+def audit_execution_style_matches_setup():
+    assert_true(dwo.execution_style_for_setup("MOMENTUM BUY") == "BREAKOUT TRIGGER", "momentum setups need a breakout trigger")
+    assert_true(dwo.execution_style_for_setup("BREAKOUT BUY") == "BREAKOUT TRIGGER", "breakout setups need a breakout trigger")
+    assert_true(dwo.execution_style_for_setup("PULLBACK BUY") == "PULLBACK LIMIT", "pullback setups need a limit zone")
+    low, high = dwo.breakout_trigger_band(100.0, 101.0, 4.0, "HIGH_BETA", "TREND VOLATILITY")
+    assert_true(low > 101.0 and high > low, "trigger band must sit above the signal high")
+    assert_true((high / low - 1) <= 0.018 + dwo.NUMERIC_TOLERANCE, "high-beta trigger band must retain a hard chase cap")
+
+
+def audit_not_filled_trains_fillability():
+    outcomes = pd.DataFrame([
+        fillability_outcome(
+            index,
+            index < 5,
+            action="SETUP FORMING" if index >= 4 else "BUY CANDIDATE",
+            walk_forward_permission="INSUFFICIENT" if index >= 4 else "ALLOW",
+        )
+        for index in range(8)
+    ])
+    stats = dwo.build_fillability_stats(outcomes)
+    key = dwo.fillability_key("BREAKOUT TRIGGER", "MOMENTUM BUY", "HIGH_BETA")
+    exact = stats[key]
+    assert_true(exact["sample_count"] == 8, "fillability must count every valid plan")
+    assert_true(exact["not_filled_count"] == 3, "NOT_FILLED plans must remain learning evidence")
+    assert_true(exact["filled_count"] == 5, "structurally valid SETUP plans must resolve fillability cold start")
+    assert_true(exact["fill_probability"] < exact["fill_rate"], "fillability probability must be conservatively smoothed")
+
+
+def audit_fillability_fails_closed():
+    strong = pd.DataFrame([fillability_outcome(index, index < 6) for index in range(8)])
+    strong_stats = dwo.build_fillability_stats(strong)
+    qualified = {
+        "ticker": "GOOD", "action": "BUY CANDIDATE", "setup": "MOMENTUM BUY", "personality_type": "HIGH_BETA",
+        "execution_style": "BREAKOUT TRIGGER", "score": 100, "adjusted_score": 100, "reason_codes": [],
+    }
+    dwo.apply_fillability_adjustments([qualified], strong_stats)
+    assert_true(qualified["action"] == "BUY CANDIDATE", "validated fillability above threshold must preserve BUY")
+    weak = pd.DataFrame([fillability_outcome(index, index == 0) for index in range(8)])
+    weak_stats = dwo.build_fillability_stats(weak)
+    rejected = {**qualified, "action": "BUY CANDIDATE", "reason_codes": []}
+    dwo.apply_fillability_adjustments([rejected], weak_stats)
+    assert_true(rejected["action"] == "SETUP FORMING", "low fillability must downgrade BUY")
+    assert_true("fillability_below_threshold" in rejected["reason_codes"], "fillability downgrade must remain auditable")
+    unproven = {**qualified, "action": "BUY CANDIDATE", "reason_codes": []}
+    dwo.apply_fillability_adjustments([unproven], {})
+    assert_true(unproven["action"] == "SETUP FORMING", "missing fillability evidence must fail closed")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
@@ -1189,9 +1263,12 @@ def main():
     audit_momentum_climax_failure_stays_blocked()
     audit_momentum_climax_is_future_invariant()
     audit_momentum_climax_does_not_penalize_stable_personality()
+    audit_execution_style_matches_setup()
+    audit_not_filled_trains_fillability()
+    audit_fillability_fails_closed()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 68,
+        "cases": 71,
     })
 
 
