@@ -269,8 +269,8 @@ def audit_non_executable_signal_is_excluded_from_risk_path_learning():
     prior = row("2026-06-01", "WATCH TREND", 100, setup="NONE", ticker="MU")
     bars = [executable_current(open=100, high=104, low=98, close=102) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
     outcome = dwo.score_signal_horizon(prior, bars)
-    assert_true(outcome["path_status"] == "NON_EXECUTABLE", "v4 risk-path learning must only score planned entries")
-    assert_true(outcome["outcome_learnable"] is False, "WATCH/EXIT paths without entry, stop, and target must not become v4 evidence")
+    assert_true(outcome["path_status"] == "NON_EXECUTABLE", "v5 risk-path learning must only score planned entries")
+    assert_true(outcome["outcome_learnable"] is False, "WATCH/EXIT paths without entry, stop, and target must not become v5 evidence")
 
 
 def audit_defensive_learning_shows_samples_without_promotion():
@@ -293,8 +293,8 @@ def audit_defensive_learning_shows_samples_without_promotion():
 
 def audit_learning_lookback_supports_60_day_window():
     history_rows = [
-        {**row(f"2026-06-{day:02d}", "BUY CANDIDATE", 100 + day, setup="MOMENTUM BUY"), "ticker": "MU"}
-        for day in range(1, 61)
+        {**row(str(date.date()), "BUY CANDIDATE", 100 + day, setup="MOMENTUM BUY"), "ticker": "MU"}
+        for day, date in enumerate(pd.bdate_range("2026-04-01", periods=60), start=1)
     ]
     learning_outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
     assert_true(dwo.DEFAULT_LEARNING_LOOKBACK_DAYS == 60, "learning should use a broader outcome window than the displayed history")

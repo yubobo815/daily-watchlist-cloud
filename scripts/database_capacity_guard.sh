@@ -14,6 +14,11 @@ readonly LEARNING_SESSIONS=60
 readonly BEHAVIOR_ROWS_PER_TICKER=30
 readonly RUN_RETENTION_DAYS=60
 readonly STAGE_TTL_HOURS=6
+readonly CALIBRATION_MAX_ARTIFACTS=8
+readonly CALIBRATION_MAX_BYTES=25165824
+# Conservative upper bound for 250 tickers: compact history/outcomes,
+# typed columns and indexes, snapshots, state rows, artifacts, and OHLCV delta.
+readonly MAX_STAGED_PUBLICATION_BYTES=140000000
 readonly LOCK_KEY=741852963
 
 metadata_value() {
@@ -74,6 +79,12 @@ delete from public.watchlist_snapshots using expired_publications
 where watchlist_snapshots.publication_id = expired_publications.publication_id;
 delete from public.watchlist_signal_outcomes using expired_publications
 where watchlist_signal_outcomes.publication_id = expired_publications.publication_id;
+delete from public.watchlist_learning_state using expired_publications
+where watchlist_learning_state.publication_id = expired_publications.publication_id;
+delete from public.watchlist_indicator_state using expired_publications
+where watchlist_indicator_state.publication_id = expired_publications.publication_id;
+delete from public.watchlist_calibration_artifacts using expired_publications
+where watchlist_calibration_artifacts.source_publication_id = expired_publications.publication_id;
 delete from public.watchlist_refresh_runs using expired_publications
 where watchlist_refresh_runs.publication_id = expired_publications.publication_id;
 commit;
@@ -99,6 +110,12 @@ delete from public.watchlist_snapshots using rollback_publication
 where watchlist_snapshots.publication_id = rollback_publication.publication_id;
 delete from public.watchlist_signal_outcomes using rollback_publication
 where watchlist_signal_outcomes.publication_id = rollback_publication.publication_id;
+delete from public.watchlist_learning_state using rollback_publication
+where watchlist_learning_state.publication_id = rollback_publication.publication_id;
+delete from public.watchlist_indicator_state using rollback_publication
+where watchlist_indicator_state.publication_id = rollback_publication.publication_id;
+delete from public.watchlist_calibration_artifacts using rollback_publication
+where watchlist_calibration_artifacts.source_publication_id = rollback_publication.publication_id;
 delete from public.watchlist_refresh_runs using rollback_publication
 where watchlist_refresh_runs.publication_id = rollback_publication.publication_id;
 commit;
@@ -108,17 +125,26 @@ SQL
 assert_capacity() {
   local ceiling="$1"
   local phase="$2"
-  local bytes tickers ohlcv_rows
+  local bytes tickers ohlcv_rows calibration_bytes
   bytes="$(database_bytes)"
   tickers="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(distinct ticker) from public.watchlist_ohlcv")"
   ohlcv_rows="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_ohlcv")"
   echo "Database capacity [$phase]: bytes=$bytes ceiling=$ceiling tickers=$tickers ohlcv_rows=$ohlcv_rows"
+  if [ "$phase" = "preflight" ] && [ $((bytes + MAX_STAGED_PUBLICATION_BYTES)) -ge "$HARD_LIMIT_BYTES" ]; then
+    echo "Insufficient reserved headroom: $bytes + $MAX_STAGED_PUBLICATION_BYTES >= $HARD_LIMIT_BYTES"
+    return 1
+  fi
   if [ "$tickers" -gt "$MAX_TICKERS" ]; then
     echo "Ticker capacity exceeded: $tickers > $MAX_TICKERS"
     return 1
   fi
   if [ "$ohlcv_rows" -gt "$OHLCV_MAX_ROWS" ]; then
     echo "OHLCV row capacity exceeded: $ohlcv_rows > $OHLCV_MAX_ROWS"
+    return 1
+  fi
+  calibration_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_calibration_artifacts')")"
+  if [ "$calibration_bytes" -ge "$CALIBRATION_MAX_BYTES" ]; then
+    echo "Calibration artifact capacity exceeded: $calibration_bytes >= $CALIBRATION_MAX_BYTES"
     return 1
   fi
   if [ "$bytes" -ge "$ceiling" ] || [ "$bytes" -ge "$HARD_LIMIT_BYTES" ]; then
@@ -145,6 +171,9 @@ with relation_metrics as (
     ('watchlist_snapshots'),
     ('watchlist_behavior_history'),
     ('watchlist_signal_outcomes'),
+    ('watchlist_learning_state'),
+    ('watchlist_indicator_state'),
+    ('watchlist_calibration_artifacts'),
     ('watchlist_refresh_runs')
   ) tables(relation_name)
 ), row_metrics as (
@@ -153,6 +182,9 @@ with relation_metrics as (
     'snapshots', (select count(*) from public.watchlist_snapshots),
     'behavior_history', (select count(*) from public.watchlist_behavior_history),
     'signal_outcomes', (select count(*) from public.watchlist_signal_outcomes),
+    'learning_state', (select count(*) from public.watchlist_learning_state),
+    'indicator_state', (select count(*) from public.watchlist_indicator_state),
+    'calibration_artifacts', (select count(*) from public.watchlist_calibration_artifacts),
     'refresh_runs', (select count(*) from public.watchlist_refresh_runs)
   ) as rows
 )
@@ -183,6 +215,7 @@ final_retention() {
     -v run_date="$run_date" \
     -v learning_sessions="$LEARNING_SESSIONS" \
     -v behavior_rows="$BEHAVIOR_ROWS_PER_TICKER" \
+    -v calibration_artifacts="$CALIBRATION_MAX_ARTIFACTS" \
     -v run_days="$RUN_RETENTION_DAYS" <<'SQL'
 begin;
 select pg_advisory_xact_lock(:lock_key);
@@ -214,6 +247,24 @@ where publication_id = :'publication_id'
     limit :learning_sessions
   );
 
+delete from public.watchlist_learning_state
+where publication_id <> :'publication_id';
+delete from public.watchlist_indicator_state
+where publication_id <> :'publication_id';
+
+delete from public.watchlist_calibration_artifacts
+where state in ('staged', 'rejected')
+  and created_at < now() - make_interval(hours => 6);
+delete from public.watchlist_calibration_artifacts target
+using (
+  select artifact_id
+  from public.watchlist_calibration_artifacts
+  where state = 'validated'
+  order by cutoff_date desc, created_at desc
+  offset :calibration_artifacts
+) expired
+where target.artifact_id = expired.artifact_id;
+
 create temporary table retained_snapshots on commit drop as
 select publication_id
 from public.watchlist_refresh_runs
@@ -226,11 +277,14 @@ where publication_id not in (select publication_id from retained_snapshots);
 delete from public.watchlist_refresh_runs
 where run_date < :'run_date'::date - :run_days
   and publication_id not in (select publication_id from retained_snapshots)
+  and publication_id not in (
+    select source_publication_id from public.watchlist_calibration_artifacts
+  )
   and publication_id <> :'publication_id';
 commit;
 SQL
   trim_ohlcv
-  psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_refresh_runs"
+  psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_learning_state, public.watchlist_indicator_state, public.watchlist_calibration_artifacts, public.watchlist_refresh_runs"
 }
 
 publication_id="$(metadata_value publication_id)"
@@ -240,7 +294,7 @@ case "$mode" in
   prepare)
     reap_incomplete_publications
     trim_ohlcv
-    psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_refresh_runs"
+    psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_learning_state, public.watchlist_indicator_state, public.watchlist_calibration_artifacts, public.watchlist_refresh_runs"
     assert_capacity "$WARNING_BYTES" "preflight"
     ;;
   staged)
@@ -260,7 +314,7 @@ case "$mode" in
     rollback_publication "$publication_id"
     reap_incomplete_publications
     trim_ohlcv
-    psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_refresh_runs"
+    psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_learning_state, public.watchlist_indicator_state, public.watchlist_calibration_artifacts, public.watchlist_refresh_runs"
     assert_capacity "$HARD_LIMIT_BYTES" "rollback"
     ;;
   *)

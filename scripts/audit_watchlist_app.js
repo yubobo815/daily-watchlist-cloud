@@ -269,7 +269,8 @@ function auditAtomicPublicationContract() {
   assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Enforce staged database ceiling"), "database health audit must precede staged capacity enforcement");
   assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy to GitHub Pages"), "an oversized staged publication must roll back before deployment");
   assert(workflow.indexOf("Finalize Supabase publication") < workflow.indexOf("Reclaim Supabase replay storage"), "retention must never mutate a pending publication");
-  assert(workflow.indexOf("Deploy to GitHub Pages") < workflow.indexOf("Finalize Supabase publication"), "Supabase publication must not become visible before Pages deployment succeeds");
+  assert(workflow.indexOf("Upload Pages artifact") < workflow.indexOf("Finalize Supabase publication"), "the immutable Pages artifact must be staged before database promotion");
+  assert(workflow.indexOf("Finalize Supabase publication") < workflow.indexOf("Deploy to GitHub Pages"), "Pages must never expose a staged publication that database rollback can remove");
   assert(workflow.includes("supabase_learning_health.py --finalize"), "workflow must explicitly finalize the audited publication");
   assert(supabaseApi.includes("status=in.(ok,degraded)"), "API must select only validated run states");
   assert(supabaseApi.includes("committedPublicationMatches"), "API must verify immutable publication ids after fetching rows");

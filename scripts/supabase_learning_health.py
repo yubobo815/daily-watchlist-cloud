@@ -7,9 +7,11 @@ This script prints only aggregate health metrics. It never prints Supabase keys.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -167,7 +169,7 @@ def main(*, finalize: bool = False) -> None:
 
     runs, _ = request_json(
         "watchlist_refresh_runs"
-        "?select=publication_id,run_date,status,history_rows,snapshot_rows,symbols_analyzed,symbols_failed,payload"
+        "?select=publication_id,run_date,status,history_rows,snapshot_rows,symbols_analyzed,symbols_failed,scanner_version,payload"
         f"&run_date=eq.{urllib.parse.quote(str(run_date))}"
         f"&publication_id=eq.{urllib.parse.quote(expected_publication_id)}&limit=1"
     )
@@ -188,9 +190,15 @@ def main(*, finalize: bool = False) -> None:
     )
     snapshot_rows = request_all_json(
         "watchlist_snapshots"
-        "?select=publication_id,ticker,open,high,low,close,payload"
+        "?select=publication_id,ticker,data_date,open,high,low,close,payload"
         f"&{filters}&{publication_filter}&order=ticker.asc"
     )
+    indicator_state_rows = []
+    if "synced_indicator_state_rows" in latest_payload:
+        indicator_state_rows = request_all_json(
+            "watchlist_indicator_state?select=publication_id,ticker,data_date,state_version,scanner_version,raw_window_hash&"
+            f"{publication_filter}&order=ticker.asc"
+        )
 
     history_by_ticker: dict[str, set[str]] = defaultdict(set)
     for row in history_rows:
@@ -214,6 +222,74 @@ def main(*, finalize: bool = False) -> None:
             f"&publication_id=eq.{urllib.parse.quote(publication_id)}"
             "&order=ticker.asc,signal_run_date.asc"
         )
+
+    calibration_artifact_id = str(latest_payload.get("calibration_artifact_id") or "")
+    calibration_artifact_valid = not calibration_artifact_id
+    if calibration_artifact_id:
+        artifacts = request_all_json(
+            "watchlist_calibration_artifacts?"
+            "select=artifact_id,source_publication_id,cutoff_date,artifact_version,scanner_version,learning_model_version,directional_model_version,content_hash,state,payload_bytes,payload&"
+            f"artifact_id=eq.{urllib.parse.quote(calibration_artifact_id)}&limit=1"
+        )
+        if len(artifacts) == 1:
+            artifact = artifacts[0]
+            source_publication_id = str(artifact.get("source_publication_id") or "")
+            source_runs = request_all_json(
+                "watchlist_refresh_runs?select=publication_id,status&"
+                f"publication_id=eq.{urllib.parse.quote(source_publication_id)}&limit=1"
+            ) if source_publication_id else []
+            source_run_valid = (
+                len(source_runs) == 1
+                and str(source_runs[0].get("publication_id") or "") == source_publication_id
+                and str(source_runs[0].get("status") or "") in {"pending_audit", "ok", "degraded"}
+            )
+            payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+            unhashed = {key: value for key, value in payload.items() if key not in {"content_hash", "artifact_id"}}
+            actual_hash = hashlib.sha256(
+                json.dumps(unhashed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            typed_keys = (
+                "artifact_id", "source_publication_id", "cutoff_date", "artifact_version", "scanner_version",
+                "learning_model_version", "directional_model_version", "content_hash",
+            )
+            model = payload.get("model") if isinstance(payload.get("model"), dict) else {}
+            try:
+                feature_count = int(latest_payload.get("directional_feature_count") or 0)
+                label_count = int(latest_payload.get("directional_label_count") or 0)
+                center = model.get("center") or []
+                scale = model.get("scale") or []
+                coefficients = model.get("coefficients") or []
+                priors = model.get("priors") or []
+                model_shape_valid = (
+                    feature_count > 0
+                    and label_count > 0
+                    and int(payload.get("feature_count") or 0) == feature_count
+                    and int(payload.get("label_count") or 0) == label_count
+                    and len(center) == feature_count
+                    and len(scale) == feature_count
+                    and len(coefficients) == feature_count + 1
+                    and all(isinstance(row, list) and len(row) == label_count for row in coefficients)
+                    and len(priors) == label_count
+                )
+                model_values = [*center, *scale, *priors, *(value for row in coefficients for value in row)]
+                model_values_valid = bool(model_values) and all(number(value) is not None for value in model_values)
+            except (TypeError, ValueError):
+                model_shape_valid = False
+                model_values_valid = False
+            calibration_artifact_valid = (
+                source_run_valid
+                and artifact.get("state") == "validated"
+                and all(str(artifact.get(key) or "") == str(payload.get(key) or "") for key in typed_keys)
+                and str(payload.get("artifact_version") or "") == str(latest_payload.get("calibration_artifact_version") or "")
+                and str(payload.get("scanner_version") or "") == str(latest.get("scanner_version") or "")
+                and str(payload.get("learning_model_version") or "") == learning_model_version
+                and str(payload.get("directional_model_version") or "") == str(latest_payload.get("directional_model_version") or "")
+                and model_shape_valid
+                and model_values_valid
+                and actual_hash == payload.get("content_hash")
+                and int(artifact.get("payload_bytes") or 0)
+                == len(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            )
 
     learning_ready = 0
     learning_scope_ready = 0
@@ -311,6 +387,42 @@ def main(*, finalize: bool = False) -> None:
         )
     )
 
+    expected_indicator_version = str(latest_payload.get("indicator_state_version") or "")
+    expected_scanner_version = str(latest.get("scanner_version") or "")
+    snapshot_dates = {
+        str(row.get("ticker") or "").upper(): str(row.get("data_date") or "")
+        for row in snapshot_rows
+        if row.get("ticker")
+    }
+    snapshot_hashes = {
+        str(row.get("ticker") or "").upper(): str(
+            (row.get("payload") if isinstance(row.get("payload"), dict) else {}).get("raw_window_hash") or ""
+        )
+        for row in snapshot_rows
+        if row.get("ticker")
+    }
+    indicator_dates = {
+        str(row.get("ticker") or "").upper(): str(row.get("data_date") or "")
+        for row in indicator_state_rows
+        if row.get("ticker")
+    }
+    indicator_state_valid = (
+        "synced_indicator_state_rows" not in latest_payload
+        or (
+            int(latest_payload.get("synced_indicator_state_rows") or 0) == len(indicator_state_rows)
+            and len(indicator_state_rows) == len(snapshot_rows)
+            and indicator_dates == snapshot_dates
+            and all(
+                str(row.get("publication_id") or "") == publication_id
+                and str(row.get("state_version") or "") == expected_indicator_version
+                and str(row.get("scanner_version") or "") == expected_scanner_version
+                and re.fullmatch(r"[0-9a-fA-F]{64}", str(row.get("raw_window_hash") or "")) is not None
+                and str(row.get("raw_window_hash") or "") == snapshot_hashes.get(str(row.get("ticker") or "").upper(), "")
+                for row in indicator_state_rows
+            )
+        )
+    )
+
     metrics = {
         "run_date": run_date,
         "run_health_history_rows": latest.get("history_rows"),
@@ -336,6 +448,9 @@ def main(*, finalize: bool = False) -> None:
         "directional_model_validation_safe": directional_validation_safe,
         "snapshots_with_learning_samples": learning_ready,
         "snapshots_with_learning_scope": learning_scope_ready,
+        "calibration_artifact_valid": calibration_artifact_valid,
+        "indicator_state_rows": len(indicator_state_rows),
+        "indicator_state_valid": indicator_state_valid,
     }
 
     if len(history_rows) < 1000:
@@ -350,9 +465,15 @@ def main(*, finalize: bool = False) -> None:
     if int(latest_payload.get("synced_history_rows") or 0) != len(history_rows):
         emit_metrics(metrics)
         fail("Behavior-history sync count does not match the expected run.")
+    if not indicator_state_valid:
+        emit_metrics(metrics)
+        fail("Indicator state is incomplete or does not match the snapshot publication.")
     if int(latest_payload.get("synced_outcome_rows") or 0) != len(outcome_rows):
         emit_metrics(metrics)
         fail("Signal-outcome sync count does not match the immutable publication.")
+    if not calibration_artifact_valid:
+        emit_metrics(metrics)
+        fail("Calibration artifact metadata, hash, size, or source publication is invalid.")
     if not publication_id:
         emit_metrics(metrics)
         fail("Expected run is missing its immutable publication id.")

@@ -5,10 +5,25 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      refresh_mode:
+        description: Daily incremental refresh or full weekly rebuild
+        required: true
+        default: daily
+        type: choice
+        options:
+          - daily
+          - weekly_rebuild
+      allow_calibration_bootstrap:
+        description: Explicitly replace missing/incompatible incremental state
+        required: true
+        default: false
+        type: boolean
   schedule:
-    # 23:00 UTC is 09:00 AEST / 10:00 AEDT, safely after the US close.
-    # One weekday trigger avoids duplicate scans and remains correct across DST.
-    - cron: "0 23 * * 1-5"
+    # Monday-Thursday US sessions use the incremental path. Friday's session
+    # performs the bounded 60-session rebuild and calibration parity gate.
+    - cron: "0 23 * * 1-4"
+    - cron: "0 23 * * 5"
 
 permissions:
   contents: read
@@ -41,12 +56,31 @@ jobs:
             else
               echo "run=false" >> "$GITHUB_OUTPUT"
             fi
+            echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
+            echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "refresh_mode=${{ inputs.refresh_mode }}" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.allow_calibration_bootstrap }}" = "true" ]; then
+              echo "bootstrap_arg=--allow-calibration-bootstrap" >> "$GITHUB_OUTPUT"
+            else
+              echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
           # Scheduled jobs can start well after their nominal cron minute.
           # Never gate them on the runner's wall-clock hour.
           echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event.schedule }}" = "0 23 * * 5" ]; then
+            echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
+          else
+            echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout
         if: steps.time_gate.outputs.run == 'true'
@@ -105,7 +139,7 @@ jobs:
         # Two years of source OHLCV leaves enough post-warmup bars for the
         # 60-session learning replay. Supabase still retains only 30 display
         # days plus a capped compact outcome table.
-        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60
+        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60 --refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}" ${{ steps.time_gate.outputs.bootstrap_arg }}
 
       - name: Audit Supabase learning health
         if: steps.time_gate.outputs.run == 'true'
@@ -131,7 +165,8 @@ jobs:
         run: |
           mkdir -p public
           mkdir -p public/data
-          git checkout -- index.html history.html assets manifest.webmanifest
+          # Keep the scanner-generated history page; it is publication-bound.
+          git checkout -- index.html assets manifest.webmanifest
           cp index.html public/index.html
           cp history.html public/history.html
           cp ticker.html public/ticker.html
@@ -193,13 +228,9 @@ jobs:
         with:
           path: public
 
-      - name: Deploy to GitHub Pages
-        if: steps.time_gate.outputs.run == 'true'
-        id: deployment
-        uses: actions/deploy-pages@v5
-
       - name: Finalize Supabase publication
         if: steps.time_gate.outputs.run == 'true'
+        id: finalize_publication
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
@@ -210,8 +241,21 @@ jobs:
           export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
           python scripts/supabase_learning_health.py --finalize
 
-      - name: Reclaim Supabase replay storage
+      # Publish static files only after the database CAS promotion succeeds.
+      # A Pages failure can then leave the previous static page in place, but
+      # can never expose a staged publication that the database rolls back.
+      - name: Deploy to GitHub Pages
         if: steps.time_gate.outputs.run == 'true'
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - name: Retry GitHub Pages deployment
+        if: steps.time_gate.outputs.run == 'true' && steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+
+      - name: Reclaim Supabase replay storage
+        if: always() && steps.time_gate.outputs.run == 'true' && steps.finalize_publication.outcome == 'success'
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: scripts/database_capacity_guard.sh finalize

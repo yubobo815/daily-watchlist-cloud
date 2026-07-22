@@ -88,8 +88,16 @@ def assert_capacity_contract() -> None:
         "readonly OHLCV_BARS_PER_TICKER=400",
         "readonly OHLCV_MAX_ROWS=100000",
         "readonly LEARNING_SESSIONS=60",
+        "readonly CALIBRATION_MAX_ARTIFACTS=8",
+        "readonly CALIBRATION_MAX_BYTES=25165824",
+        "readonly MAX_STAGED_PUBLICATION_BYTES=140000000",
+        "bytes + MAX_STAGED_PUBLICATION_BYTES",
         "record_storage_metrics",
         "evaluation_run_date not in",
+        "delete from public.watchlist_learning_state",
+        "delete from public.watchlist_indicator_state",
+        "delete from public.watchlist_calibration_artifacts",
+        "select source_publication_id from public.watchlist_calibration_artifacts",
     ):
         assert contract in guard, contract
     assert "scripts/database_capacity_guard.sh prepare" in workflow
@@ -100,6 +108,10 @@ def assert_capacity_contract() -> None:
     assert workflow.index("Enforce staged database ceiling") < workflow.index("Deploy to GitHub Pages")
     assert "drop constraint if exists watchlist_snapshots_pkey" not in schema
     assert "drop constraint if exists watchlist_behavior_history_pkey" not in schema
+    assert "create table if not exists public.watchlist_learning_state" in schema
+    assert "create table if not exists public.watchlist_indicator_state" in schema
+    assert "create table if not exists public.watchlist_calibration_artifacts" in schema
+    assert "payload_bytes > 0 and payload_bytes <= 2097152" in schema
 
 
 if __name__ == "__main__":

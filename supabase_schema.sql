@@ -328,6 +328,83 @@ create index if not exists watchlist_signal_outcomes_eval_idx
 create index if not exists watchlist_signal_outcomes_ticker_idx
   on public.watchlist_signal_outcomes (ticker, evaluation_run_date desc);
 
+-- Publication-scoped aggregates are cheap to replace atomically each day.
+-- Canonical outcomes remain the source of truth; this table is the serving
+-- state used to audit that only newly settled samples changed the window.
+create table if not exists public.watchlist_learning_state (
+  publication_id text not null,
+  run_date date not null,
+  learning_key text not null,
+  scope text not null,
+  model_version text not null,
+  horizon_sessions integer not null,
+  sample_count integer not null default 0,
+  working_rate numeric,
+  failed_rate numeric,
+  trap_avoided_rate numeric,
+  distinct_ticker_count integer not null default 0,
+  evaluation_date_count integer not null default 0,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (publication_id, learning_key, scope),
+  check (horizon_sessions > 0),
+  check (sample_count >= 0)
+);
+
+create index if not exists watchlist_learning_state_run_idx
+  on public.watchlist_learning_state (run_date desc, model_version, horizon_sessions);
+
+create table if not exists public.watchlist_indicator_state (
+  publication_id text not null,
+  ticker text not null,
+  data_date date not null,
+  state_version text not null,
+  scanner_version text not null,
+  raw_window_hash text not null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (publication_id, ticker)
+);
+
+create index if not exists watchlist_indicator_state_date_idx
+  on public.watchlist_indicator_state (data_date desc, ticker);
+
+-- Weekly rebuilds write immutable fitted bundles. A daily scan may consume an
+-- artifact only when its source publication is also committed ok/degraded.
+create table if not exists public.watchlist_calibration_artifacts (
+  artifact_id text primary key,
+  source_publication_id text not null,
+  cutoff_date date not null,
+  artifact_version text not null,
+  scanner_version text not null,
+  learning_model_version text not null,
+  directional_model_version text not null,
+  content_hash text not null,
+  state text not null default 'staged',
+  payload_bytes integer not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (state in ('staged', 'validated', 'rejected')),
+  check (payload_bytes > 0 and payload_bytes <= 2097152),
+  unique (content_hash)
+);
+
+create index if not exists watchlist_calibration_artifacts_cutoff_idx
+  on public.watchlist_calibration_artifacts (state, cutoff_date desc, created_at desc);
+
+alter table public.watchlist_learning_state enable row level security;
+alter table public.watchlist_indicator_state enable row level security;
+alter table public.watchlist_calibration_artifacts enable row level security;
+revoke all on public.watchlist_learning_state from anon, authenticated;
+revoke all on public.watchlist_indicator_state from anon, authenticated;
+revoke all on public.watchlist_calibration_artifacts from anon, authenticated;
+grant select, insert, update, delete on public.watchlist_learning_state to service_role;
+grant select, insert, update, delete on public.watchlist_indicator_state to service_role;
+grant select, insert, update, delete on public.watchlist_calibration_artifacts to service_role;
+
 alter table public.watchlist_snapshots add column if not exists signal_stage text;
 alter table public.watchlist_snapshots add column if not exists open numeric;
 alter table public.watchlist_snapshots add column if not exists high numeric;

@@ -2,6 +2,7 @@ import argparse
 import base64
 import http.cookiejar
 import html
+import hashlib
 import itertools
 import json
 import math
@@ -40,7 +41,10 @@ RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
 SCANNER_VERSION = "2026.07.16-risk-adjusted-learning"
-LEARNING_MODEL_VERSION = "five-session-r-risk-v4"
+LEARNING_MODEL_VERSION = "five-session-r-risk-v5"
+INCREMENTAL_STATE_VERSION = "incremental-state-v1"
+INDICATOR_STATE_VERSION = "indicator-state-v1"
+CALIBRATION_ARTIFACT_VERSION = "calibration-artifact-v1"
 PERSONALITY_LOOKBACK_BARS = 100
 EMA_SLOPE_LOOKBACK_BARS = 5
 SHORT_RS_LOOKBACK_BARS = 10
@@ -99,7 +103,7 @@ DIRECTIONAL_MODEL_MIN_PERSONALITY_SAMPLES = int(os.getenv("DIRECTIONAL_MODEL_MIN
 DIRECTIONAL_MODEL_MIN_PERSONALITY_DATES = int(os.getenv("DIRECTIONAL_MODEL_MIN_PERSONALITY_DATES", "30"))
 DIRECTIONAL_MODEL_MIN_BRIER_SKILL = float(os.getenv("DIRECTIONAL_MODEL_MIN_BRIER_SKILL", "0.03"))
 DIRECTIONAL_MODEL_RIDGE = float(os.getenv("DIRECTIONAL_MODEL_RIDGE", "12.0"))
-DIRECTIONAL_RAW_LOOKBACK_DAYS = int(os.getenv("DIRECTIONAL_RAW_LOOKBACK_DAYS", "180"))
+DIRECTIONAL_RAW_LOOKBACK_DAYS = int(os.getenv("DIRECTIONAL_RAW_LOOKBACK_DAYS", "60"))
 DIRECTIONAL_REFIT_INTERVAL_DAYS = int(os.getenv("DIRECTIONAL_REFIT_INTERVAL_DAYS", "5"))
 POST_EXIT_COOLDOWN_BARS = int(os.getenv("POST_EXIT_COOLDOWN_BARS", "2"))
 POST_EXIT_RECLAIM_MIN_PCT = float(os.getenv("POST_EXIT_RECLAIM_MIN_PCT", "6"))
@@ -347,6 +351,23 @@ def local_run_date() -> str:
     return datetime.now(RUN_TIMEZONE).strftime("%Y-%m-%d")
 
 
+def canonical_date(value: object) -> str:
+    parsed = pd.to_datetime(value, errors="coerce")
+    return "" if pd.isna(parsed) else str(parsed.date())
+
+
+def resolve_refresh_mode(requested: str, now: Optional[datetime] = None) -> str:
+    requested_mode = str(requested or "auto").strip().lower()
+    if requested_mode in {"daily", "weekly_rebuild"}:
+        return requested_mode
+    if requested_mode != "auto":
+        raise ValueError(f"Unsupported refresh mode: {requested}")
+    local_now = now.astimezone(RUN_TIMEZONE) if now else datetime.now(RUN_TIMEZONE)
+    # Saturday Melbourne follows the Friday US session and is the natural
+    # weekly calibration boundary.
+    return "weekly_rebuild" if local_now.weekday() == 5 else "daily"
+
+
 def cache_path_for(ticker: str, years: int) -> Path:
     safe_ticker = ticker.replace("^", "_").replace("/", "_").replace(".", "_")
     return Path(f"watchlist_{safe_ticker}_{years}y.csv")
@@ -373,6 +394,15 @@ def data_provider_context(df: pd.DataFrame) -> dict:
         "data_provider_error": df.attrs.get("data_provider_error", ""),
         "data_provider_latency_ms": numeric_or_none(df.attrs.get("data_provider_latency_ms")),
     }
+
+
+def ohlcv_window_hash(df: pd.DataFrame) -> str:
+    columns = [column for column in ("date", "open", "high", "low", "close", "volume") if column in df.columns]
+    canonical = df[columns].tail(OHLCV_RETENTION_BARS).copy()
+    if "date" in canonical:
+        canonical["date"] = pd.to_datetime(canonical["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    records = clean_json_value(canonical.to_dict(orient="records"))
+    return hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def apply_data_provider_context(row: dict, df: pd.DataFrame) -> dict:
@@ -983,16 +1013,29 @@ def persist_ohlcv_to_supabase(ticker: str, frame: pd.DataFrame) -> None:
     supabase_upsert_batches("watchlist_ohlcv", records, ["ticker", "data_date"])
 
 
-def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool) -> pd.DataFrame:
+def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool, force_full: bool = False) -> pd.DataFrame:
     """Use durable OHLCV locally, fetching a full seed only when it is absent."""
     stored = load_ohlcv_from_supabase(ticker) if refresh else pd.DataFrame()
-    needs_seed = len(stored) < OHLCV_MIN_READY_BARS
+    needs_seed = len(stored) < OHLCV_MIN_READY_BARS or force_full
     if not refresh and not stored.empty:
         return stored.tail(OHLCV_RETENTION_BARS).reset_index(drop=True)
 
     # Once seeded, request a short window and only write dates that are new or
     # recent enough to correct provider revisions. This keeps daily syncs small.
-    live = fetch_chart(ticker, years=years if needs_seed else OHLCV_INCREMENTAL_YEARS, refresh=refresh)
+    try:
+        live = fetch_chart(ticker, years=years if needs_seed else OHLCV_INCREMENTAL_YEARS, refresh=refresh)
+    except Exception as exc:
+        if stored.empty or force_full:
+            raise
+        return attach_data_provider(
+            stored.tail(OHLCV_RETENTION_BARS).reset_index(drop=True),
+            "cache",
+            "STALE_FALLBACK",
+            str(exc),
+        )
+    provider_context = data_provider_context(live)
+    live = live.copy()
+    live["data_provider"] = provider_context["data_provider"]
     combined = pd.concat([stored, live], ignore_index=True, sort=False)
     combined["date"] = pd.to_datetime(combined["date"], errors="coerce")
     combined = combined.dropna(subset=["date", "open", "high", "low", "close", "volume"])
@@ -1003,7 +1046,13 @@ def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool) -> pd.DataFram
         latest_stored = pd.Timestamp(stored["date"].max())
         revision_start = latest_stored - pd.Timedelta(days=10)
         persist_ohlcv_to_supabase(ticker, live.loc[pd.to_datetime(live["date"]) >= revision_start])
-    return combined
+    return attach_data_provider(
+        combined,
+        provider_context["data_provider"],
+        provider_context["data_provider_status"],
+        provider_context["data_provider_error"],
+        provider_context["data_provider_latency_ms"],
+    )
 
 
 def supabase_upsert_batches(table: str, records: list[dict], conflict_columns: list[str]) -> None:
@@ -1068,7 +1117,15 @@ def compact_payload(row: dict, typed_record: dict, *, aliases: tuple[str, ...] =
     return payload
 
 
-def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.DataFrame, run_date: str, run_metadata: Optional[dict] = None) -> None:
+def sync_supabase(
+    report: pd.DataFrame,
+    history: pd.DataFrame,
+    outcomes: pd.DataFrame,
+    run_date: str,
+    run_metadata: Optional[dict] = None,
+    calibration_artifact: Optional[dict] = None,
+    learning_stats: Optional[dict[str, dict]] = None,
+) -> None:
     url, key = supabase_credentials()
     if not url or not key:
         print("Supabase sync skipped: SUPABASE_URL and SUPABASE_SECRET_KEY are not set.")
@@ -1078,6 +1135,7 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
     print(f"Supabase sync target: {urllib.parse.urlparse(url).netloc} ({describe_supabase_key(key)})")
 
     report_records = []
+    indicator_records = []
     for record in report.to_dict(orient="records"):
         row = clean_record(record)
         report_record = {
@@ -1118,6 +1176,21 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
             max_bytes=SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES,
         )
         report_records.append(report_record)
+        indicator_fields = (
+            "rsi", "atr_pct", "trend_efficiency", "buyer_score", "seller_score",
+            "volume_state", "personality_type", "personality_atr_pct", "ema_alignment_clean",
+            "slow_slope_up", "signed_volume_pressure_5", "demand_days_5", "supply_days_5",
+            "accum_vol", "breakout_vol", "dist_vol", "breakdown_vol",
+        )
+        indicator_records.append({
+            "publication_id": row.get("publication_id"),
+            "ticker": row.get("ticker"),
+            "data_date": row.get("date"),
+            "state_version": row.get("indicator_state_version") or INDICATOR_STATE_VERSION,
+            "scanner_version": SCANNER_VERSION,
+            "raw_window_hash": row.get("raw_window_hash"),
+            "payload": clean_record({key: row.get(key) for key in indicator_fields if row.get(key) not in (None, "")}),
+        })
 
     history_records = []
     if not history.empty:
@@ -1215,13 +1288,25 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
             print(f"Supabase run-health sync skipped: {exc}")
 
     snapshot_synced = 0
+    indicator_state_synced = 0
     history_synced = 0
     outcome_synced = 0
+    artifact_synced = calibration_artifact is None
+    learning_state_synced = learning_stats is None
     try:
         supabase_upsert_batches("watchlist_snapshots", report_records, ["publication_id", "ticker"])
         snapshot_synced = len(report_records)
     except Exception as exc:
         print(f"Supabase snapshot sync skipped: {exc}")
+    try:
+        supabase_upsert_batches(
+            "watchlist_indicator_state",
+            indicator_records,
+            ["publication_id", "ticker"],
+        )
+        indicator_state_synced = len(indicator_records)
+    except Exception as exc:
+        print(f"Supabase indicator-state sync skipped: {exc}")
     try:
         supabase_upsert_batches("watchlist_behavior_history", history_records, ["publication_id", "ticker", "history_date"])
         history_synced = len(history_records)
@@ -1237,10 +1322,61 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
         outcome_synced = len(outcome_records)
     except Exception as exc:
         print(f"Supabase signal-outcome sync skipped: {exc}")
+    if calibration_artifact:
+        try:
+            artifact_payload = clean_record(calibration_artifact)
+            artifact_record = {
+                "artifact_id": artifact_payload.get("artifact_id"),
+                "source_publication_id": artifact_payload.get("source_publication_id"),
+                "cutoff_date": artifact_payload.get("cutoff_date"),
+                "artifact_version": artifact_payload.get("artifact_version"),
+                "scanner_version": artifact_payload.get("scanner_version"),
+                "learning_model_version": artifact_payload.get("learning_model_version"),
+                "directional_model_version": artifact_payload.get("directional_model_version"),
+                "content_hash": artifact_payload.get("content_hash"),
+                "state": "validated",
+                "payload_bytes": calibration_payload_bytes(artifact_payload),
+                "payload": artifact_payload,
+            }
+            supabase_upsert("watchlist_calibration_artifacts", [artifact_record], ["artifact_id"])
+            artifact_synced = True
+        except Exception as exc:
+            print(f"Supabase calibration-artifact sync skipped: {exc}")
+    if learning_stats is not None:
+        try:
+            learning_records = []
+            for learning_key, stats in learning_stats.items():
+                stats_payload = clean_record(stats)
+                learning_records.append({
+                    "publication_id": (run_metadata or {}).get("publication_id"),
+                    "run_date": run_date,
+                    "learning_key": str(learning_key),
+                    "scope": str(stats_payload.get("scope") or "unknown"),
+                    "model_version": str(stats_payload.get("model_version") or LEARNING_MODEL_VERSION),
+                    "horizon_sessions": LEARNING_HORIZON_SESSIONS,
+                    "sample_count": int(stats_payload.get("sample_count") or 0),
+                    "working_rate": numeric_or_none(stats_payload.get("working_rate")),
+                    "failed_rate": numeric_or_none(stats_payload.get("failed_rate")),
+                    "trap_avoided_rate": numeric_or_none(stats_payload.get("trap_avoided_rate")),
+                    "distinct_ticker_count": int(stats_payload.get("distinct_ticker_count") or 0),
+                    "evaluation_date_count": int(stats_payload.get("evaluation_date_count") or 0),
+                    "payload": stats_payload,
+                })
+            supabase_upsert_batches(
+                "watchlist_learning_state",
+                learning_records,
+                ["publication_id", "learning_key", "scope"],
+            )
+            learning_state_synced = True
+        except Exception as exc:
+            print(f"Supabase learning-state sync skipped: {exc}")
     sync_complete = (
         snapshot_synced == len(report_records)
+        and indicator_state_synced == len(indicator_records)
         and history_synced == len(history_records)
         and outcome_synced == len(outcome_records)
+        and artifact_synced
+        and learning_state_synced
     )
     if run_metadata:
         try:
@@ -1253,8 +1389,11 @@ def sync_supabase(report: pd.DataFrame, history: pd.DataFrame, outcomes: pd.Data
                 "scanner_status": scanner_status,
                 "sync_state": "complete" if sync_complete else "failed",
                 "synced_snapshot_rows": snapshot_synced,
+                "synced_indicator_state_rows": indicator_state_synced,
                 "synced_history_rows": history_synced,
                 "synced_outcome_rows": outcome_synced,
+                "calibration_artifact_id": (calibration_artifact or {}).get("artifact_id") or final_payload.get("calibration_artifact_id", ""),
+                "synced_learning_state_rows": len(learning_stats or {}),
             }
             supabase_upsert_refresh_run([final_metadata])
         except Exception as exc:
@@ -2151,7 +2290,7 @@ def fetch_previous_snapshot_rows(run_date: str) -> list[dict]:
     try:
         run_rows = supabase_select(
             "watchlist_refresh_runs?select=run_date,publication_id,payload&status=in.(ok,degraded)&"
-            f"run_date=lt.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
+            f"run_date=lte.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
         )
         if not run_rows:
             return []
@@ -2168,6 +2307,129 @@ def fetch_previous_snapshot_rows(run_date: str) -> list[dict]:
     except RuntimeError as exc:
         print(f"Previous snapshot fetch skipped: {exc}")
         return []
+
+
+def fetch_previous_behavior_history(run_date: str) -> list[dict]:
+    """Load the latest committed history as the canonical daily state."""
+    try:
+        run_rows = supabase_select(
+            "watchlist_refresh_runs?select=run_date,publication_id,payload&status=in.(ok,degraded)&"
+            f"run_date=lte.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
+        )
+        if not run_rows:
+            return []
+        publication_id = run_rows[0].get("publication_id") or (run_rows[0].get("payload") or {}).get("publication_id")
+        if not publication_id:
+            return []
+        rows = supabase_select(
+            "watchlist_behavior_history?select=*&"
+            f"publication_id=eq.{urllib.parse.quote(str(publication_id))}&"
+            "order=ticker.asc,history_date.asc&limit=10000"
+        )
+        return [merge_payload_row(row) for row in rows]
+    except RuntimeError as exc:
+        print(f"Previous behavior-history fetch skipped: {exc}")
+        return []
+
+
+def fetch_previous_run_metadata(run_date: str) -> dict:
+    try:
+        rows = supabase_select(
+            "watchlist_refresh_runs?select=publication_id,run_date,status,payload&status=in.(ok,degraded)&"
+            f"run_date=lte.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
+        )
+        if not rows:
+            return {}
+        payload = rows[0].get("payload") if isinstance(rows[0].get("payload"), dict) else {}
+        return {**payload, "publication_id": rows[0].get("publication_id"), "run_date": rows[0].get("run_date")}
+    except RuntimeError as exc:
+        print(f"Previous run metadata fetch skipped: {exc}")
+    return {}
+
+
+def compatible_incremental_metadata(metadata: dict) -> dict:
+    if (
+        metadata.get("incremental_state_ready") is True
+        and metadata.get("incremental_state_version") == INCREMENTAL_STATE_VERSION
+        and metadata.get("learning_model_version") == LEARNING_MODEL_VERSION
+    ):
+        return metadata
+    return {}
+
+
+def behavior_history_by_ticker(rows: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        ticker = str(row.get("ticker") or "").upper()
+        date = str(row.get("date") or row.get("history_date") or "")
+        if not ticker or not date:
+            continue
+        merged = dict(row)
+        merged["date"] = date
+        grouped.setdefault(ticker, []).append(merged)
+    for ticker, ticker_rows in grouped.items():
+        by_date = {str(row.get("date")): row for row in ticker_rows}
+        grouped[ticker] = [by_date[date] for date in sorted(by_date)]
+    return grouped
+
+
+def load_local_behavior_history() -> list[dict]:
+    path = Path("watchlist_behavior_history_latest.csv")
+    if not path.exists():
+        return []
+    try:
+        return pd.read_csv(path).to_dict(orient="records")
+    except Exception as exc:
+        print(f"Local behavior-history load skipped: {exc}")
+        return []
+
+
+def load_local_run_metadata() -> dict:
+    path = Path("daily_watchlist_run_metadata_latest.json")
+    if not path.exists():
+        return {}
+    try:
+        metadata = json.loads(path.read_text())
+        payload = metadata.get("payload") if isinstance(metadata.get("payload"), dict) else {}
+        return {**payload, "publication_id": metadata.get("publication_id"), "run_date": metadata.get("run_date")}
+    except Exception as exc:
+        print(f"Local run-metadata load skipped: {exc}")
+        return {}
+
+
+def append_incremental_behavior_row(previous_rows: list[dict], current_row: dict, history_days: int) -> list[dict]:
+    """Append one live session and recompute only transition-dependent overlays."""
+    current_date = str(current_row.get("date") or "")
+    retained = [dict(row) for row in previous_rows if str(row.get("date") or "") < current_date]
+    combined = [*retained[-max(0, history_days - 1):], dict(current_row)]
+    return [apply_anti_signal_penalty(row) for row in enrich_signal_transitions(combined)]
+
+
+def freeze_final_signal_history(history_rows: list[dict], final_rows: list[dict], history_days: int) -> list[dict]:
+    """Persist the exact post-learning/post-calibration signal shown to users."""
+    grouped = behavior_history_by_ticker(history_rows)
+    for final in final_rows:
+        ticker = str(final.get("ticker") or "").upper()
+        signal_date = str(final.get("date") or "")
+        if not ticker or not signal_date:
+            continue
+        prior = [row for row in grouped.get(ticker, []) if str(row.get("date") or "") < signal_date]
+        grouped[ticker] = [*prior[-max(0, history_days - 1):], dict(final)]
+    return [row for ticker in sorted(grouped) for row in grouped[ticker][-history_days:]]
+
+
+def preserve_failed_ticker_history(
+    current_history: list[dict],
+    previous_by_ticker: dict[str, list[dict]],
+    expected_tickers: set[str],
+    history_days: int,
+) -> list[dict]:
+    """Keep unsettled signal lifecycles when one ticker fails a daily scan."""
+    present = {str(row.get("ticker") or "").upper() for row in current_history}
+    preserved = list(current_history)
+    for ticker in sorted(expected_tickers - present):
+        preserved.extend(dict(row) for row in previous_by_ticker.get(ticker, [])[-history_days:])
+    return preserved
 
 
 def load_previous_local_report(run_date: str) -> list[dict]:
@@ -2443,9 +2705,9 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
     horizon = max(1, int(horizon_sessions))
     prior_action = str(prior.get("action") or "")
     final_row = future_rows[min(len(future_rows), horizon) - 1] if future_rows else {}
-    evaluation_date = final_row.get("date") or final_row.get("history_date") or ""
+    evaluation_date = canonical_date(final_row.get("date") or final_row.get("history_date"))
     base = {
-        "signal_run_date": prior.get("run_date") or prior.get("date") or prior.get("data_date"),
+        "signal_run_date": canonical_date(prior.get("run_date") or prior.get("date") or prior.get("data_date")),
         "evaluation_run_date": evaluation_date,
         "ticker": prior.get("ticker"),
         "prior_action": prior_action,
@@ -2453,6 +2715,17 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_buy_tier": prior.get("buy_tier"),
         "prior_operator_state": prior.get("operator_state"),
         "prior_anti_signal_level": prior.get("anti_signal_level"),
+        "prior_personality_type": prior.get("personality_type"),
+        "prior_market_permission": prior.get("market_permission"),
+        "prior_ticker_permission": prior.get("ticker_permission"),
+        "prior_risk_permission": prior.get("risk_permission"),
+        "prior_walk_forward_permission": prior.get("walk_forward_permission"),
+        "prior_personality_setup_allowed": prior.get("personality_setup_allowed"),
+        "prior_entry_zone_low": numeric_or_none(prior.get("entry_zone_low")),
+        "prior_entry_zone_high": numeric_or_none(prior.get("entry_zone_high")),
+        "prior_entry_est": numeric_or_none(prior.get("entry_est")),
+        "prior_stop_est": numeric_or_none(prior.get("stop_est")),
+        "prior_target_est": numeric_or_none(prior.get("target_est")),
         "prior_prediction_upside_probability": numeric_or_none(prior.get("prediction_upside_probability")),
         "prior_prediction_downside_probability": numeric_or_none(prior.get("prediction_downside_probability")),
         "prior_prediction_no_edge_probability": numeric_or_none(prior.get("prediction_no_edge_probability")),
@@ -2551,7 +2824,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
             close_return = (float(close) / entry - 1) * 100
             base.update({
                 "path_status": "SETTLED", "target_hit": hit_target, "stop_hit": hit_stop,
-                "evaluation_run_date": bar.get("date") or bar.get("history_date") or evaluation_date,
+                "evaluation_run_date": canonical_date(bar.get("date") or bar.get("history_date")) or evaluation_date,
                 "mfe_pct": round(mfe, 2), "mae_pct": round(mae, 2), "close_return_pct": round(close_return, 2),
                 "current_close": round(float(close), 2), "outcome_learnable": gates_allow, "forecast_learnable": True,
                 "outcome_label": "WORKING" if hit_target else "FAILED", "outcome_score": 1.0 if hit_target else -1.0,
@@ -2617,10 +2890,196 @@ def combine_signal_outcomes(*frames: pd.DataFrame) -> pd.DataFrame:
     if not usable:
         return pd.DataFrame()
     combined = pd.concat(usable, ignore_index=True)
-    required = {"signal_run_date", "evaluation_run_date", "ticker"}
-    if required.issubset(combined.columns):
-        combined = combined.drop_duplicates(subset=list(required), keep="last")
+    if {"signal_run_date", "ticker"}.issubset(combined.columns):
+        combined["_canonical_signal_id"] = combined.apply(
+            lambda row: "|".join(str(value) for value in signal_outcome_identity(row.to_dict())),
+            axis=1,
+        )
+        combined = combined.drop_duplicates(subset=["_canonical_signal_id"], keep="last")
+        combined = combined.drop(columns=["_canonical_signal_id"])
     return combined
+
+
+def signal_outcome_identity(row: dict) -> tuple[str, str, str, int]:
+    return (
+        str(row.get("ticker") or "").upper(),
+        canonical_date(row.get("signal_run_date")),
+        str(row.get("entry_model_version") or LEARNING_MODEL_VERSION),
+        int(numeric_or_none(row.get("label_horizon_sessions")) or LEARNING_HORIZON_SESSIONS),
+    )
+
+
+def build_incremental_signal_outcomes(
+    behavior_rows: list[dict],
+    raw_frames: dict[str, pd.DataFrame],
+    existing_outcomes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Settle only canonical signals whose five-session path is now available."""
+    existing_ids = {
+        signal_outcome_identity(row)
+        for row in (existing_outcomes.to_dict(orient="records") if not existing_outcomes.empty else [])
+    }
+    candidates = behavior_history_by_ticker(behavior_rows)
+    settled: list[dict] = []
+    executable_actions = {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    for ticker, ticker_rows in candidates.items():
+        raw = raw_frames.get(ticker)
+        if raw is None or raw.empty:
+            continue
+        bars = raw.copy()
+        bars["date"] = pd.to_datetime(bars["date"], errors="coerce")
+        bars = bars.dropna(subset=["date"]).sort_values("date")
+        for prior in ticker_rows:
+            if str(prior.get("action") or "") not in executable_actions:
+                continue
+            identity = signal_outcome_identity({
+                **prior,
+                "signal_run_date": prior.get("date"),
+                "entry_model_version": LEARNING_MODEL_VERSION,
+                "label_horizon_sessions": LEARNING_HORIZON_SESSIONS,
+            })
+            if identity in existing_ids:
+                continue
+            signal_date = pd.to_datetime(prior.get("date"), errors="coerce")
+            if pd.isna(signal_date):
+                continue
+            future = bars.loc[bars["date"] > signal_date].head(LEARNING_HORIZON_SESSIONS)
+            if len(future) < LEARNING_HORIZON_SESSIONS:
+                continue
+            outcome = score_signal_horizon(prior, future.to_dict(orient="records"))
+            settled.append(outcome)
+            existing_ids.add(identity)
+    return pd.DataFrame(settled)
+
+
+def rebuild_canonical_signal_outcomes(
+    canonical_outcomes: pd.DataFrame,
+    raw_frames: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Re-score frozen production plans against the canonical OHLCV path."""
+    rebuilt: list[dict] = []
+    if canonical_outcomes is None or canonical_outcomes.empty:
+        return pd.DataFrame()
+    for raw_outcome in canonical_outcomes.to_dict(orient="records"):
+        outcome = merge_payload_row(raw_outcome)
+        if str(outcome.get("entry_model_version") or "") != LEARNING_MODEL_VERSION:
+            continue
+        ticker = str(outcome.get("ticker") or "").upper()
+        bars = raw_frames.get(ticker)
+        signal_date = pd.to_datetime(outcome.get("signal_run_date"), errors="coerce")
+        if bars is None or bars.empty or pd.isna(signal_date):
+            continue
+        future = bars.copy()
+        future["date"] = pd.to_datetime(future["date"], errors="coerce")
+        future = future.loc[future["date"] > signal_date].dropna(subset=["date"]).sort_values("date").head(LEARNING_HORIZON_SESSIONS)
+        if len(future) < LEARNING_HORIZON_SESSIONS:
+            continue
+        prior = {
+            "ticker": ticker,
+            "date": str(outcome.get("signal_run_date") or ""),
+            "action": outcome.get("prior_action"),
+            "setup": outcome.get("prior_setup"),
+            "buy_tier": outcome.get("prior_buy_tier"),
+            "operator_state": outcome.get("prior_operator_state"),
+            "anti_signal_level": outcome.get("prior_anti_signal_level"),
+            "personality_type": outcome.get("prior_personality_type"),
+            "market_permission": outcome.get("prior_market_permission"),
+            "ticker_permission": outcome.get("prior_ticker_permission"),
+            "risk_permission": outcome.get("prior_risk_permission"),
+            "walk_forward_permission": outcome.get("prior_walk_forward_permission"),
+            "personality_setup_allowed": outcome.get("prior_personality_setup_allowed"),
+            "entry_zone_low": outcome.get("prior_entry_zone_low"),
+            "entry_zone_high": outcome.get("prior_entry_zone_high"),
+            "entry_est": outcome.get("prior_entry_est"),
+            "stop_est": outcome.get("prior_stop_est"),
+            "target_est": outcome.get("prior_target_est"),
+            "close": outcome.get("prior_close"),
+            "prediction_upside_probability": outcome.get("prior_prediction_upside_probability"),
+            "prediction_downside_probability": outcome.get("prior_prediction_downside_probability"),
+            "prediction_no_edge_probability": outcome.get("prior_prediction_no_edge_probability"),
+            "prediction_confidence": outcome.get("prior_prediction_confidence"),
+            "prediction_state": outcome.get("prior_prediction_state"),
+            "learning_key_used": outcome.get("prior_prediction_key"),
+            "learning_scope": outcome.get("prior_prediction_scope"),
+        }
+        rebuilt.append(score_signal_horizon(prior, future.to_dict(orient="records")))
+    return pd.DataFrame(rebuilt)
+
+
+def replay_start_dates(raw_frames: dict[str, pd.DataFrame], sessions: int) -> dict[str, str]:
+    starts: dict[str, str] = {}
+    for ticker, frame in raw_frames.items():
+        if frame is None or frame.empty or "date" not in frame:
+            continue
+        dates = pd.to_datetime(frame["date"], errors="coerce").dropna().drop_duplicates().sort_values()
+        if dates.empty:
+            continue
+        starts[display_ticker(ticker)] = str(dates.tail(max(1, sessions)).iloc[0].date())
+    return starts
+
+
+def calibration_parity_report(
+    incremental: pd.DataFrame,
+    rebuilt: pd.DataFrame,
+    replay_starts: dict[str, str],
+) -> dict:
+    """Compare settled canonical outcomes without tolerating identity drift."""
+    def settled_map(frame: pd.DataFrame) -> dict[tuple[str, str, str, int], tuple[str, str]]:
+        if frame is None or frame.empty:
+            return {}
+        result = {}
+        for raw in frame.to_dict(orient="records"):
+            row = merge_payload_row(raw)
+            if str(row.get("path_status") or "").upper() != "SETTLED":
+                continue
+            result[signal_outcome_identity(row)] = (
+                str(row.get("outcome_label") or "").upper(),
+                canonical_date(row.get("evaluation_run_date")),
+            )
+        return result
+
+    incremental_map = settled_map(incremental)
+    rebuilt_map = settled_map(rebuilt)
+    shared = set(incremental_map) & set(rebuilt_map)
+    mismatched = sorted(key for key in shared if incremental_map[key] != rebuilt_map[key])
+    incremental_cutoff = max((value[1] for value in incremental_map.values()), default="")
+    missing_from_incremental = sorted(
+        key
+        for key in set(rebuilt_map) - set(incremental_map)
+        if not incremental_cutoff or rebuilt_map[key][1] <= incremental_cutoff
+    )
+    newly_available = sorted(
+        key
+        for key in set(rebuilt_map) - set(incremental_map)
+        if incremental_cutoff and rebuilt_map[key][1] > incremental_cutoff
+    )
+    rebuilt_cutoff = max((value[1] for value in rebuilt_map.values()), default="")
+    missing_from_rebuild = sorted(
+        key
+        for key in set(incremental_map) - set(rebuilt_map)
+        if (not replay_starts.get(key[0]) or key[1] >= replay_starts[key[0]])
+        and (not rebuilt_cutoff or incremental_map[key][1] <= rebuilt_cutoff)
+    )
+    older_outside_rebuild = sorted(
+        key
+        for key in set(incremental_map) - set(rebuilt_map)
+        if replay_starts.get(key[0]) and key[1] < replay_starts[key[0]]
+    )
+    # Incremental state may retain older identities outside the bounded replay,
+    # but every identity inside the rebuilt signal/evaluation window must match.
+    passed = bool(shared) and not mismatched and not missing_from_incremental and not missing_from_rebuild
+    return {
+        "passed": passed,
+        "incremental_settled": len(incremental_map),
+        "rebuilt_settled": len(rebuilt_map),
+        "shared_settled": len(shared),
+        "mismatched": len(mismatched),
+        "missing_from_incremental": len(missing_from_incremental),
+        "missing_from_rebuild": len(missing_from_rebuild),
+        "older_outside_rebuild": len(older_outside_rebuild),
+        "newly_available": len(newly_available),
+        "sample_mismatches": [list(item) for item in mismatched[:10]],
+    }
 
 
 def attach_latest_outcomes(rows: list[dict], outcomes: pd.DataFrame) -> None:
@@ -2716,7 +3175,7 @@ def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
     frames = []
     for path in sorted(Path(".").glob("daily_signal_outcomes_*.csv")):
         stem_date = path.stem.replace("daily_signal_outcomes_", "")
-        if stem_date == "latest" or stem_date >= run_date or len(stem_date) != 10:
+        if stem_date == "latest" or stem_date > run_date or len(stem_date) != 10:
             continue
         try:
             frames.append(pd.read_csv(path))
@@ -2733,7 +3192,7 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
         cutoff = (run_timestamp - pd.Timedelta(days=max(90, LEARNING_LOOKBACK_DAYS * 3))).date().isoformat()
         validated_runs = supabase_select(
             "watchlist_refresh_runs?select=payload&status=in.(ok,degraded)&"
-            f"run_date=lt.{urllib.parse.quote(run_date)}&run_date=gte.{urllib.parse.quote(cutoff)}&limit=200"
+            f"run_date=lte.{urllib.parse.quote(run_date)}&run_date=gte.{urllib.parse.quote(cutoff)}&limit=200"
         )
         publication_ids = sorted({
             str((record.get("payload") or {}).get("publication_id") or "")
@@ -3168,18 +3627,84 @@ def directional_validation_metrics(predictions: pd.DataFrame) -> dict:
     }
 
 
-def apply_directional_ohlcv_model(rows: list[dict], history_rows: list[dict]) -> dict:
+def build_directional_calibration_artifact(
+    rows: list[dict],
+    history_rows: list[dict],
+    source_publication_id: str,
+) -> dict:
     samples = build_directional_samples(history_rows)
     walk_forward = directional_walk_forward_predictions(samples)
     metrics = directional_validation_metrics(walk_forward)
     latest_signal_date = max((str(row.get("date") or "") for row in rows), default="")
     settled = samples[pd.to_datetime(samples.get("evaluation_run_date"), errors="coerce") < pd.Timestamp(latest_signal_date)] if not samples.empty and latest_signal_date else pd.DataFrame()
     model = fit_directional_ridge(settled)
+    model_payload = None
+    if model is not None:
+        model_payload = {
+            "center": model["center"].tolist(),
+            "scale": model["scale"].tolist(),
+            "coefficients": model["coefficients"].tolist(),
+            "priors": model["priors"].tolist(),
+            "sample_count": int(model["sample_count"]),
+        }
+    payload = {
+        "source_publication_id": source_publication_id,
+        "artifact_version": CALIBRATION_ARTIFACT_VERSION,
+        "scanner_version": SCANNER_VERSION,
+        "learning_model_version": LEARNING_MODEL_VERSION,
+        "directional_model_version": DIRECTIONAL_MODEL_VERSION,
+        "feature_count": len(DIRECTIONAL_NUMERIC_FEATURES) + len(DIRECTIONAL_PERSONALITIES),
+        "label_count": len(DIRECTIONAL_LABELS),
+        "cutoff_date": latest_signal_date,
+        "metrics": metrics,
+        "model": model_payload,
+        "train_sample_count": int(len(settled)),
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    payload["content_hash"] = digest
+    payload["artifact_id"] = f"cal-v1-{latest_signal_date.replace('-', '')}-{digest[:16]}"
+    return payload
+
+
+def calibration_payload_bytes(payload: dict) -> int:
+    return len(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def directional_model_from_artifact(artifact: dict) -> Optional[dict]:
+    model = artifact.get("model") if isinstance(artifact, dict) else None
+    if not isinstance(model, dict):
+        return None
+    try:
+        restored = {
+            "center": np.asarray(model["center"], dtype=float),
+            "scale": np.asarray(model["scale"], dtype=float),
+            "coefficients": np.asarray(model["coefficients"], dtype=float),
+            "priors": np.asarray(model["priors"], dtype=float),
+            "sample_count": int(model.get("sample_count") or 0),
+        }
+        feature_count = len(DIRECTIONAL_NUMERIC_FEATURES) + len(DIRECTIONAL_PERSONALITIES)
+        if (
+            restored["center"].shape != (feature_count,)
+            or restored["scale"].shape != (feature_count,)
+            or restored["coefficients"].shape != (feature_count + 1, len(DIRECTIONAL_LABELS))
+            or restored["priors"].shape != (len(DIRECTIONAL_LABELS),)
+            or not all(np.isfinite(restored[key]).all() for key in ("center", "scale", "coefficients", "priors"))
+        ):
+            return None
+        return restored
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def apply_directional_calibration_artifact(rows: list[dict], artifact: dict) -> dict:
+    metrics = artifact.get("metrics") if isinstance(artifact.get("metrics"), dict) else {}
+    model = directional_model_from_artifact(artifact)
+    settled_count = int(artifact.get("train_sample_count") or 0)
     validated_personalities = set(metrics.get("validated_personalities") or [])
     globally_validated = bool(metrics.get("passed")) and model is not None
     for row in rows:
         row["directional_model_version"] = DIRECTIONAL_MODEL_VERSION
-        row["directional_model_train_samples"] = int(len(settled))
+        row["directional_model_train_samples"] = settled_count
         row["directional_model_oos_samples"] = int(metrics.get("sample_count") or 0)
         row["directional_model_oos_dates"] = int(metrics.get("date_count") or 0)
         row["directional_model_brier_score"] = round(float(metrics["brier_score"]), 4) if metrics.get("brier_score") is not None else ""
@@ -3212,6 +3737,81 @@ def apply_directional_ohlcv_model(rows: list[dict], history_rows: list[dict]) ->
             row["learning_promotion_state"] = "PROMOTION_BLOCKED"
             row["reason_codes"] = list(dict.fromkeys([*(row.get("reason_codes") or []), "directional_model_not_confirmed"]))
             row["next_day_plan"] = "The validated OHLCV model does not confirm upside dominance; keep this as a setup, not an entry."
+    return metrics
+
+
+def apply_directional_ohlcv_model(rows: list[dict], history_rows: list[dict], source_publication_id: str) -> dict:
+    artifact = build_directional_calibration_artifact(rows, history_rows, source_publication_id)
+    metrics = apply_directional_calibration_artifact(rows, artifact)
+    return {**metrics, "_artifact": artifact}
+
+
+def fetch_active_calibration_artifact() -> Optional[dict]:
+    try:
+        candidates = supabase_select(
+            "watchlist_calibration_artifacts?select=artifact_id,source_publication_id,cutoff_date,artifact_version,scanner_version,learning_model_version,directional_model_version,content_hash,payload_bytes,payload,created_at&"
+            "state=eq.validated&order=cutoff_date.desc,created_at.desc&limit=5"
+        )
+        for candidate in candidates:
+            publication_id = str(candidate.get("source_publication_id") or "")
+            if not publication_id:
+                continue
+            runs = supabase_select(
+                "watchlist_refresh_runs?select=publication_id,status,payload&"
+                f"publication_id=eq.{urllib.parse.quote(publication_id)}&status=in.(ok,degraded)&limit=1"
+            )
+            if not runs:
+                continue
+            payload = candidate.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            typed_contract = {
+                "artifact_id": candidate.get("artifact_id"),
+                "source_publication_id": candidate.get("source_publication_id"),
+                "cutoff_date": str(candidate.get("cutoff_date") or ""),
+                "artifact_version": candidate.get("artifact_version"),
+                "scanner_version": candidate.get("scanner_version"),
+                "learning_model_version": candidate.get("learning_model_version"),
+                "directional_model_version": candidate.get("directional_model_version"),
+                "content_hash": candidate.get("content_hash"),
+            }
+            payload_contract = {key: payload.get(key) for key in typed_contract}
+            if typed_contract != payload_contract:
+                continue
+            if (
+                payload.get("artifact_version") != CALIBRATION_ARTIFACT_VERSION
+                or payload.get("scanner_version") != SCANNER_VERSION
+                or payload.get("learning_model_version") != LEARNING_MODEL_VERSION
+                or payload.get("directional_model_version") != DIRECTIONAL_MODEL_VERSION
+                or str(payload.get("cutoff_date") or "") > local_run_date()
+                or int(candidate.get("payload_bytes") or 0) != calibration_payload_bytes(payload)
+            ):
+                continue
+            expected_hash = payload.get("content_hash")
+            unhashed = {key: value for key, value in payload.items() if key not in {"content_hash", "artifact_id"}}
+            actual_hash = hashlib.sha256(json.dumps(unhashed, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+            if expected_hash == actual_hash and directional_model_from_artifact(payload) is not None:
+                return payload
+    except RuntimeError as exc:
+        print(f"Calibration artifact fetch skipped: {exc}")
+    return None
+
+
+def apply_reporting_only_directional_state(rows: list[dict]) -> dict:
+    """Fail closed between weekly calibrations when no fitted artifact is active."""
+    metrics = {
+        "sample_count": 0,
+        "date_count": 0,
+        "brier_score": None,
+        "baseline_brier_score": None,
+        "brier_skill_score": None,
+        "validated_personalities": [],
+        "passed": False,
+    }
+    for row in rows:
+        row["directional_model_version"] = DIRECTIONAL_MODEL_VERSION
+        row["directional_model_state"] = "REPORTING_ONLY"
+        row["prediction_state"] = "AWAITING_WEEKLY_CALIBRATION"
     return metrics
 
 
@@ -5742,7 +6342,7 @@ def write_history_html(path: Path) -> None:
     }
 
     function shortAction(action) {
-      const actionLabels = {json.dumps(ACTION_DISPLAY_LABELS, sort_keys=True)};
+      const actionLabels = __ACTION_DISPLAY_LABELS__;
       return actionLabels[action] || action || "WAIT";
     }
 
@@ -5758,15 +6358,16 @@ def write_history_html(path: Path) -> None:
       if (!config || !config.url || !config.anonKey) return null;
 
       const baseUrl = config.url.replace(/\\/$/, "");
-      const latestUrl = `${baseUrl}/rest/v1/watchlist_snapshots?select=run_date&order=run_date.desc&limit=1`;
+      const latestUrl = `${baseUrl}/rest/v1/watchlist_refresh_runs?select=publication_id,run_date,status&status=in.(ok,degraded)&order=run_date.desc,created_at.desc&limit=1`;
       const latestResponse = await fetch(latestUrl, { headers: supabaseHeaders(config) });
       if (!latestResponse.ok) throw new Error("Could not read latest Supabase run.");
       const latestRuns = await latestResponse.json();
       if (!latestRuns.length) return [];
 
       const runDate = latestRuns[0].run_date;
+      const publicationId = latestRuns[0].publication_id;
       const selectedTicker = ticker.trim().toUpperCase();
-      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=payload&run_date=eq.${encodeURIComponent(runDate)}&ticker=eq.${encodeURIComponent(selectedTicker)}&order=history_date.asc`;
+      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=payload&publication_id=eq.${encodeURIComponent(publicationId)}&run_date=eq.${encodeURIComponent(runDate)}&ticker=eq.${encodeURIComponent(selectedTicker)}&order=history_date.asc`;
       const historyResponse = await fetch(historyUrl, { headers: supabaseHeaders(config) });
       if (!historyResponse.ok) throw new Error("Could not read Supabase history.");
       const rows = await historyResponse.json();
@@ -5864,7 +6465,12 @@ def write_history_html(path: Path) -> None:
 </body>
 </html>
 """
-    path.write_text(html_page)
+    path.write_text(
+        html_page.replace(
+            "__ACTION_DISPLAY_LABELS__",
+            json.dumps(ACTION_DISPLAY_LABELS, sort_keys=True),
+        )
+    )
 
 
 def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, preflight_text: Optional[str] = None) -> None:
@@ -6386,6 +6992,22 @@ def main() -> None:
     parser.add_argument("--years", type=int, default=1)
     parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
     parser.add_argument("--learning-lookback-days", type=int, default=DEFAULT_LEARNING_LOOKBACK_DAYS, help="Number of recent trading days to replay for learning samples.")
+    parser.add_argument(
+        "--full-ohlcv-refresh",
+        action="store_true",
+        help="Maintenance-only full provider refetch; weekly learning rebuilds normally reuse the canonical 400-bar store.",
+    )
+    parser.add_argument(
+        "--allow-calibration-bootstrap",
+        action="store_true",
+        help="Allow an explicit baseline rebuild when no compatible prior daily incremental state exists.",
+    )
+    parser.add_argument(
+        "--refresh-mode",
+        choices=("auto", "daily", "weekly_rebuild"),
+        default="auto",
+        help="Daily appends state and settles new samples; weekly_rebuild replays and recalibrates the full learning window.",
+    )
     parser.add_argument("--no-supabase", action="store_true", help="Skip Supabase sync even if credentials are configured.")
     parser.add_argument("--cache-only", action="store_true", help="Use only existing cached price CSV files and skip live Yahoo chart fetches.")
     parser.add_argument(
@@ -6394,6 +7016,8 @@ def main() -> None:
         help="Skip Yahoo company profile enrichment so signal and Supabase refreshes cannot stall on non-signal data.",
     )
     args = parser.parse_args()
+    refresh_mode = resolve_refresh_mode(args.refresh_mode)
+    today = local_run_date()
 
     tickers = read_watchlist(Path(args.watchlist))
     live_access_ok = True
@@ -6404,16 +7028,38 @@ def main() -> None:
     rows = []
     history_rows = []
     learning_history_rows = []
+    raw_frames: dict[str, pd.DataFrame] = {}
     directional_history_by_ticker: dict[str, list[dict]] = {}
     failures = []
     stale_cache_fallbacks = []
+    previous_history_rows = fetch_previous_behavior_history(today) if not args.no_supabase else load_local_behavior_history()
+    previous_run_metadata = fetch_previous_run_metadata(today) if not args.no_supabase else load_local_run_metadata()
+    previous_incremental_metadata = compatible_incremental_metadata(previous_run_metadata)
+    previous_history_by_ticker = behavior_history_by_ticker(previous_history_rows)
+    daily_state_ready = bool(previous_history_rows and previous_incremental_metadata)
+    state_compatible = bool(previous_incremental_metadata)
+    needs_bootstrap = (refresh_mode == "daily" and not daily_state_ready) or (
+        refresh_mode == "weekly_rebuild" and not state_compatible
+    )
+    if needs_bootstrap and not args.allow_calibration_bootstrap:
+        raise SystemExit(
+            "No compatible incremental state is available. Run an explicit calibration bootstrap; parity must never be bypassed implicitly."
+        )
+    effective_mode = "weekly_rebuild" if needs_bootstrap else refresh_mode
+    if needs_bootstrap:
+        print("Explicit calibration bootstrap enabled; rebuilding the bounded 60-session state.")
     benchmark_frames: dict[str, pd.DataFrame] = {}
     for benchmark in ("SPY", "QQQ", "SMH"):
         try:
             if args.cache_only or (args.refresh and not live_access_ok):
                 benchmark_frames[benchmark] = cached_chart(benchmark, years=args.years)
             else:
-                benchmark_frames[benchmark] = load_or_refresh_ohlcv(benchmark, years=args.years, refresh=args.refresh)
+                benchmark_frames[benchmark] = load_or_refresh_ohlcv(
+                    benchmark,
+                    years=args.years,
+                    refresh=args.refresh,
+                    force_full=args.full_ohlcv_refresh,
+                )
         except Exception as exc:
             print(f"Benchmark context unavailable for {benchmark}: {exc}")
     market_permission = market_permission_from_frames(benchmark_frames)
@@ -6428,16 +7074,31 @@ def main() -> None:
                         {"ticker": display_ticker(ticker), "error": live_access_message}
                     )
             else:
-                df = load_or_refresh_ohlcv(ticker, years=args.years, refresh=args.refresh)
+                df = load_or_refresh_ohlcv(
+                    ticker,
+                    years=args.years,
+                    refresh=args.refresh,
+                    force_full=args.full_ohlcv_refresh,
+                )
+            raw_frames[ticker] = df
             row = classify_and_score(ticker, df, market_permission=market_permission)
             row = apply_data_provider_context(row, df)
-            # Replay once at the longest required horizon. The displayed
-            # history is a trailing view of the same no-lookahead snapshots.
-            ticker_learning_history = build_behavior_history(
-                ticker, df, days=replay_days, benchmark_frames=benchmark_frames
-            )
-            ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
-            ticker_history = ticker_learning_history[-args.history_days:]
+            row["indicator_state_version"] = INDICATOR_STATE_VERSION
+            row["raw_window_hash"] = ohlcv_window_hash(df)
+            if effective_mode == "weekly_rebuild":
+                ticker_learning_history = build_behavior_history(
+                    ticker, df, days=replay_days, benchmark_frames=benchmark_frames
+                )
+                ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
+                ticker_history = ticker_learning_history[-args.history_days:]
+            else:
+                ticker_history = append_incremental_behavior_row(
+                    previous_history_by_ticker.get(display_ticker(ticker), []),
+                    row,
+                    args.history_days,
+                )
+                ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
+                ticker_learning_history = []
             row = apply_latest_signal_context(row, ticker_history)
             row.update(signal_outcome_from_history(row, ticker_history))
             if not args.skip_profiles:
@@ -6446,7 +7107,8 @@ def main() -> None:
             rows.append(row)
             history_rows.extend(ticker_history)
             learning_history_rows.extend(ticker_learning_history)
-            directional_history_by_ticker[ticker] = build_directional_raw_history(ticker, df)
+            if effective_mode == "weekly_rebuild":
+                directional_history_by_ticker[ticker] = build_directional_raw_history(ticker, df)
             if args.refresh:
                 record_stale_cache_fallback(stale_cache_fallbacks, ticker, df, live_access_message)
         except URLError as exc:
@@ -6455,13 +7117,25 @@ def main() -> None:
                 continue
             try:
                 df = cached_chart(ticker, years=args.years)
+                raw_frames[ticker] = df
                 row = classify_and_score(ticker, df, market_permission=market_permission)
                 row = apply_data_provider_context(row, df)
-                ticker_learning_history = build_behavior_history(
-                    ticker, df, days=replay_days, benchmark_frames=benchmark_frames
-                )
-                ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
-                ticker_history = ticker_learning_history[-args.history_days:]
+                row["indicator_state_version"] = INDICATOR_STATE_VERSION
+                row["raw_window_hash"] = ohlcv_window_hash(df)
+                if effective_mode == "weekly_rebuild":
+                    ticker_learning_history = build_behavior_history(
+                        ticker, df, days=replay_days, benchmark_frames=benchmark_frames
+                    )
+                    ticker_learning_history = apply_data_provider_context_to_rows(ticker_learning_history, df)
+                    ticker_history = ticker_learning_history[-args.history_days:]
+                else:
+                    ticker_history = append_incremental_behavior_row(
+                        previous_history_by_ticker.get(display_ticker(ticker), []),
+                        row,
+                        args.history_days,
+                    )
+                    ticker_history = apply_data_provider_context_to_rows(ticker_history, df)
+                    ticker_learning_history = []
                 row = apply_latest_signal_context(row, ticker_history)
                 row.update(signal_outcome_from_history(row, ticker_history))
                 if not args.skip_profiles:
@@ -6470,7 +7144,8 @@ def main() -> None:
                 rows.append(row)
                 history_rows.extend(ticker_history)
                 learning_history_rows.extend(ticker_learning_history)
-                directional_history_by_ticker[ticker] = build_directional_raw_history(ticker, df)
+                if effective_mode == "weekly_rebuild":
+                    directional_history_by_ticker[ticker] = build_directional_raw_history(ticker, df)
                 stale_cache_fallbacks.append(
                     {"ticker": display_ticker(ticker), "error": f"live refresh failed; used cache ({exc})"}
                 )
@@ -6482,11 +7157,17 @@ def main() -> None:
     if not rows:
         raise SystemExit("No symbols could be analyzed.")
 
+    history_rows = preserve_failed_ticker_history(
+        history_rows,
+        previous_history_by_ticker,
+        {display_ticker(ticker) for ticker in tickers},
+        args.history_days,
+    )
+
     report = pd.DataFrame(rows)
     sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
     report = report.sort_values([sort_score_col, "score", "action", "ticker"], ascending=[False, False, True, True]).reset_index(drop=True)
 
-    today = local_run_date()
     publication_id = f"{today}-{int(time.time() * 1000)}-{os.getpid()}"
     for item in rows:
         item["publication_id"] = publication_id
@@ -6499,22 +7180,77 @@ def main() -> None:
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
-    backfilled_outcomes = attach_walk_forward_predictions(
-        build_backfilled_signal_outcomes(learning_history_rows)
-    )
+    prior_outcomes = fetch_signal_outcome_history(today)
+    if needs_bootstrap:
+        # An explicit state migration starts a new canonical outcome identity
+        # space; never mix samples from an incompatible model contract.
+        prior_outcomes = pd.DataFrame()
+    parity_report = {
+        "passed": None,
+        "state": "EXPLICIT_BOOTSTRAP" if needs_bootstrap else "NOT_REQUIRED",
+    }
+    if effective_mode == "weekly_rebuild":
+        if previous_incremental_metadata:
+            newly_settled_outcomes = build_incremental_signal_outcomes(
+                previous_history_rows,
+                raw_frames,
+                prior_outcomes,
+            )
+            canonical_outcomes = combine_signal_outcomes(prior_outcomes, newly_settled_outcomes)
+            backfilled_outcomes = rebuild_canonical_signal_outcomes(canonical_outcomes, raw_frames)
+            parity_report = calibration_parity_report(
+                canonical_outcomes,
+                backfilled_outcomes,
+                replay_start_dates(raw_frames, args.learning_lookback_days),
+            )
+            parity_report["state"] = "PASSED" if parity_report["passed"] else "FAILED"
+            if not parity_report["passed"]:
+                raise SystemExit(f"Weekly calibration parity failed closed: {json.dumps(parity_report, sort_keys=True)}")
+        else:
+            # Explicit first-run bootstrap has no frozen production decisions;
+            # seed from the bounded no-lookahead rule replay once.
+            backfilled_outcomes = attach_walk_forward_predictions(
+                build_backfilled_signal_outcomes(learning_history_rows)
+            )
+            newly_settled_outcomes = backfilled_outcomes
+        outcome_candidates = combine_signal_outcomes(prior_outcomes, backfilled_outcomes)
+    else:
+        newly_settled_outcomes = build_incremental_signal_outcomes(
+            previous_history_rows,
+            raw_frames,
+            prior_outcomes,
+        )
+        backfilled_outcomes = pd.DataFrame()
+        outcome_candidates = combine_signal_outcomes(prior_outcomes, newly_settled_outcomes)
     learning_history = restrict_learning_outcomes_to_window(
-        combine_signal_outcomes(fetch_signal_outcome_history(today), backfilled_outcomes),
+        outcome_candidates,
         today,
         args.learning_lookback_days,
     )
     learning_stats = build_learning_stats(learning_history, today, args.learning_lookback_days)
     apply_learning_adjustments(rows, learning_stats)
-    directional_history_rows = [
-        item
-        for ticker_rows in directional_history_by_ticker.values()
-        for item in ticker_rows
-    ]
-    directional_metrics = apply_directional_ohlcv_model(rows, directional_history_rows)
+    calibration_artifact = None
+    calibration_artifact_id = ""
+    if effective_mode == "weekly_rebuild":
+        directional_history_rows = [
+            item
+            for ticker_rows in directional_history_by_ticker.values()
+            for item in ticker_rows
+        ]
+        directional_metrics = apply_directional_ohlcv_model(rows, directional_history_rows, publication_id)
+        calibration_artifact = directional_metrics.pop("_artifact", None)
+        if calibration_artifact and directional_model_from_artifact(calibration_artifact) is None:
+            calibration_artifact = None
+    else:
+        active_calibration = fetch_active_calibration_artifact()
+        if active_calibration:
+            directional_metrics = apply_directional_calibration_artifact(rows, active_calibration)
+            calibration_artifact_id = active_calibration.get("artifact_id", "")
+        else:
+            directional_metrics = apply_reporting_only_directional_state(rows)
+            calibration_artifact_id = ""
+    if calibration_artifact:
+        calibration_artifact_id = calibration_artifact.get("artifact_id", "")
     rows = sorted(
         rows,
         key=lambda item: (
@@ -6525,16 +7261,15 @@ def main() -> None:
         ),
     )
     rows = apply_buy_tiers(rows)
-    previous_rows = fetch_previous_snapshot_rows(today) or load_previous_local_report(today)
-    daily_outcomes = build_daily_signal_outcomes(previous_rows, rows, today)
-    outcomes = combine_signal_outcomes(backfilled_outcomes, daily_outcomes)
+    history_rows = freeze_final_signal_history(history_rows, rows, args.history_days)
+    outcomes = learning_history.copy()
     if not outcomes.empty:
         outcomes["publication_id"] = publication_id
     attach_latest_outcomes(rows, outcomes)
     report = pd.DataFrame(rows)
     sort_score_col = "adjusted_score" if "adjusted_score" in report.columns else "score"
     report = report.sort_values(["execution_priority", sort_score_col, "score", "action", "ticker"], ascending=[True, False, False, True, True]).reset_index(drop=True)
-    status_parts = [f"Report data as of {latest_data_date}"]
+    status_parts = [f"Report data as of {latest_data_date}", f"refresh {effective_mode}"]
     if earliest_data_date != latest_data_date:
         status_parts.append(f"mixed source dates {earliest_data_date} to {latest_data_date}")
     if stale_cache_fallbacks:
@@ -6581,6 +7316,13 @@ def main() -> None:
         "notes": status_text,
         "payload": {
             "publication_id": publication_id,
+            "refresh_mode_requested": refresh_mode,
+            "refresh_mode": effective_mode,
+            "incremental_state_version": INCREMENTAL_STATE_VERSION,
+            "incremental_state_ready": True,
+            "indicator_state_version": INDICATOR_STATE_VERSION,
+            "calibration_artifact_version": CALIBRATION_ARTIFACT_VERSION,
+            "calibration_artifact_id": calibration_artifact_id,
             "data_provider_priority": configured_data_providers(),
             "data_provider_counts": provider_counts if "data_provider" in report.columns else {},
             "failures": failures[:25],
@@ -6588,6 +7330,8 @@ def main() -> None:
             "stale_execution_blocks": stale_blocks,
             "signal_outcomes": outcome_summary,
             "backfilled_signal_outcomes": int(len(backfilled_outcomes)),
+            "newly_settled_signal_outcomes": int(len(newly_settled_outcomes)),
+            "calibration_parity": parity_report,
             "learning_lookback_days": args.learning_lookback_days,
             "learning_model_version": LEARNING_MODEL_VERSION,
             "learning_horizon_sessions": LEARNING_HORIZON_SESSIONS,
@@ -6595,6 +7339,8 @@ def main() -> None:
             "learning_evaluation_date_max": learning_window.get("evaluation_date_max", ""),
             "learning_evaluation_session_count": learning_window.get("evaluation_session_count", 0),
             "directional_model_version": DIRECTIONAL_MODEL_VERSION,
+            "directional_feature_count": len(DIRECTIONAL_NUMERIC_FEATURES) + len(DIRECTIONAL_PERSONALITIES),
+            "directional_label_count": len(DIRECTIONAL_LABELS),
             "directional_model_oos_samples": directional_metrics.get("sample_count", 0),
             "directional_model_oos_dates": directional_metrics.get("date_count", 0),
             "directional_model_brier_score": directional_metrics.get("brier_score"),
@@ -6643,7 +7389,15 @@ def main() -> None:
     if not args.no_supabase:
         sync_ok, sync_reason = should_sync_supabase_snapshot(report, today)
         if sync_ok:
-            sync_supabase(report, history, outcomes, today, run_metadata)
+            sync_supabase(
+                report,
+                history,
+                outcomes,
+                today,
+                run_metadata,
+                calibration_artifact=calibration_artifact,
+                learning_stats=learning_stats,
+            )
         else:
             print(f"Supabase sync skipped: {sync_reason}")
 
