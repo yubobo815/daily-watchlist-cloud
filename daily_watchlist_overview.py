@@ -945,6 +945,23 @@ OHLCV_INCREMENTAL_YEARS = float(os.getenv("OHLCV_INCREMENTAL_YEARS", "0.1"))
 SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES", "8192"))
 SUPABASE_HISTORY_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_HISTORY_PAYLOAD_MAX_BYTES", "6144"))
 SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES", "2048"))
+SUPABASE_HISTORY_PAYLOAD_ALIASES = (
+    "date",
+    "raw_window_hash",
+    "indicator_state_version",
+    "execution_fill_model_version",
+)
+
+# These fields can carry the same generated sentence under different semantic
+# aliases. Keep the field the UI checks first and avoid paying for duplicate
+# prose on every ticker-day stored in Supabase.
+COMPACT_NARRATIVE_DUPLICATE_RULES = (
+    ("operator_plan", "operator_state_plan"),
+    ("execution_plan", "contextual_plan"),
+    ("execution_plan", "anti_signal_plan"),
+    ("execution_plan", "freshness_plan"),
+    ("execution_plan", "next_day_plan"),
+)
 
 
 def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[bool, str]:
@@ -1114,14 +1131,32 @@ def supabase_upsert_refresh_run(records: list[dict]) -> None:
         supabase_upsert("watchlist_refresh_runs", stripped_records, ["publication_id"])
 
 
+def deduplicate_payload_narratives(payload: dict) -> dict:
+    compacted = dict(payload)
+    for duplicate_key, preferred_key in COMPACT_NARRATIVE_DUPLICATE_RULES:
+        duplicate = compacted.get(duplicate_key)
+        preferred = compacted.get(preferred_key)
+        if isinstance(duplicate, str) and duplicate and duplicate == preferred:
+            compacted.pop(duplicate_key, None)
+
+    next_day_plan = compacted.get("next_day_plan")
+    freshness_plan = compacted.get("freshness_plan")
+    if isinstance(next_day_plan, str) and next_day_plan and next_day_plan == freshness_plan:
+        if str(compacted.get("freshness_block") or "").upper() == "YES":
+            compacted.pop("next_day_plan", None)
+        else:
+            compacted.pop("freshness_plan", None)
+    return compacted
+
+
 def compact_payload(row: dict, typed_record: dict, *, aliases: tuple[str, ...] = (), max_bytes: int) -> dict:
     """Keep only non-empty fields not already represented by typed columns."""
     excluded = set(typed_record).union(aliases, {"payload"})
-    payload = {
+    payload = deduplicate_payload_narratives({
         key: value
         for key, value in row.items()
         if key not in excluded and value not in (None, "", [], {})
-    }
+    })
     payload_bytes = len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
     if payload_bytes > max_bytes:
         raise ValueError(f"Compact Supabase payload is {payload_bytes} bytes; limit is {max_bytes} bytes.")
@@ -1240,7 +1275,7 @@ def sync_supabase(
             history_record["payload"] = compact_payload(
                 row,
                 history_record,
-                aliases=("date",),
+                aliases=SUPABASE_HISTORY_PAYLOAD_ALIASES,
                 max_bytes=SUPABASE_HISTORY_PAYLOAD_MAX_BYTES,
             )
             history_records.append(history_record)

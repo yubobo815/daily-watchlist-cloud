@@ -2,6 +2,7 @@
 """Deterministic regression checks for bounded database learning storage."""
 
 import datetime as dt
+import json
 import sys
 from pathlib import Path
 
@@ -65,6 +66,48 @@ def assert_payload_compaction() -> None:
     assert merged["action"] == "BUY", "null typed columns must not erase payload fallbacks"
     assert merged["adjusted_score"] == 61
     assert merged["date"] == "2026-07-16"
+
+    repeated_plan = "Execution blocked until the current market-data session is available."
+    near_limit = {
+        "core_evidence": "x" * 5800,
+        "anti_signal_plan": repeated_plan,
+        "execution_plan": repeated_plan,
+        "freshness_plan": repeated_plan,
+        "next_day_plan": repeated_plan,
+        "freshness_block": "YES",
+        "execution_fill_probability": 0.895,
+        "execution_fill_sample_count": 15,
+    }
+    raw_bytes = len(json.dumps(near_limit, separators=(",", ":")).encode("utf-8"))
+    assert raw_bytes > scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES
+    compacted = scanner.compact_payload(
+        {
+            **near_limit,
+            "raw_window_hash": "a" * 64,
+            "indicator_state_version": scanner.INDICATOR_STATE_VERSION,
+            "execution_fill_model_version": scanner.LEARNING_MODEL_VERSION,
+        },
+        {},
+        aliases=scanner.SUPABASE_HISTORY_PAYLOAD_ALIASES,
+        max_bytes=scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES,
+    )
+    compacted_bytes = len(json.dumps(compacted, separators=(",", ":")).encode("utf-8"))
+    assert compacted_bytes <= scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES
+    assert "anti_signal_plan" in compacted
+    assert "execution_plan" not in compacted
+    assert "freshness_plan" in compacted
+    assert "next_day_plan" not in compacted
+    assert compacted["execution_fill_probability"] == 0.895
+    assert compacted["execution_fill_sample_count"] == 15
+    assert "raw_window_hash" not in compacted
+    assert "indicator_state_version" not in compacted
+    assert "execution_fill_model_version" not in compacted
+
+    distinct_plans = scanner.deduplicate_payload_narratives({
+        "operator_plan": "Operator pressure is neutral.",
+        "operator_state_plan": "Accumulation remains constructive.",
+    })
+    assert set(distinct_plans) == {"operator_plan", "operator_state_plan"}
 
     try:
         scanner.compact_payload({"large": "x" * 20}, {}, max_bytes=10)
