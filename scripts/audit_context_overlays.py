@@ -1057,6 +1057,69 @@ def audit_volatile_zones_and_stops_expand_without_excess():
     assert_true(dwo.minimum_stop_pct("HIGH_BETA", "TREND VOLATILITY") == 2.0, "directional volatility needs a wider minimum stop")
 
 
+def climax_fixture(next_row=None):
+    rows = []
+    for index in range(100):
+        close = 100.0 + index * 0.1
+        rows.append({
+            "open": close - 0.1, "high": close + 0.4, "low": close - 0.4, "close": close,
+            "atr": 4.0, "atr_pct": 7.5, "relative_volume": 0.9, "range_atr": 0.2,
+            "ema_fast": close - 0.5, "rsi": 58.0, "close_loc": 0.6,
+        })
+    rows.append({
+        "open": 115.0, "high": 127.0, "low": 110.0, "close": 125.0,
+        "atr": 5.0, "atr_pct": 4.0, "relative_volume": 1.6, "range_atr": 3.4,
+        "ema_fast": 110.0, "rsi": 78.0, "close_loc": 0.86,
+    })
+    if next_row:
+        rows.append(next_row)
+    return pd.DataFrame(rows)
+
+
+def audit_momentum_climax_requires_reclaim():
+    event = climax_fixture()
+    state = dwo.momentum_climax_state(event, 100)
+    assert_true(state["state"] == "CLIMAX LOCKOUT", "a multi-factor upside climax must pause immediate execution")
+    assert_true(state["evidence_count"] >= 3 and state["execution_block"], "climax must expose evidence and block execution")
+
+    reclaimed = climax_fixture({
+        "open": 122.0, "high": 128.0, "low": 120.0, "close": 126.0,
+        "atr": 4.1, "atr_pct": 3.45, "relative_volume": 0.9, "range_atr": 1.46,
+        "ema_fast": 111.0, "rsi": 74.0, "close_loc": 0.67,
+    })
+    state = dwo.momentum_climax_state(reclaimed, 101)
+    assert_true(state["state"] == "RECLAIM CONFIRMED" and not state["execution_block"], "event-close reclaim must restore eligibility")
+
+
+def audit_momentum_climax_failure_stays_blocked():
+    failed = climax_fixture({
+        "open": 116.0, "high": 117.0, "low": 108.0, "close": 110.0,
+        "atr": 4.2, "atr_pct": 3.82, "relative_volume": 1.3, "range_atr": 2.14,
+        "ema_fast": 111.0, "rsi": 62.0, "close_loc": 0.22,
+    })
+    state = dwo.momentum_climax_state(failed, 101)
+    assert_true(state["state"] == "RECLAIM FAILED" and state["execution_block"], "midpoint failure on supply must remain blocked")
+
+
+def audit_momentum_climax_is_future_invariant():
+    event = climax_fixture()
+    before = dwo.momentum_climax_state(event, 100)
+    future = pd.concat([event, pd.DataFrame([{
+        "open": 150.0, "high": 180.0, "low": 140.0, "close": 175.0,
+        "atr": 10.0, "atr_pct": 5.7, "relative_volume": 4.0, "range_atr": 4.0,
+        "ema_fast": 120.0, "rsi": 90.0, "close_loc": 0.88,
+    }])], ignore_index=True)
+    after = dwo.momentum_climax_state(future, 100)
+    assert_true(before == after, "future candles must not alter a historical climax decision")
+
+
+def audit_momentum_climax_does_not_penalize_stable_personality():
+    stable = climax_fixture()
+    stable.loc[:99, "atr_pct"] = 3.5
+    state = dwo.momentum_climax_state(stable, 100)
+    assert_true(state["state"] == "NONE", "a stable personality must not inherit the high-beta climax gate")
+
+
 def main():
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
@@ -1122,9 +1185,13 @@ def main():
     audit_confirmed_volatile_reversal_uses_half_size()
     audit_chaotic_volatility_blocks_execution()
     audit_volatile_zones_and_stops_expand_without_excess()
+    audit_momentum_climax_requires_reclaim()
+    audit_momentum_climax_failure_stays_blocked()
+    audit_momentum_climax_is_future_invariant()
+    audit_momentum_climax_does_not_penalize_stable_personality()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 64,
+        "cases": 68,
     })
 
 

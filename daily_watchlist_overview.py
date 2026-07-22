@@ -40,7 +40,7 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.07.16-risk-adjusted-learning"
+SCANNER_VERSION = "2026.07.22-climax-reclaim"
 LEARNING_MODEL_VERSION = "five-session-r-risk-v5"
 INCREMENTAL_STATE_VERSION = "incremental-state-v1"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
@@ -56,6 +56,13 @@ EVENT_RISK_DAYS = 10
 MARKET_LEADER_THRESHOLD_PCT = 3.0
 MARKET_LAGGARD_THRESHOLD_PCT = -3.0
 BUY_QUALITY_MINIMUM = 60.0
+CLIMAX_MOVE_MULTIPLE = 2.0
+CLIMAX_RETURN_ATR = 1.15
+CLIMAX_MIN_EVIDENCE = 3
+MATURE_CHASE_MOVE_MULTIPLE = 1.25
+MATURE_CHASE_RETURN_ATR = 0.55
+MATURE_CHASE_RETURN_20D_PCT = 15.0
+MATURE_CHASE_EMA_EXTENSION_ATR = 1.25
 SCANNER_RISK_DOLLARS = 1000.0
 MAX_SCANNER_POSITION_VALUE = 25000.0
 MAX_SIGNAL_RISK_PCT = 7.0
@@ -1482,6 +1489,100 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
     out["bull_trap_confirmed"] = failed_breakout.shift(1, fill_value=False).astype(bool) & (out["close"] < out["low"].shift(1))
     out["bear_trap_confirmed"] = failed_breakdown.shift(1, fill_value=False).astype(bool) & (out["close"] > out["high"].shift(1))
     return out
+
+
+def momentum_climax_state(d: pd.DataFrame, i: int, is_etf: bool = False) -> dict:
+    """Classify a large upside shock and its next-session reclaim without lookahead."""
+    empty = {
+        "state": "NONE",
+        "event_type": "NONE",
+        "event": False,
+        "execution_block": False,
+        "evidence_count": 0,
+        "event_midpoint": np.nan,
+        "day_change_atr": 0.0,
+    }
+    if i < PERSONALITY_LOOKBACK_BARS or i >= len(d):
+        return empty
+
+    def event_at(index: int) -> dict:
+        if index < PERSONALITY_LOOKBACK_BARS:
+            return {**empty}
+        row = d.iloc[index]
+        previous = d.iloc[index - 1]
+        window = d.iloc[index - PERSONALITY_LOOKBACK_BARS + 1 : index + 1]
+        normal_move = float(window["close"].pct_change().abs().dropna().median() * 100.0)
+        normal_move = max(normal_move, 0.50)
+        atr_pct = float(row.atr_pct) if not pd.isna(row.atr_pct) else 0.0
+        day_change = (float(row.close) / float(previous.close) - 1.0) * 100.0
+        day_change_atr = day_change / atr_pct if atr_pct > 0 else 0.0
+        travel = d["close"].diff().abs().iloc[index - PERSONALITY_LOOKBACK_BARS + 1 : index + 1].sum()
+        trend_efficiency = (
+            abs(float(row.close) - float(d.iloc[index - PERSONALITY_LOOKBACK_BARS].close)) / travel
+            if travel > 0
+            else 0.0
+        )
+        personality = stock_personality_profile(d, index, is_etf, float(trend_efficiency))["personality_type"]
+        high_beta = personality == "HIGH_BETA"
+        return_20d = (float(row.close) / float(d.iloc[index - 20].close) - 1.0) * 100.0
+        ema_extension_atr = float(row.close - row.ema_fast) / float(row.atr) if float(row.atr) > 0 else 0.0
+        evidence = (
+            int(float(row.relative_volume) >= 1.20)
+            + int(float(row.range_atr) >= 1.25)
+            + int(float(row.close - row.ema_fast) / float(row.atr) >= 2.00 if float(row.atr) > 0 else False)
+            + int(float(row.rsi) >= 72.0)
+            + int(float(row.open - previous.close) / float(row.atr) >= 0.50 if float(row.atr) > 0 else False)
+        )
+        strict_climax = high_beta and (
+            day_change >= max(3.0, normal_move * CLIMAX_MOVE_MULTIPLE)
+            and day_change_atr >= CLIMAX_RETURN_ATR
+            and evidence >= CLIMAX_MIN_EVIDENCE
+        )
+        mature_chase = high_beta and (
+            day_change >= normal_move * MATURE_CHASE_MOVE_MULTIPLE
+            and day_change_atr >= MATURE_CHASE_RETURN_ATR
+            and return_20d >= MATURE_CHASE_RETURN_20D_PCT
+            and ema_extension_atr >= MATURE_CHASE_EMA_EXTENSION_ATR
+        )
+        event = strict_climax or mature_chase
+        return {
+            "event": event,
+            "event_type": "MOMENTUM CLIMAX" if strict_climax else "MATURE HIGH-BETA CHASE" if mature_chase else "NONE",
+            "evidence_count": evidence,
+            "event_midpoint": (float(row.high) + float(row.low)) / 2.0,
+            "day_change_atr": day_change_atr,
+        }
+
+    current = event_at(i)
+    if current["event"]:
+        return {
+            **current,
+            "state": "CLIMAX LOCKOUT",
+            "execution_block": True,
+        }
+
+    prior = event_at(i - 1)
+    if not prior["event"]:
+        return empty
+
+    row = d.iloc[i]
+    midpoint = float(prior["event_midpoint"])
+    relative_volume = float(row.relative_volume) if not pd.isna(row.relative_volume) else 0.0
+    failed = float(row.close) < midpoint and (
+        float(row.close) < float(row.open)
+        or float(row.close_loc) < 0.45
+        or relative_volume >= 1.10
+    )
+    reclaimed = (
+        float(row.close) >= max(midpoint, float(d.iloc[i - 1].close))
+        and float(row.close_loc) >= 0.55
+        and not failed
+    )
+    return {
+        **prior,
+        "state": "RECLAIM CONFIRMED" if reclaimed else "RECLAIM FAILED" if failed else "RECLAIM PENDING",
+        "execution_block": not reclaimed,
+    }
 
 
 def bool_text(value: bool) -> str:
@@ -4721,6 +4822,7 @@ def classify_and_score(
     include_audit_gates: bool = True,
     market_permission: Optional[dict] = None,
     audit_gate_cache: Optional[dict[str, dict]] = None,
+    include_climax_gate: bool = True,
 ) -> dict:
     d = raw.copy() if prepared else prepare(raw)
     if len(d) < 220:
@@ -4752,6 +4854,8 @@ def classify_and_score(
     travel = d["close"].diff().abs().iloc[i - personality_lookback + 1 : i + 1].sum()
     trend_efficiency = abs(close - float(d.iloc[i - personality_lookback].close)) / travel if travel > 0 else 0.0
     personality_profile = stock_personality_profile(d, i, is_etf, float(trend_efficiency))
+    climax_state = momentum_climax_state(d, i, is_etf)
+    climax_execution_block = bool(climax_state["execution_block"]) if include_climax_gate else False
 
     effective_monster_eff = 0.30 * (1.15 if is_etf else 1.0)
     effective_compounder_eff = 0.18 * (0.75 if is_etf else 1.0)
@@ -4925,6 +5029,10 @@ def classify_and_score(
     volatility_permission = str(volatility_state["permission"])
     position_size_factor = float(volatility_state["position_size_factor"])
     volatility_plan = str(volatility_state["plan"])
+    if climax_execution_block:
+        position_size_factor = 0.0
+    elif include_climax_gate and climax_state["state"] == "RECLAIM CONFIRMED":
+        position_size_factor = min(position_size_factor, 0.50)
     if include_setup_stats or include_audit_gates:
         d = ensure_setup_names(d)
     setup_stats = (
@@ -5469,11 +5577,21 @@ def classify_and_score(
         and not fomo
         and not greed_rejected
         and not seller_control
+        and not climax_execution_block
     )
 
     if exit_pressure or (seller_control and trend_damage):
         next_day_bias = "DEFENSIVE / EXIT RISK"
         next_day_plan = "Protect capital first; wait for buyer reclaim before considering new exposure."
+    elif include_climax_gate and climax_state["state"] == "CLIMAX LOCKOUT":
+        next_day_bias = "WAIT FOR RECLAIM"
+        next_day_plan = "Momentum is unusually extended; wait one session for the event midpoint to hold before considering entry."
+    elif include_climax_gate and climax_state["state"] == "RECLAIM FAILED":
+        next_day_bias = "AVOID CHASE"
+        next_day_plan = "The prior momentum event failed to hold its midpoint; wait for a fresh base or reclaim."
+    elif include_climax_gate and climax_state["state"] == "RECLAIM PENDING":
+        next_day_bias = "WAIT FOR RECLAIM"
+        next_day_plan = "The prior momentum event has not confirmed or failed; keep execution paused."
     elif profile_extended_from_zone or extended_from_zone or fomo or greed_rejected:
         next_day_bias = "AVOID CHASE"
         next_day_plan = "Do not chase strength; wait for price to reset into the reference zone."
@@ -5510,6 +5628,8 @@ def classify_and_score(
         filters_ok = (filters_ok and profile_buy_ok) or high_quality_entry_override
         filters_ok = filters_ok and next_day_buyable and personality_setup_allowed
         continuation_ok = continuation_ok and personality_setup_allowed and not profile_extended_from_zone and execution_safety_ok and next_day_constructive and not operator_blocks_buy
+    filters_ok = filters_ok and not climax_execution_block
+    continuation_ok = continuation_ok and not climax_execution_block
     extension_state = "EXTENDED" if extended_from_zone or profile_extended_from_zone else "NEAR_ZONE" if setup_forming else ""
 
     action, rank = select_signal_action(
@@ -5571,6 +5691,12 @@ def classify_and_score(
         notes.append("Personality requires another confirmation before execution")
     if volatility_regime != "NORMAL":
         notes.append(volatility_plan)
+    if include_climax_gate and climax_state["state"] == "CLIMAX LOCKOUT":
+        notes.append("Momentum climax; wait for midpoint reclaim")
+    elif include_climax_gate and climax_state["state"] == "RECLAIM CONFIRMED":
+        notes.append("Prior momentum climax reclaimed its event close")
+    elif include_climax_gate and climax_state["state"] in {"RECLAIM FAILED", "RECLAIM PENDING"}:
+        notes.append("Prior momentum climax has not produced a valid reclaim")
     if profit_protect_pressure and not exit_pressure:
         notes.append("Profit protect only; structure is not broken")
     if next_day_plan:
@@ -5619,6 +5745,14 @@ def classify_and_score(
         reason_codes.append("chaotic_volatility")
     if volatility_permission != "ALLOW":
         reason_codes.append("volatility_execution_gate")
+    if include_climax_gate and climax_state["state"] == "CLIMAX LOCKOUT":
+        reason_codes.append("momentum_climax_lockout")
+    elif include_climax_gate and climax_state["state"] == "RECLAIM CONFIRMED":
+        reason_codes.append("momentum_climax_reclaimed")
+    elif include_climax_gate and climax_state["state"] == "RECLAIM FAILED":
+        reason_codes.append("momentum_climax_failed")
+    elif include_climax_gate and climax_state["state"] == "RECLAIM PENDING":
+        reason_codes.append("momentum_climax_pending")
     if next_day_bias == "BULLISH CONFIRM":
         reason_codes.append("next_day_bullish_confirm")
     elif next_day_bias == "CONSTRUCTIVE PULLBACK":
@@ -5694,6 +5828,11 @@ def classify_and_score(
         "return_5d_pct": round((close / float(d.iloc[-6].close) - 1) * 100, 3),
         "return_20d_pct": round((close / float(d.iloc[-21].close) - 1) * 100, 3),
         "gap_pct": round((open_ / float(prev.close) - 1) * 100, 3),
+        "momentum_climax_state": climax_state["state"],
+        "momentum_climax_type": climax_state["event_type"],
+        "momentum_climax_evidence": int(climax_state["evidence_count"]),
+        "momentum_climax_midpoint": round(float(climax_state["event_midpoint"]), 2) if not math.isnan(float(climax_state["event_midpoint"])) else np.nan,
+        "momentum_climax_day_change_atr": round(float(climax_state["day_change_atr"]), 3),
         "setup_atr_limit": setup_max_atr,
         "trend_efficiency": round(float(trend_efficiency), 2),
         "personality_type": personality_profile["personality_type"],
