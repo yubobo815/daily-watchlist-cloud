@@ -159,10 +159,10 @@ def audit_supabase_history_pagination() -> None:
 
     assert len(rows) == 2350
     assert [row["row"] for row in rows] == list(range(2350))
-    assert [path.rsplit("offset=", 1)[1] for path in calls] == ["0", "1000", "2000"]
+    assert [path.rsplit("offset=", 1)[1] for path in calls] == ["0", "1000", "2000", "2350"]
     assert all("order=ticker.asc,history_date.asc" in path for path in calls)
 
-    for total, expected_calls in ((999, 1), (1000, 2), (1001, 2), (2000, 3), (2001, 3)):
+    for total, expected_calls in ((999, 2), (1000, 2), (1001, 3), (2000, 3), (2001, 4)):
         boundary_calls = []
 
         def boundary_select(path, row_count=total):
@@ -178,6 +178,20 @@ def audit_supabase_history_pagination() -> None:
         finally:
             scanner.supabase_select = original_select
         assert len(boundary_rows) == total and len(boundary_calls) == expected_calls
+
+    capped_calls = []
+
+    def capped_select(path):
+        capped_calls.append(path)
+        offset = int(path.rsplit("offset=", 1)[1])
+        return [{"row": index} for index in range(offset, min(offset + 100, 2350))]
+
+    scanner.supabase_select = capped_select
+    try:
+        capped_rows = scanner.supabase_select_all("watchlist_behavior_history?select=*&order=ticker.asc")
+    finally:
+        scanner.supabase_select = original_select
+    assert len(capped_rows) == 2350 and len(capped_calls) == 25
 
 
 def audit_daily_history_inherits_full_publication() -> None:
@@ -211,9 +225,9 @@ def audit_daily_history_inherits_full_publication() -> None:
     coverage = pd.DataFrame(inherited).groupby("ticker")["history_date"].nunique()
     assert len(coverage) == ticker_count and int(coverage.min()) == sessions
     tickers = [f"T{ticker:03d}" for ticker in range(ticker_count)]
-    assert scanner.incremental_history_ready(inherited, tickers, sessions)
+    assert scanner.incremental_history_ready(inherited, tickers, sessions, len(inherited))
     partial = [row for row in inherited if int(row["ticker"][1:]) < 33]
-    assert not scanner.incremental_history_ready(partial, tickers, sessions)
+    assert not scanner.incremental_history_ready(partial, tickers, sessions, len(inherited))
 
 
 def audit_rolling_window_and_modes() -> None:

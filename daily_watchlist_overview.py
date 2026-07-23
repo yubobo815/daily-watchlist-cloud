@@ -928,15 +928,20 @@ def supabase_select_all(path: str, page_size: int = 1000, max_pages: int = 100) 
         raise ValueError("Paginated Supabase paths must not include limit or offset")
 
     separator = "&" if "?" in path else "?"
+    max_rows = page_size * max_pages
     rows: list[dict] = []
-    for page_number in range(max_pages):
-        offset = page_number * page_size
+    # Continue to an empty page because the PostgREST server may enforce a cap
+    # lower than the requested page size.
+    for _ in range(max_pages * 10 + 1):
+        offset = len(rows)
         page = supabase_select(f"{path}{separator}limit={page_size}&offset={offset}")
-        rows.extend(page)
-        if len(page) < page_size:
+        if not page:
             return rows
+        rows.extend(page)
+        if len(rows) > max_rows:
+            break
     raise RuntimeError(
-        f"Supabase select exceeded the guarded pagination limit ({page_size * max_pages} rows): {path}"
+        f"Supabase select exceeded the guarded pagination limit ({max_rows} rows): {path}"
     )
 
 
@@ -2538,9 +2543,14 @@ def behavior_history_by_ticker(rows: list[dict]) -> dict[str, list[dict]]:
     return grouped
 
 
-def incremental_history_ready(history_rows: list[dict], tickers: list[str], history_days: int) -> bool:
+def incremental_history_ready(
+    history_rows: list[dict],
+    tickers: list[str],
+    history_days: int,
+    expected_rows: int,
+) -> bool:
     """Reject partial inherited publications before a daily run can build on them."""
-    if not history_rows or not tickers:
+    if not history_rows or not tickers or expected_rows < 1:
         return False
     frame = pd.DataFrame(history_rows)
     if "ticker" not in frame.columns:
@@ -2552,6 +2562,8 @@ def incremental_history_ready(history_rows: list[dict], tickers: list[str], hist
     normalized["ticker"] = normalized["ticker"].astype(str).map(display_ticker)
     normalized[date_column] = pd.to_datetime(normalized[date_column], errors="coerce").dt.date
     normalized = normalized.dropna().drop_duplicates()
+    if len(normalized) != expected_rows:
+        return False
     required_sessions = min(25, max(1, int(history_days)))
     required_tickers = math.ceil(len({display_ticker(ticker) for ticker in tickers}) * 0.80)
     coverage = normalized.groupby("ticker")[date_column].nunique()
@@ -7452,7 +7464,12 @@ def main() -> None:
     previous_history_by_ticker = behavior_history_by_ticker(previous_history_rows)
     daily_state_ready = bool(
         previous_incremental_metadata
-        and incremental_history_ready(previous_history_rows, tickers, args.history_days)
+        and incremental_history_ready(
+            previous_history_rows,
+            tickers,
+            args.history_days,
+            int(numeric_or_none(previous_incremental_metadata.get("synced_history_rows")) or 0),
+        )
     )
     state_compatible = bool(previous_incremental_metadata)
     needs_bootstrap = (refresh_mode == "daily" and not daily_state_ready) or (

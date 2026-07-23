@@ -649,8 +649,8 @@ def audit_signal_outcome_history_is_paginated():
         calls.append(path)
         if path.startswith("watchlist_refresh_runs?"):
             return [{"payload": {"publication_id": "pub-validated", "sync_state": "complete"}}]
-        offset = 1000 if "offset=1000" in path else 0
-        count = 500 if offset else 1000
+        offset = int(path.rsplit("offset=", 1)[1])
+        count = max(0, min(1000, 1500 - offset))
         return [
             {
                 "ticker": f"T{offset + index}",

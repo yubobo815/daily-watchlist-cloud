@@ -96,16 +96,19 @@ def add_query_param(path: str, key: str, value: str | int) -> str:
 
 
 def request_all_json(path: str, *, page_size: int = 1000, max_pages: int = 50) -> list[dict]:
+    max_rows = page_size * max_pages
     rows: list[dict] = []
-    for page in range(max_pages):
-        offset = page * page_size
+    for _ in range(max_pages * 10 + 1):
+        offset = len(rows)
         page_path = add_query_param(add_query_param(path, "limit", page_size), "offset", offset)
         page_rows, _ = request_json(page_path)
-        rows.extend(page_rows)
-        if len(page_rows) < page_size:
+        if not page_rows:
             return rows
+        rows.extend(page_rows)
+        if len(rows) > max_rows:
+            break
     raise RuntimeError(
-        f"Supabase health audit exceeded the guarded pagination limit ({page_size * max_pages} rows): {path}"
+        f"Supabase health audit exceeded the guarded pagination limit ({max_rows} rows): {path}"
     )
 
 
