@@ -2785,40 +2785,111 @@ function renderLatestHistoryPanel(latest) {
   `;
 }
 
+function historySignalSentence(rows, summaryApi) {
+  const transition = summaryApi.signalTransition(rows);
+  if (transition.reason === "actions") return "Signal history is unavailable because one or more sessions are missing a signal.";
+  if (!transition.available) return "Signal history is unavailable.";
+  const latestSignal = ACTION_LABELS[transition.currentAction] || transition.currentAction;
+  if (!transition.changed) return `Unchanged at ${latestSignal} throughout the ${transition.windowSessions}-session window.`;
+  const previousSignal = ACTION_LABELS[transition.previousAction] || transition.previousAction;
+  if (transition.sessionsAgo === 0) return `Changed from ${previousSignal} to ${latestSignal} in the latest trading session.`;
+  return `Changed from ${previousSignal} to ${latestSignal} ${transition.sessionsAgo === 1 ? "one trading session" : `${transition.sessionsAgo} trading sessions`} ago.`;
+}
+
+function pressureSummary(rows, summaryApi) {
+  const comparison = summaryApi.pressureComparison(rows);
+  if (!comparison.available && comparison.reason === "window") {
+    return "A 5-versus-25 session comparison needs 30 valid observations and is not available yet.";
+  }
+  if (!comparison.available) {
+    return "Price-and-volume pressure could not be compared because the source scores are incomplete.";
+  }
+  const recentRows = rows.slice(-5);
+  const direction = comparison.shift;
+  const currentKind = actionKind(rows.at(-1).action);
+  const staleReminder = qualityConstraintLabel(rows.at(-1)) === "DATA OLD"
+    ? " Today's data is stale, so this historical pressure is descriptive only."
+    : "";
+  const defensiveReminder = ["exit", "avoid"].includes(currentKind)
+    ? ` This price-and-volume proxy does not override today's ${ACTION_LABELS[rows.at(-1).action] || rows.at(-1).action} signal.`
+    : "";
+  const contextReminder = `${staleReminder}${defensiveReminder}`;
+  if (direction === "balanced") {
+    return `The price-and-volume proxy shows no meaningful change between buying and selling pressure; recent volume is not giving a directional confirmation.${contextReminder}`;
+  }
+  const confirmingStates = direction === "buying"
+    ? new Set(["DEMAND", "BREAKOUT"])
+    : new Set(["DISTRIBUTION", "BREAKDOWN", "SUPPLY"]);
+  const opposingStates = direction === "buying"
+    ? new Set(["DISTRIBUTION", "BREAKDOWN", "SUPPLY"])
+    : new Set(["DEMAND", "BREAKOUT"]);
+  const confirmingDays = recentRows.filter((row) => confirmingStates.has(String(payloadValue(row, "volume_state") || "").toUpperCase())).length;
+  const opposingDays = recentRows.filter((row) => opposingStates.has(String(payloadValue(row, "volume_state") || "").toUpperCase())).length;
+  const controlSentence = comparison.control === "buying"
+    ? " Buyers now have the advantage."
+    : comparison.control === "selling"
+      ? " Sellers still have the advantage."
+      : " Neither side now has a clear advantage.";
+  const pressureLead = `The price-and-volume proxy shifted toward ${direction} over the latest five sessions.`;
+  const volumeSentence = confirmingDays >= 2 && confirmingDays > opposingDays
+    ? ` Directionally supportive volume appeared on ${confirmingDays} of those sessions.`
+    : opposingDays >= 2
+      ? " Recent volume points the other way and does not confirm the shift."
+      : " Recent volume confirmation remains limited.";
+  return `${pressureLead}${controlSentence}${volumeSentence}${contextReminder}`;
+}
+
+function historyInterpretation(latest, priceMovePct, summaryApi) {
+  const kind = actionKind(latest.action);
+  const state = summaryApi.interpretationState(kind, {
+    stale: qualityConstraintLabel(latest) === "DATA OLD",
+    checksClear: executionChecksClear(latest),
+  });
+  if (state === "stale-exit") return "Today's data is stale. Keep the defensive Exit posture until fresh data confirms otherwise.";
+  if (state === "stale-avoid") return "Today's data is stale. Continue to Avoid new entries until fresh data is available.";
+  if (state === "stale") return "Today's data is stale, so the recent record cannot support an entry.";
+  if (state === "exit") return "The current Exit signal takes priority over any positive move in the recent price record.";
+  if (state === "avoid") return "The recent record does not establish a usable setup; the current view remains Avoid.";
+  if (state === "blocked") return "Today's data and risk checks do not support an entry.";
+  if (state === "setup") return "The technical picture is developing, but it has not reached an entry signal.";
+  if (state === "watch") return "The recent record remains mixed; there is no confirmed entry.";
+  if (state === "continue") return "The recent trend remains constructive, but this is not a fresh entry signal by itself.";
+  if (state === "buy") return "The recent record is constructive and today's Buy has passed the current execution checks.";
+  return `Price ${priceMovePct >= 0 ? "improved" : "weakened"} over the measured period, but there is no executable entry today.`;
+}
+
 function renderHistoryVisual(rows) {
   const visual = document.querySelector("#history-visual");
-  const chronological = [...rows].reverse();
+  const summaryApi = window.HistorySummary;
+  if (!summaryApi?.historyMetrics || !summaryApi?.pressureComparison || !summaryApi?.signalTransition || !summaryApi?.interpretationState) {
+    visual.innerHTML = "<div class=\"empty\">Recent behavior summary is temporarily unavailable.</div>";
+    return;
+  }
+  const metrics = summaryApi.historyMetrics([...rows].reverse());
+  if (metrics.reason === "dates") {
+    visual.innerHTML = "<div class=\"empty\">Recent behavior summary is unavailable because session dates are incomplete.</div>";
+    return;
+  }
+  const chronological = metrics.rows;
   if (!chronological.length) {
     visual.innerHTML = "<div class=\"empty\">No recent behavior found.</div>";
     return;
   }
 
   const latest = chronological.at(-1);
-  const first = chronological[0];
-  const priceMove = numericValue(latest, "close") - numericValue(first, "close");
-  const firstClose = numericValue(first, "close");
-  const priceMovePct = firstClose ? (priceMove / firstClose) * 100 : 0;
-  const signalCounts = chronological.reduce((counts, row) => {
-    const label = ACTION_LABELS[row.action] || row.action;
-    counts[label] = (counts[label] || 0) + 1;
-    return counts;
-  }, {});
-  const dominantSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Watch";
-  const startSignal = ACTION_LABELS[first.action] || first.action;
-  const latestSignal = ACTION_LABELS[latest.action] || latest.action;
-  const trendChange = convictionScore(latest) - convictionScore(first);
-  const signalSentence = startSignal !== latestSignal
-    ? `The view moved from ${startSignal} to ${latestSignal}.`
-    : `The most common view was ${dominantSignal}; today's view is ${latestSignal}.`;
-  const trendSentence = Math.abs(trendChange) < 8
-    ? "The technical condition is broadly unchanged over this period."
-    : `The technical condition has ${trendChange > 0 ? "strengthened" : "weakened"} over this period.`;
+  const { priceMovePct = 0, maxDrawdownPct, distanceFromHighPct } = metrics;
+  const periodLabel = `${chronological.length}-session summary`;
+  const priceSentence = metrics.priceAvailable
+    ? `Price ${priceMovePct >= 0 ? "rose" : "fell"} ${fmtNumber(Math.abs(priceMovePct), 1)}%. The maximum drawdown based on closing prices was ${fmtNumber(maxDrawdownPct, 1)}%. ${distanceFromHighPct == null ? "The distance from the period high is unavailable because one or more daily highs are missing or invalid." : `The latest close is ${fmtNumber(Math.abs(distanceFromHighPct), 1)}% below the period's highest daily high.`}`
+    : "Price statistics are unavailable because one or more closing prices are missing or invalid.";
 
   visual.innerHTML = `
-    <div class="behavior-summary" aria-label="Recent behavior summary">
-      <div><span>Price</span><strong>Price ${priceMove >= 0 ? "rose" : "fell"} ${fmtNumber(Math.abs(priceMovePct), 1)}% over the last ${chronological.length} sessions.</strong></div>
-      <div><span>Signal</span><strong>${escapeHtml(signalSentence)}</strong></div>
-      <div><span>Trend</span><strong>${escapeHtml(trendSentence)}</strong></div>
+    <div class="behavior-summary" aria-label="${escapeHtml(periodLabel)}">
+      <div class="behavior-summary-head"><span>${escapeHtml(periodLabel)}</span><strong>${escapeHtml(historyInterpretation(latest, priceMovePct, summaryApi))}</strong></div>
+      <div><span>Price</span><strong>${escapeHtml(priceSentence)}</strong></div>
+      <div><span>Signal</span><strong>${escapeHtml(historySignalSentence(chronological, summaryApi))}</strong></div>
+      <div><span>Buying pressure</span><strong>${escapeHtml(pressureSummary(chronological, summaryApi))}</strong></div>
+      <p class="behavior-action"><span>Today</span><strong>${escapeHtml(decisionHeadline(latest))}.</strong></p>
     </div>
   `;
 }

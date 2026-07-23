@@ -3,6 +3,7 @@ const { publishedLatestPayload, publishedTickerPayload } = require("../api/_publ
 const { committedPublicationMatches, rowDto, runDto } = require("../api/_supabase");
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 const { latestCompletedMarketSession, marketSessionAge, previousMarketSession } = require("../api/_market_session");
+const { historyMetrics, pressureComparison, signalTransition, interpretationState } = require("../assets/history_summary");
 const fs = require("fs");
 
 const REQUIRED_GATES = [
@@ -99,6 +100,67 @@ function auditSearchBehavior() {
   };
 }
 
+function auditHistorySummary() {
+  const completeRows = Array.from({ length: 30 }, (_, index) => ({
+    history_date: `2026-06-${String(index + 1).padStart(2, "0")}`,
+    close: 100 + index,
+    high: 101 + index,
+  }));
+  const completeMetrics = historyMetrics(completeRows);
+  assert(completeMetrics.rows.length === 30 && completeMetrics.priceAvailable, "history summary must retain the fixed 30-session window when prices are complete");
+  assert(Number.isFinite(completeMetrics.distanceFromHighPct), "complete daily highs must produce a distance from the period high");
+
+  const missingHighRows = completeRows.map((row, index) => index === 12 ? { ...row, high: null } : row);
+  assert(historyMetrics(missingHighRows).distanceFromHighPct === null, "a missing daily high must make distance from the period high unavailable");
+  const invalidHighRows = completeRows.map((row, index) => index === 12 ? { ...row, high: row.close - 1 } : row);
+  assert(historyMetrics(invalidHighRows).distanceFromHighPct === null, "a daily high below its close must make distance from the period high unavailable");
+  const invalidPriceMetrics = historyMetrics([
+    { history_date: "2026-06-01", close: 0, high: 1 },
+    { history_date: "2026-06-02", close: -2, high: 1 },
+  ]);
+  assert(invalidPriceMetrics.available && !invalidPriceMetrics.priceAvailable && invalidPriceMetrics.rows.length === 2, "invalid closes must fail price metrics without silently removing sessions");
+  const gappedWindow = historyMetrics([...completeRows, { history_date: "2026-07-01", close: null, high: null }]);
+  assert(gappedWindow.rows.length === 30 && !gappedWindow.priceAvailable, "the latest 30 sessions must be selected before completeness checks");
+
+  const pressureRows = Array.from({ length: 30 }, (_, index) => ({
+    history_date: `2026-06-${String(index + 1).padStart(2, "0")}`,
+    buyer_score: index < 25 ? 20 : 40,
+    seller_score: index < 25 ? 80 : 55,
+  }));
+  const recoveringPressure = pressureComparison(pressureRows);
+  assert(recoveringPressure.shift === "buying" && recoveringPressure.control === "selling", "a shift toward buying must not imply buyer control while sellers still dominate");
+  const reversedPressure = pressureComparison([...pressureRows].reverse());
+  assert(reversedPressure.shift === recoveringPressure.shift && reversedPressure.control === recoveringPressure.control, "pressure comparison must be independent of API row order when dates are present");
+  assert(pressureComparison(pressureRows.slice(1)).reason === "window", "pressure comparison must require the full 5-versus-25 window");
+  assert(pressureComparison([...pressureRows.slice(0, 29), { history_date: "2026-06-30", buyer_score: null, seller_score: 50 }]).reason === "scores", "missing pressure scores must fail closed");
+  const partialDates = completeRows.map((row, index) => index === 12 ? { close: row.close, high: row.high } : row);
+  assert(historyMetrics(partialDates).reason === "dates", "partially dated history must fail closed instead of trusting input order");
+  assert(pressureComparison(partialDates).reason === "dates", "partially dated pressure history must fail closed instead of trusting input order");
+  const undatedRows = completeRows.map(({ history_date, ...row }) => row);
+  assert(historyMetrics(undatedRows).reason === "dates" && historyMetrics([...undatedRows].reverse()).reason === "dates", "fully undated history must fail closed in either caller order");
+  assert(pressureComparison(undatedRows).reason === "dates", "fully undated pressure history must fail closed");
+  const changedToday = signalTransition([
+    { history_date: "2026-06-01", action: "WAIT" },
+    { history_date: "2026-06-02", action: "BUY CANDIDATE" },
+  ]);
+  const changedPriorSession = signalTransition([
+    { history_date: "2026-06-01", action: "WAIT" },
+    { history_date: "2026-06-02", action: "BUY CANDIDATE" },
+    { history_date: "2026-06-03", action: "BUY CANDIDATE" },
+  ]);
+  assert(changedToday.sessionsAgo === 0, "a signal change on the latest session must be reported as current, not one session old");
+  assert(changedPriorSession.sessionsAgo === 1, "a signal change on the prior session must be one trading session old");
+  assert(signalTransition([{ history_date: "2026-06-01", action: "WAIT" }, { history_date: "2026-06-02", action: "" }]).reason === "actions", "missing session actions must fail closed instead of shifting the apparent latest signal");
+  assert(signalTransition([
+    { history_date: "2026-06-01", action: "WAIT" },
+    { history_date: "2026-06-02" },
+    { history_date: "2026-06-03", action: "BUY CANDIDATE" },
+  ]).reason === "actions", "missing middle-session actions must fail closed instead of shortening signal history");
+  assert(interpretationState("exit", { stale: true, checksClear: true }) === "stale-exit", "stale status must remain visible while preserving defensive Exit priority");
+  assert(interpretationState("avoid", { stale: true, checksClear: true }) === "stale-avoid", "stale status must remain visible while preserving Avoid priority");
+  return { metricCases: 6, pressureCases: 6, transitionCases: 4, priorityCases: 2 };
+}
+
 function auditDecisionFunnelUi() {
   const appSource = fs.readFileSync("assets/app.js", "utf8");
   const pageSource = fs.readFileSync("index.html", "utf8");
@@ -153,11 +215,28 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
   assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
-  assert(tickerSource.includes("clear-detail-20260723"), "ticker detail must load the current shared application bundle");
+  assert(tickerSource.includes("behavior-summary-20260723") && pageSource.includes("behavior-summary-20260723"), "both app surfaces must load the current shared application bundle");
   assert(!appSource.includes("Optional chart"), "ticker detail must remove the optional scanner chart");
   assert(!appSource.includes("Daily scanner bars"), "ticker detail must remove scanner-chart jargon");
   assert(!stylesSource.includes(".chart-details") && !stylesSource.includes(".history-chart"), "removed chart styles must not remain as dead UI code");
   assert(appSource.includes("Why we see it this way"), "ticker detail must explain the decision in natural language");
+  assert(tickerSource.includes("assets/history_summary.js"), "ticker detail must load the executable history-summary module");
+  assert(!pageSource.includes("assets/history_summary.js"), "the main watchlist must not load ticker-only summary code");
+  assert(appSource.includes("Recent behavior summary is temporarily unavailable."), "ticker detail must fail clearly when its summary dependency is unavailable");
+  assert(appSource.includes("session dates are incomplete"), "ticker detail must explain mixed-date history failures");
+  assert(appSource.includes("maximum drawdown based on closing prices"), "behavior summary must disclose its drawdown basis");
+  assert(appSource.includes("highest daily high"), "behavior summary must compare the latest close with the period's intraday high");
+  assert(appSource.includes("function historySignalSentence(rows, summaryApi)"), "behavior summary must report the latest actual signal transition");
+  assert(appSource.includes("function pressureSummary(rows, summaryApi)"), "behavior summary must provide a bounded price-and-volume pressure inference");
+  assert(appSource.includes("comparison.shift") && appSource.includes("comparison.control"), "pressure copy must distinguish directional shift from current control");
+  assert(appSource.includes("Directionally supportive volume"), "volume confirmation must agree with pressure direction");
+  assert(appSource.includes("This price-and-volume proxy does not override today's"), "pressure inference must not soften a defensive signal");
+  assert(appSource.includes("Today's data is stale, so this historical pressure is descriptive only."), "stale pressure must be explicitly qualified");
+  assert(appSource.includes("A 5-versus-25 session comparison needs 30 valid observations"), "partial history must not be presented as a full pressure window");
+  assert(!appSource.includes("The most common view was"), "behavior summary must not substitute a dominant historical label for the actual transition");
+  assert(appSource.includes("The current Exit signal takes priority"), "positive history must never soften today's Exit signal");
+  assert(appSource.includes("Today's data is stale, so the recent record cannot support an entry."), "stale history must be explained without execution jargon");
+  assert(appSource.includes("The technical picture is developing, but it has not reached an entry signal."), "Building must remain explicitly non-executable");
   assert(appSource.includes("function similarCasesNarrative(row)"), "plain-language evidence must retain comparable historical context");
   assert(appSource.includes("No entry is recommended today."), "inactive signals must not expose misleading planning levels");
   assert(tickerSource.includes("Today's decision") && tickerSource.includes("Recent behavior"), "ticker detail must follow the user decision order");
@@ -1070,6 +1149,7 @@ async function main() {
     supabaseFallback: auditSupabaseFallback(),
     historicalReplayDto: auditHistoricalReplayDto(),
     searchBehavior: auditSearchBehavior(),
+    historySummary: auditHistorySummary(),
     decisionFunnelUi: auditDecisionFunnelUi(),
     marketSessionFreshness: auditMarketSessionFreshness(),
     learningReadoutUi: auditLearningReadoutUi(),
