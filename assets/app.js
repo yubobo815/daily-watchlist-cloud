@@ -490,7 +490,7 @@ function displaySecurityName(name, ticker) {
 }
 
 function historyDisplayTitle() {
-  return state.tickerName || state.ticker;
+  return state.tickerName ? `${state.ticker} · ${state.tickerName}` : state.ticker;
 }
 
 function cleanSummaryText(text) {
@@ -520,15 +520,17 @@ function renderCompanyBrief(profile) {
   const summaryPreview = summary.length > 260 ? `${summary.slice(0, 257).replace(/\s+\S*$/, "")}...` : summary;
 
   if (!summary && !highlights && !nextReport && !website && !industry) {
+    setCompanyContextAvailable(false);
     target.innerHTML = `
-      <h2>Company Context</h2>
-      <div class="company-context-empty subtle">No company context available yet.</div>
+      <h2>About the company</h2>
+      <div class="company-context-empty subtle">Company information is not available.</div>
     `;
     return;
   }
 
+  setCompanyContextAvailable(true);
   target.innerHTML = `
-    <h2>Company Context</h2>
+    <h2>About the company</h2>
     <details class="company-brief">
       <summary>
         ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
@@ -544,6 +546,13 @@ function renderCompanyBrief(profile) {
       <span class="company-source">Source: ${escapeHtml(source)}</span>
     </details>
   `;
+}
+
+function setCompanyContextAvailable(available) {
+  const section = document.querySelector("#company-context");
+  const tab = document.querySelector('.app-tabbar a[href="#company-context"]');
+  if (section) section.hidden = !available;
+  if (tab) tab.hidden = !available;
 }
 
 function hasCompanyProfile(profile) {
@@ -653,16 +662,6 @@ function scannerScoreValue(row) {
   const raw = adjusted === "" || adjusted == null ? payloadValue(row, "score") : adjusted;
   const number = Number(raw);
   return Number.isFinite(number) ? number : 0;
-}
-
-function scalePoint(value, min, max, start, end) {
-  if (max === min) return (start + end) / 2;
-  return start + ((value - min) / (max - min)) * (end - start);
-}
-
-function linePath(points) {
-  if (!points.length) return "";
-  return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
 }
 
 function setupLabel(value) {
@@ -877,7 +876,7 @@ function naturalActionSentence(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
   const style = String(payloadValue(row, "execution_style") || "").toUpperCase();
-  if (kind === "buy" && style === "BREAKOUT TRIGGER") return `${pattern} conditions are in place; enter only if price reaches the trigger band without running above the maximum entry.`;
+  if (kind === "buy" && style === "BREAKOUT TRIGGER") return `${pattern} conditions are in place; enter only if price reaches the breakout entry range without running above the maximum entry.`;
   if (kind === "buy") return `${pattern} conditions are in place; use a limit entry only inside the pullback zone and require it to hold.`;
   if (kind === "continue") return "The existing trend remains constructive, but a new entry should avoid chasing strength.";
   if (kind === "setup") return `${pattern} is taking shape, but it still needs confirmation before it becomes a buy.`;
@@ -904,7 +903,7 @@ function executionChecksClear(row) {
 
 function entryPlanLabel(row, { active = false } = {}) {
   const style = String(payloadValue(row, "execution_style") || "").toUpperCase();
-  if (style === "BREAKOUT TRIGGER") return active ? "Trigger band" : "Reference trigger band";
+  if (style === "BREAKOUT TRIGGER") return active ? "Breakout entry range" : "Reference breakout range";
   if (style === "PULLBACK LIMIT") return active ? "Pullback zone" : "Reference pullback zone";
   return active ? "Entry zone" : "Reference zone";
 }
@@ -951,7 +950,7 @@ function decisionNarrative(row) {
   }
   if (kind === "setup" || kind === "watch") return `${priceLead}. ${naturalActionSentence(row)}${position ? ` Price is ${position}.` : ""}`;
   if (kind === "buy" && String(payloadValue(row, "execution_style") || "").toUpperCase() === "BREAKOUT TRIGGER") {
-    return `${priceLead}. This is a conditional breakout plan, not a market order. Enter only inside the trigger band and skip the trade if price opens or runs above the maximum entry.`;
+    return `${priceLead}. This is a conditional breakout plan, not a market order. Enter only inside the breakout entry range and skip the trade if price opens or runs above the maximum entry.`;
   }
   if (kind === "buy" && position.includes("above")) return `${priceLead}. Price is ${position}; wait for a controlled pullback or a new base instead of chasing.`;
   return `${priceLead}. ${naturalActionSentence(row)}${position ? ` Price is ${position}.` : ""}`;
@@ -970,7 +969,7 @@ function predictionNarrative(row) {
   }
   const certainty = confidence >= 0.65 ? "moderate" : confidence >= 0.40 ? "limited" : "low";
   if (modelVersion.startsWith("ohlcv-ridge")) {
-    return `Using the validated OHLCV model, the next ${horizon} sessions are estimated at ${fmtNumber(upside * 100, 0)}% for a meaningful rise, ${fmtNumber(downside * 100, 0)}% for a meaningful decline, and ${fmtNumber(noEdge * 100, 0)}% for no decisive move. Confidence is ${certainty}.`;
+    return `Using price-and-volume history, the next ${horizon} sessions are estimated at ${fmtNumber(upside * 100, 0)}% for a meaningful rise, ${fmtNumber(downside * 100, 0)}% for a meaningful decline, and ${fmtNumber(noEdge * 100, 0)}% for no decisive move. Confidence is ${certainty}.`;
   }
   const message = `Among comparable filled ${horizon}-session trade plans, the model estimates ${fmtNumber(upside * 100, 0)}% target reached, ${fmtNumber(downside * 100, 0)}% stop reached, and ${fmtNumber(noEdge * 100, 0)}% unresolved. Confidence is ${certainty}.`;
   return state === "CALIBRATED" ? message : `${message} Validation is incomplete, so this estimate does not change today's decision.`;
@@ -980,10 +979,7 @@ function recentBehaviorSummary(row, previous) {
   const close = numericValue(row, "close");
   const move = numericValue(row, "day_change_pct");
   const moveText = Number.isFinite(move) ? `${move >= 0 ? "up" : "down"} ${fmtNumber(Math.abs(move), 1)}%` : "little changed";
-  const signal = ACTION_LABELS[row.action] || row.action;
-  const priorSignal = previous ? (ACTION_LABELS[previous.action] || previous.action) : "";
-  const change = priorSignal && priorSignal !== signal ? ` The scanner moved from ${priorSignal} to ${signal}.` : "";
-  return `Closed at ${fmtNumber(close, 2)}, ${moveText} on the day. ${naturalActionSentence(row)}${change}`;
+  return `Closed at ${fmtNumber(close, 2)}, ${moveText} on the day. ${naturalActionSentence(row)}`;
 }
 
 function behaviorDetail(row) {
@@ -1261,10 +1257,6 @@ function dataDateSummary(rows) {
   return earliest === latest ? `Market data: ${latest}` : `Market data: ${earliest} to ${latest}`;
 }
 
-function isStaleMarketDate(runDate, rows) {
-  return rows.some((row) => payloadValue(row, "freshness_block") === "YES");
-}
-
 function historyDateSummary(rows) {
   const dates = [...new Set(rows.map((row) => row.history_date || row.date).filter(Boolean))].sort();
   if (!dates.length) return "";
@@ -1397,7 +1389,6 @@ function renderScoreBreakdown(row) {
   const seller = Number(payloadValue(row, "seller_score"));
   const volume = String(payloadValue(row, "volume_state") || "NEUTRAL").toUpperCase();
   const market = String(payloadValue(row, "market_context") || "UNKNOWN").toUpperCase();
-  const volatility = String(payloadValue(row, "volatility_regime") || "NORMAL").replaceAll("_", " ").toLowerCase();
   const nextDayBias = String(payloadValue(row, "next_day_bias") || "NEUTRAL").toUpperCase();
   const tape = Number.isFinite(buyer) && Number.isFinite(seller)
     ? buyer >= seller + 12
@@ -1411,27 +1402,13 @@ function renderScoreBreakdown(row) {
     : market === "LAGGING"
       ? "The stock is lagging SPY/QQQ over the recent comparison window."
       : "Relative performance versus the market is mixed.";
-  const nearTerm = nextDayBias.includes("BULLISH")
-    ? "The latest OHLCV pattern supports possible upside follow-through, but it is not a buy signal by itself."
-    : nextDayBias.includes("BEARISH")
-      ? "The latest OHLCV pattern points to near-term downside risk."
-      : "The latest OHLCV pattern has no clear next-session edge.";
   const items = [
-    ["Price action", tape],
-    ["Relative trend", relativeTrend],
-    ["Near-term read", nearTerm],
-    ["Entry fillability", fillabilityReadout(row)],
-    ["Five-session outlook", predictionNarrative(row)],
-    ["Stock personality", `This stock is currently behaving like a ${volatility} name; position sizing should reflect that variability.`],
-    ["Historical learning", learningReadout(row)],
-    ["Risk checks", validationSummary(row)]
+    ["Price and trend", `${tape} ${relativeTrend}`],
+    ["Similar past setups", similarCasesNarrative(row)],
+    ["Main risk", mainRiskNarrative(row, { nextDayBias, seller, buyer })]
   ];
   return `
     <div class="score-explainer">
-      <div class="score-explainer-head">
-        <span>Evidence behind this read</span>
-        <strong>${escapeHtml(decisionNarrative(row))}</strong>
-      </div>
       <div class="score-factors">
         ${items.map(([label, value]) => `
           <div>
@@ -1442,6 +1419,60 @@ function renderScoreBreakdown(row) {
       </div>
     </div>
   `;
+}
+
+function similarCasesNarrative(row) {
+  const sentences = [];
+  const volatility = String(payloadValue(row, "volatility_regime") || "NORMAL").toUpperCase();
+  const fillSamples = Number(payloadValue(row, "execution_fill_sample_count"));
+  const fillProbability = Number(payloadValue(row, "execution_fill_probability"));
+  const upside = Number(payloadValue(row, "prediction_upside_probability"));
+  const downside = Number(payloadValue(row, "prediction_downside_probability"));
+  const noEdge = Number(payloadValue(row, "prediction_no_edge_probability"));
+  const predictionState = String(payloadValue(row, "prediction_state") || "").toUpperCase();
+  const adjustment = Number(payloadValue(row, "learning_adjustment"));
+  const learningEligible = learningBoolean(payloadValue(row, "learning_promotion_eligible")) === true
+    && learningBoolean(payloadValue(row, "learning_reporting_only")) !== true;
+
+  if (volatility.includes("HIGH") || volatility.includes("EXPANSION")) {
+    sentences.push("This stock has recently made larger-than-usual moves, so position size matters more.");
+  } else if (volatility.includes("LOW") || volatility.includes("COMPRESSED")) {
+    sentences.push("This stock has recently moved in a tighter range than usual.");
+  }
+  if (Number.isFinite(fillSamples) && fillSamples > 0 && Number.isFinite(fillProbability)) {
+    sentences.push(`In ${fmtNumber(fillSamples, 0)} similar plans, price reached the planned entry about ${fmtNumber(fillProbability * 100, 0)}% of the time.`);
+  } else {
+    sentences.push("There are not enough completed similar entries to rely on a historical fill rate.");
+  }
+  if (predictionState === "CALIBRATED" && [upside, downside, noEdge].every(Number.isFinite)) {
+    const likely = upside >= downside && upside >= noEdge
+      ? "an upward move"
+      : downside >= noEdge
+        ? "a downward move"
+        : "no decisive move";
+    sentences.push(`Comparable five-session paths most often pointed to ${likely}.`);
+  }
+  if (learningEligible && Number.isFinite(adjustment) && Math.abs(adjustment) >= 0.5) {
+    sentences.push(`Past outcomes ${adjustment > 0 ? "raised" : "lowered"} confidence in today's view.`);
+  }
+  return sentences.slice(0, 3).join(" ");
+}
+
+function mainRiskNarrative(row, context = {}) {
+  const kind = actionKind(row.action);
+  const seller = Number.isFinite(context.seller) ? context.seller : Number(payloadValue(row, "seller_score"));
+  const buyer = Number.isFinite(context.buyer) ? context.buyer : Number(payloadValue(row, "buyer_score"));
+  const nextDayBias = String(context.nextDayBias || payloadValue(row, "next_day_bias") || "").toUpperCase();
+  if (payloadValue(row, "freshness_block") === "YES") return "Price data is not current, so no action is suggested.";
+  if (["YES", "true", true].includes(payloadValue(row, "event_risk"))) return "A company report is close, so a gap could invalidate the price plan.";
+  if (payloadValue(row, "extension_state") === "EXTENDED") return "Price is above the preferred entry area; chasing it would increase downside risk.";
+  if (kind === "exit") return "Selling pressure is damaging the trend; capital protection matters more than a new entry.";
+  if (Number.isFinite(seller) && Number.isFinite(buyer) && seller >= buyer + 12) return "Sellers currently have the advantage, so wait for demand to return.";
+  if (!executionChecksClear(row)) return validationSummary(row);
+  if (nextDayBias.includes("BEARISH")) return "The latest price pattern points to near-term downside risk.";
+  const stop = numericValue(row, "stop_est");
+  if (stop && ["buy", "continue"].includes(kind)) return `The constructive view is invalid if price closes below ${fmtNumber(stop, 2)}.`;
+  return "No single risk dominates, but the setup still depends on price and volume holding together.";
 }
 
 function renderHistoryChangeChips(row, previous) {
@@ -1510,7 +1541,7 @@ function renderMarketRail(runInfo, rows = []) {
     <dl>
       <div><dt>Coverage</dt><dd>${escapeHtml(coverage)}</dd></div>
       <div><dt>US close</dt><dd>${escapeHtml(dataDate)}</dd></div>
-      <div><dt>Execution</dt><dd class="tone-${health.tone}">${escapeHtml(health.label)}</dd></div>
+      <div><dt>Status</dt><dd class="tone-${health.tone}">${escapeHtml(health.label)}</dd></div>
     </dl>
   `;
 }
@@ -1518,7 +1549,16 @@ function renderMarketRail(runInfo, rows = []) {
 function runHealthStatus(runInfo, rows = []) {
   const failed = Number(runInfo?.symbols_failed || 0);
   const stale = Number(runInfo?.symbols_stale_cache || 0);
-  const staleBlocks = Number(runInfo?.payload?.stale_execution_blocks || 0);
+  const latestRows = new Map();
+  rows.forEach((row) => {
+    const ticker = String(row.ticker || "_");
+    const date = String(row.history_date || row.data_date || row.date || "");
+    const previous = latestRows.get(ticker);
+    if (!previous || date > previous.date) latestRows.set(ticker, { date, row });
+  });
+  const rowStaleBlocks = [...latestRows.values()]
+    .filter(({ row }) => payloadValue(row, "freshness_block") === "YES").length;
+  const staleBlocks = Number(runInfo?.payload?.stale_execution_blocks ?? rowStaleBlocks);
   const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
   const total = Number(runInfo?.symbols_total || rows.length || 0);
   const liveOk = runInfo?.live_access_ok;
@@ -1566,7 +1606,7 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const disclaimer = document.querySelector("#app-disclaimer");
   const runStatus = document.querySelector("#run-status");
   if (runStatus) {
-    const stalePrefix = isStaleMarketDate(latest, rows) ? "Market data may lag · " : "";
+    const stalePrefix = runHealthStatus(runInfo, rows).tone === "ok" ? "" : "Some data may lag · ";
     runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
     runStatus.classList.toggle("warn", Boolean(
       runInfo && (
@@ -2016,7 +2056,7 @@ function validationSummary(row) {
       : "The pattern has not held up consistently in historical testing.";
   };
   return items.length
-    ? items.map(([label, value]) => validationSentence(label, value)).join(" ")
+    ? validationSentence(items[0][0], items[0][1])
     : "Market, stock-specific, risk and historical checks are clear.";
 }
 
@@ -2028,12 +2068,12 @@ function renderReferenceLevels(row, { active = false } = {}) {
   const postTp1Stop = payloadNumeric(row, "post_tp1_stop");
   const rows = [
     [entryPlanLabel(row, { active }), formatEntryZone(row) || "Unavailable"],
-    ...(active ? [["Execution rule", payloadValue(row, "entry_zone_plan") || "Use only the stated entry plan."]] : []),
+    ...(active ? [["How to enter", payloadValue(row, "entry_zone_plan") || "Use only the stated entry plan."]] : []),
     [active ? "Protect below" : "Reference stop", fmtNumber(row.stop_est, 2) || "Unavailable"],
     ...(active ? [
       ["First profit review", takeProfit1 ? `${fmtNumber(takeProfit1, 2)} · consider trimming ${fmtNumber(reducePct || 33, 0)}%` : "Unavailable"],
       ["After first target", postTp1Stop ? `Raise protection to ${fmtNumber(postTp1Stop, 2)} or higher` : "Unavailable"],
-      ["Longer-term reference", target ? fmtNumber(target, 2) : "Unavailable"],
+      ["Further target", target ? fmtNumber(target, 2) : "Unavailable"],
       ["Planned downside", risk ? `${fmtNumber(Math.abs(risk), 1)}%` : "Unavailable"]
     ] : [])
   ];
@@ -2052,11 +2092,11 @@ function renderTickerDetailPanel() {
     <div class="detail-panel-head"><div><span class="eyebrow">Selected stock</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open details</a></div>
     <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
     <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-    <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do now</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
+    <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
     ${activePlan
-      ? `<section class="active-plan"><span class="eyebrow">Conditional entry plan</span>${renderReferenceLevels(row, { active: true })}</section>`
-      : `<div class="inactive-plan">No executable entry plan. These levels are context only.</div><details class="reference-levels"><summary>Planning levels (inactive)</summary>${renderReferenceLevels(row)}</details>`}
-    <details class="detail-diagnostics"><summary>Evidence behind this read</summary>${renderScoreBreakdown(row)}</details>
+      ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(row, { active: true })}</section>`
+      : `<div class="inactive-plan">No entry is recommended today.</div>`}
+    <details class="detail-diagnostics"><summary>Why we see it this way</summary>${renderScoreBreakdown(row)}</details>
   `;
 }
 
@@ -2605,12 +2645,18 @@ function initTabNavigation() {
   const tabs = [...document.querySelectorAll(".app-tabbar a")];
   if (!tabs.length) return;
   const setActive = (hash) => {
-    tabs.forEach((tab) => tab.classList.toggle("active", tab.getAttribute("href") === hash));
+    tabs.forEach((tab) => {
+      const active = tab.getAttribute("href") === hash;
+      tab.classList.toggle("active", active);
+      if (active) tab.setAttribute("aria-current", "page");
+      else tab.removeAttribute("aria-current");
+    });
   };
   tabs.forEach((tab) => {
     tab.addEventListener("click", (event) => {
       const hash = tab.getAttribute("href");
-      const target = hash ? document.querySelector(hash) : null;
+      if (!hash?.startsWith("#")) return;
+      const target = document.querySelector(hash);
       if (!target) return;
       event.preventDefault();
       if (target instanceof HTMLDetailsElement) target.open = true;
@@ -2689,7 +2735,7 @@ async function initWatchlist() {
       state.runInfo = fallback.runInfo || null;
       await loadCloudFocusTickers();
       const marketData = dataDateSummary(state.rows);
-      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
+      setRefreshSummary(fallback.latest, `${marketData} · saved validated data`, state.rows);
       renderWatchlist();
       return;
     }
@@ -2707,7 +2753,7 @@ async function initWatchlist() {
       state.runInfo = fallback.runInfo || null;
       await loadCloudFocusTickers();
       const marketData = dataDateSummary(state.rows);
-      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.rows);
+      setRefreshSummary(fallback.latest, `${marketData} · saved validated data`, state.rows);
       renderWatchlist();
     } catch {
       setStatus(error.message, false);
@@ -2726,15 +2772,15 @@ function renderLatestHistoryPanel(latest) {
   panel.innerHTML = `
     <div class="latest-card tone-${actionKind(latest.action)}">
       <div class="latest-head">
-        <span class="latest-label">Current read</span>
+        <span class="latest-label">Today's signal</span>
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
       </div>
       <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
-      <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do now</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
+      <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
       ${activePlan
-        ? `<section class="active-plan"><span class="eyebrow">Conditional entry plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
-        : `<div class="inactive-plan">No executable entry plan. Planning levels are hidden until the setup is ready.</div><details class="reference-levels"><summary>Planning levels (inactive)</summary>${renderReferenceLevels(latest)}</details>`}
-      <details class="detail-diagnostics"><summary>Evidence behind this read</summary>${renderScoreBreakdown(latest)}</details>
+        ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
+        : `<div class="inactive-plan">No entry is recommended today.</div>`}
+      <details class="detail-diagnostics"><summary>Why we see it this way</summary>${renderScoreBreakdown(latest)}</details>
     </div>
   `;
 }
@@ -2743,110 +2789,37 @@ function renderHistoryVisual(rows) {
   const visual = document.querySelector("#history-visual");
   const chronological = [...rows].reverse();
   if (!chronological.length) {
-    visual.innerHTML = "<div class=\"empty\">No visual history found.</div>";
+    visual.innerHTML = "<div class=\"empty\">No recent behavior found.</div>";
     return;
   }
 
-  const width = 960;
-  const height = 146;
-  const pad = { left: 34, right: 22, top: 16, bottom: 26 };
-  const plotWidth = width - pad.left - pad.right;
-  const plotHeight = height - pad.top - pad.bottom;
-  const scores = chronological.map((row) => convictionScore(row));
-  const closes = chronological.map((row) => numericValue(row, "close"));
-  const minClose = Math.min(...closes);
-  const maxClose = Math.max(...closes);
-  const xFor = (index) => pad.left + (chronological.length === 1 ? plotWidth / 2 : (index / (chronological.length - 1)) * plotWidth);
-  const scoreY = (score) => pad.top + plotHeight - (Math.max(0, Math.min(100, score)) / 100) * plotHeight;
-  const closeY = (close) => scalePoint(close, minClose, maxClose, pad.top + plotHeight, pad.top);
-  const pricePointList = chronological.map((row, index) => ({ x: xFor(index), y: closeY(numericValue(row, "close")) }));
-  const pricePath = linePath(pricePointList);
   const latest = chronological.at(-1);
   const first = chronological[0];
   const priceMove = numericValue(latest, "close") - numericValue(first, "close");
   const firstClose = numericValue(first, "close");
   const priceMovePct = firstClose ? (priceMove / firstClose) * 100 : 0;
   const signalCounts = chronological.reduce((counts, row) => {
-    const kind = actionKind(row.action);
-    counts[kind] = (counts[kind] || 0) + 1;
+    const label = ACTION_LABELS[row.action] || row.action;
+    counts[label] = (counts[label] || 0) + 1;
     return counts;
   }, {});
-  const dominantSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "watch";
-  const priceRange = maxClose - minClose;
-  const gridLines = [75, 50, 25].map((score) => `
-    <line x1="${pad.left}" y1="${scoreY(score).toFixed(1)}" x2="${width - pad.right}" y2="${scoreY(score).toFixed(1)}" class="chart-grid" />
-    <text x="${pad.left - 10}" y="${scoreY(score).toFixed(1) + 3}" text-anchor="end" class="score-tick">${score}</text>
-  `).join("");
-  const barSlot = chronological.length > 1 ? plotWidth / chronological.length : plotWidth;
-  const barWidth = Math.max(6, Math.min(18, barSlot * 0.58));
-  const baselineY = pad.top + plotHeight;
-  const scoreBars = chronological.map((row, index) => {
-    const score = convictionScore(row);
-    const y = scoreY(score);
-    const x = xFor(index) - barWidth / 2;
-    return `
-      <rect class="score-bar score-${scoreBand(score)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, baselineY - y).toFixed(1)}" rx="3">
-        <title>${escapeHtml(row.history_date)} · trend quality ${escapeHtml(strengthLabel(row))} · raw rank ${fmtNumber(row.score, 1)} · close ${fmtNumber(row.close, 2)}</title>
-      </rect>
-    `;
-  }).join("");
-  const dateTicks = chronological
-    .map((row, index) => ({ row, index }))
-    .filter(({ index }) => index === 0 || index === chronological.length - 1 || (index % 7 === 0 && index < chronological.length - 3))
-    .map(({ row, index }, tickIndex, ticks) => {
-      return `<text x="${xFor(index).toFixed(1)}" y="${height - 18}" text-anchor="${index === 0 ? "start" : tickIndex === ticks.length - 1 ? "end" : "middle"}">${escapeHtml(fmtCompactDate(row.history_date))}</text>`;
-    }).join("");
+  const dominantSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Watch";
+  const startSignal = ACTION_LABELS[first.action] || first.action;
+  const latestSignal = ACTION_LABELS[latest.action] || latest.action;
+  const trendChange = convictionScore(latest) - convictionScore(first);
+  const signalSentence = startSignal !== latestSignal
+    ? `The view moved from ${startSignal} to ${latestSignal}.`
+    : `The most common view was ${dominantSignal}; today's view is ${latestSignal}.`;
+  const trendSentence = Math.abs(trendChange) < 8
+    ? "The technical condition is broadly unchanged over this period."
+    : `The technical condition has ${trendChange > 0 ? "strengthened" : "weakened"} over this period.`;
 
   visual.innerHTML = `
-    <div class="visual-summary">
-      <div>
-        <span class="subtle">Latest signal</span>
-        <strong><span class="badge ${actionKind(latest.action)}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span></strong>
-      </div>
-      <div>
-        <span class="subtle">30-day price move</span>
-        <strong class="${priceMove >= 0 ? "up" : "down"}">
-          ${priceMove >= 0 ? "+" : ""}${fmtNumber(priceMove, 2)}
-          <span>${fmtSignedNumber(priceMovePct, 1)}%</span>
-        </strong>
-      </div>
+    <div class="behavior-summary" aria-label="Recent behavior summary">
+      <div><span>Price</span><strong>Price ${priceMove >= 0 ? "rose" : "fell"} ${fmtNumber(Math.abs(priceMovePct), 1)}% over the last ${chronological.length} sessions.</strong></div>
+      <div><span>Signal</span><strong>${escapeHtml(signalSentence)}</strong></div>
+      <div><span>Trend</span><strong>${escapeHtml(trendSentence)}</strong></div>
     </div>
-    <details class="chart-details">
-      <summary>
-        <span>Optional chart</span>
-        <strong>Daily scanner bars</strong>
-      </summary>
-      <div class="chart-card">
-      <div class="chart-heading">
-        <div>
-          <span>Trend Quality Detail</span>
-          <strong>Daily trend-quality bars</strong>
-          <p class="chart-note">Bars show normalized scanner trend quality. The thin dotted line shows close-price direction, scaled only for shape comparison.</p>
-        </div>
-        <div class="chart-latest">
-          <span>Latest</span>
-          <strong>${escapeHtml(strengthLabel(latest))}</strong>
-        </div>
-      </div>
-      <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(state.ticker)} 30-day trend quality and price chart">
-        <rect x="${pad.left}" y="${pad.top}" width="${plotWidth}" height="${plotHeight}" class="plot-bg" />
-        ${gridLines}
-        ${scoreBars}
-        <path d="${pricePath}" class="price-line" />
-        ${dateTicks}
-      </svg>
-      <div class="chart-legend">
-        <span><i class="legend-score"></i> daily quality bars</span>
-        <span><i class="legend-price"></i> price direction</span>
-      </div>
-      <div class="chart-insights">
-        <div><span>Dominant signal</span><strong>${escapeHtml(KIND_LABELS[dominantSignal] || dominantSignal.toUpperCase())}</strong></div>
-        <div><span>Current pattern</span><strong>${escapeHtml(setupLabel(latest.setup))}</strong></div>
-        <div><span>Close range</span><strong>${fmtNumber(minClose, 2)} - ${fmtNumber(maxClose, 2)}</strong></div>
-        <div><span>Range width</span><strong>${fmtNumber(priceRange, 2)}</strong></div>
-      </div>
-      </div>
-    </details>
   `;
 }
 
@@ -2854,7 +2827,7 @@ function renderHistoryRows() {
   const timeline = document.querySelector("#timeline");
   if (!state.historyRows.length) {
     timeline.innerHTML = "<div class=\"empty\">No history found for this ticker.</div>";
-    document.querySelector("#history-visual").innerHTML = "<div class=\"empty\">No visual history found.</div>";
+    document.querySelector("#history-visual").innerHTML = "<div class=\"empty\">No recent behavior found.</div>";
     renderLatestHistoryPanel(null);
     return;
   }
@@ -2862,24 +2835,33 @@ function renderHistoryRows() {
   renderHistoryVisual(state.historyRows);
   const chronological = [...state.historyRows].reverse();
   const previousByDate = new Map(chronological.map((row, index) => [row.history_date, chronological[index - 1] || null]));
-  const recentRows = state.historyRows.slice(0, Math.min(6, state.historyRows.length));
-  const lookbackRows = state.historyRows.slice(recentRows.length);
+  const meaningfulRows = state.historyRows.filter((row, index) => {
+    const previous = previousByDate.get(row.history_date);
+    return index === 0
+      || !previous
+      || row.action !== previous.action
+      || row.setup !== previous.setup
+      || Math.abs(convictionScore(row) - convictionScore(previous)) >= 8
+      || Math.abs(numericValue(row, "day_change_pct")) >= 3;
+  });
+  const recentRows = meaningfulRows.slice(0, 3);
+  const recentDates = new Set(recentRows.map((row) => row.history_date));
+  const lookbackRows = state.historyRows.filter((row) => !recentDates.has(row.history_date));
 
   timeline.innerHTML = `
-    <h3>Recent changes</h3>
+    <h3>What changed</h3>
     ${recentRows.map((row, index) => `
       <div class="moment-card tone-${actionKind(row.action)}">
         <div class="moment-date">${index === 0 ? "Latest" : escapeHtml(fmtCompactDate(row.history_date))}</div>
         <div class="moment-body">
           <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-          <div class="change-chips">${renderHistoryChangeChips(row, previousByDate.get(row.history_date))}</div>
+          <p class="moment-change">${escapeHtml(historyChangeSentence(row, previousByDate.get(row.history_date)))}</p>
           <p class="subtle">${escapeHtml(recentBehaviorSummary(row, previousByDate.get(row.history_date)))}</p>
-          ${index === 0 && row.notes ? `<p class="subtle">${escapeHtml(behaviorDetail(row))}</p>` : ""}
         </div>
       </div>
     `).join("")}
     <details class="raw-history">
-      <summary>Show Earlier Days</summary>
+      <summary>See earlier sessions</summary>
       <div class="lookback-grid">
       ${lookbackRows.length ? lookbackRows.map((row) => `
         <article class="lookback-card tone-${actionKind(row.action)}">
@@ -2889,13 +2871,11 @@ function renderHistoryRows() {
           </div>
           <div class="lookback-main">
             <span class="badge ${actionKind(row.action)}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-            <strong>${escapeHtml(strengthLabel(row))}</strong>
           </div>
           <div class="lookback-meta">
             <span>${escapeHtml(setupLabel(row.setup))}</span>
             ${renderMovePct(row.day_change_pct)}
           </div>
-          <div class="bar"><span class="score-${scoreBand(convictionScore(row))}" style="width: ${Math.max(2, convictionScore(row))}%"></span></div>
           <div class="lookback-price">
             <strong>${fmtNumber(row.close, 2)}</strong>
           </div>
@@ -2906,15 +2886,29 @@ function renderHistoryRows() {
   `;
 }
 
+function historyChangeSentence(row, previous) {
+  if (!previous) return "This is the first recorded session.";
+  const currentSignal = ACTION_LABELS[row.action] || row.action;
+  const priorSignal = ACTION_LABELS[previous.action] || previous.action;
+  if (currentSignal !== priorSignal) return `The view changed from ${priorSignal} to ${currentSignal}.`;
+  if (row.setup !== previous.setup) return `The price pattern changed to ${setupLabel(row.setup).toLowerCase()}.`;
+  const trendMove = convictionScore(row) - convictionScore(previous);
+  if (Math.abs(trendMove) >= 8) return `The technical condition ${trendMove > 0 ? "strengthened" : "weakened"}.`;
+  const priceMove = numericValue(row, "day_change_pct");
+  if (Math.abs(priceMove) >= 3) return `Price made a larger-than-usual ${priceMove > 0 ? "upward" : "downward"} move.`;
+  return "There was no important change from the prior session.";
+}
+
 async function loadHistory(ticker) {
   state.ticker = normaliseTicker(ticker);
   state.tickerName = "";
   document.querySelector("#ticker").value = state.ticker;
   document.querySelector("#history-title").textContent = state.ticker;
   document.querySelector("#ticker-name").innerHTML = "";
+  setCompanyContextAvailable(false);
   document.querySelector("#company-context").innerHTML = `
-    <h2>Company Context</h2>
-    <div class="company-context-empty subtle">Loading company context...</div>
+    <h2>About the company</h2>
+    <div class="company-context-empty subtle">Loading company information...</div>
   `;
   document.title = state.ticker;
   window.history.replaceState(null, "", `./ticker.html?ticker=${encodeURIComponent(state.ticker)}`);
@@ -2942,7 +2936,7 @@ async function loadHistory(ticker) {
       document.title = historyDisplayTitle();
       state.historyRows = fallback.rows;
       const marketData = historyDateSummary(state.historyRows);
-      setRefreshSummary(fallback.latest, `${marketData} · static fallback`, state.historyRows);
+      setRefreshSummary(fallback.latest, `${marketData} · saved validated data`, state.historyRows);
       renderCompanyBrief({});
       renderHistoryRows();
     } catch (fallbackError) {
