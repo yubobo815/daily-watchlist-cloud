@@ -920,6 +920,26 @@ def supabase_select(path: str) -> list[dict]:
         raise RuntimeError(f"Supabase select failed with HTTP {exc.code}: {body}") from exc
 
 
+def supabase_select_all(path: str, page_size: int = 1000, max_pages: int = 100) -> list[dict]:
+    """Read every PostgREST page without relying on a server-side max-row setting."""
+    if page_size < 1 or max_pages < 1:
+        raise ValueError("Supabase pagination limits must be positive")
+    if "limit=" in path or "offset=" in path:
+        raise ValueError("Paginated Supabase paths must not include limit or offset")
+
+    separator = "&" if "?" in path else "?"
+    rows: list[dict] = []
+    for page_number in range(max_pages):
+        offset = page_number * page_size
+        page = supabase_select(f"{path}{separator}limit={page_size}&offset={offset}")
+        rows.extend(page)
+        if len(page) < page_size:
+            return rows
+    raise RuntimeError(
+        f"Supabase select exceeded the guarded pagination limit ({page_size * max_pages} rows): {path}"
+    )
+
+
 OPTIONAL_REFRESH_RUN_COLUMNS = {
     "learning_history_rows",
 }
@@ -2461,11 +2481,16 @@ def fetch_previous_behavior_history(run_date: str) -> list[dict]:
         publication_id = run_rows[0].get("publication_id") or (run_rows[0].get("payload") or {}).get("publication_id")
         if not publication_id:
             return []
-        rows = supabase_select(
+        rows = supabase_select_all(
             "watchlist_behavior_history?select=*&"
             f"publication_id=eq.{urllib.parse.quote(str(publication_id))}&"
-            "order=ticker.asc,history_date.asc&limit=10000"
+            "order=ticker.asc,history_date.asc"
         )
+        identities = [(row.get("ticker"), row.get("history_date")) for row in rows]
+        if any(not ticker or not history_date for ticker, history_date in identities):
+            raise RuntimeError("Inherited behavior history contains rows without a ticker/date identity")
+        if len(identities) != len(set(identities)):
+            raise RuntimeError("Inherited behavior history contains duplicate ticker/date rows")
         return [merge_payload_row(row) for row in rows]
     except RuntimeError as exc:
         print(f"Previous behavior-history fetch skipped: {exc}")
@@ -2511,6 +2536,26 @@ def behavior_history_by_ticker(rows: list[dict]) -> dict[str, list[dict]]:
         by_date = {str(row.get("date")): row for row in ticker_rows}
         grouped[ticker] = [by_date[date] for date in sorted(by_date)]
     return grouped
+
+
+def incremental_history_ready(history_rows: list[dict], tickers: list[str], history_days: int) -> bool:
+    """Reject partial inherited publications before a daily run can build on them."""
+    if not history_rows or not tickers:
+        return False
+    frame = pd.DataFrame(history_rows)
+    if "ticker" not in frame.columns:
+        return False
+    date_column = next((column for column in ("history_date", "data_date", "date") if column in frame.columns), None)
+    if not date_column:
+        return False
+    normalized = frame[["ticker", date_column]].copy()
+    normalized["ticker"] = normalized["ticker"].astype(str).map(display_ticker)
+    normalized[date_column] = pd.to_datetime(normalized[date_column], errors="coerce").dt.date
+    normalized = normalized.dropna().drop_duplicates()
+    required_sessions = min(25, max(1, int(history_days)))
+    required_tickers = math.ceil(len({display_ticker(ticker) for ticker in tickers}) * 0.80)
+    coverage = normalized.groupby("ticker")[date_column].nunique()
+    return int((coverage >= required_sessions).sum()) >= required_tickers
 
 
 def load_local_behavior_history() -> list[dict]:
@@ -3347,21 +3392,16 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
         if not publication_ids:
             return load_local_signal_outcomes(run_date)
         publication_filter = ",".join(urllib.parse.quote(value, safe="") for value in publication_ids)
-        rows: list[dict] = []
-        page_size = 1000
-        for offset in range(0, 25000, page_size):
-            page = supabase_select(
-                "watchlist_signal_outcomes?"
-                "select=*&"
-                f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
-                f"evaluation_run_date=gte.{urllib.parse.quote(cutoff)}&"
-                f"publication_id=in.({publication_filter})&"
-                "outcome_label=neq.PENDING&"
-                f"order=evaluation_run_date.desc,signal_run_date.desc,ticker.asc&limit={page_size}&offset={offset}"
-            )
-            rows.extend(page)
-            if len(page) < page_size:
-                break
+        rows = supabase_select_all(
+            "watchlist_signal_outcomes?"
+            "select=*&"
+            f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
+            f"evaluation_run_date=gte.{urllib.parse.quote(cutoff)}&"
+            f"publication_id=in.({publication_filter})&"
+            "outcome_label=neq.PENDING&"
+            "order=evaluation_run_date.desc,signal_run_date.desc,ticker.asc",
+            max_pages=25,
+        )
         if rows:
             return restrict_learning_outcomes_to_window(pd.DataFrame([merge_payload_row(row) for row in rows]), run_date)
     except RuntimeError as exc:
@@ -7410,7 +7450,10 @@ def main() -> None:
     previous_run_metadata = fetch_previous_run_metadata(today) if not args.no_supabase else load_local_run_metadata()
     previous_incremental_metadata = compatible_incremental_metadata(previous_run_metadata)
     previous_history_by_ticker = behavior_history_by_ticker(previous_history_rows)
-    daily_state_ready = bool(previous_history_rows and previous_incremental_metadata)
+    daily_state_ready = bool(
+        previous_incremental_metadata
+        and incremental_history_ready(previous_history_rows, tickers, args.history_days)
+    )
     state_compatible = bool(previous_incremental_metadata)
     needs_bootstrap = (refresh_mode == "daily" and not daily_state_ready) or (
         refresh_mode == "weekly_rebuild" and not state_compatible

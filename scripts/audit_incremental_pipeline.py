@@ -139,6 +139,83 @@ def audit_incremental_settlement() -> None:
     assert {row["ticker"] for row in preserved} == {"TEST", "FAIL"}
 
 
+def audit_supabase_history_pagination() -> None:
+    original_select = scanner.supabase_select
+    calls = []
+
+    def select(path):
+        calls.append(path)
+        offset = int(path.rsplit("offset=", 1)[1])
+        remaining = max(0, 2350 - offset)
+        return [{"row": index} for index in range(offset, offset + min(1000, remaining))]
+
+    scanner.supabase_select = select
+    try:
+        rows = scanner.supabase_select_all(
+            "watchlist_behavior_history?select=*&publication_id=eq.test&order=ticker.asc,history_date.asc"
+        )
+    finally:
+        scanner.supabase_select = original_select
+
+    assert len(rows) == 2350
+    assert [row["row"] for row in rows] == list(range(2350))
+    assert [path.rsplit("offset=", 1)[1] for path in calls] == ["0", "1000", "2000"]
+    assert all("order=ticker.asc,history_date.asc" in path for path in calls)
+
+    for total, expected_calls in ((999, 1), (1000, 2), (1001, 2), (2000, 3), (2001, 3)):
+        boundary_calls = []
+
+        def boundary_select(path, row_count=total):
+            boundary_calls.append(path)
+            offset = int(path.rsplit("offset=", 1)[1])
+            return [{"row": index} for index in range(offset, min(offset + 1000, row_count))]
+
+        scanner.supabase_select = boundary_select
+        try:
+            boundary_rows = scanner.supabase_select_all(
+                "watchlist_behavior_history?select=*&order=ticker.asc"
+            )
+        finally:
+            scanner.supabase_select = original_select
+        assert len(boundary_rows) == total and len(boundary_calls) == expected_calls
+
+
+def audit_daily_history_inherits_full_publication() -> None:
+    original_select = scanner.supabase_select
+    ticker_count = 186
+    sessions = 30
+
+    def select(path):
+        if path.startswith("watchlist_refresh_runs?"):
+            return [{"run_date": "2026-07-22", "publication_id": "pub-complete", "payload": {}}]
+        offset = int(path.rsplit("offset=", 1)[1])
+        all_rows = [
+            {
+                "ticker": f"T{ticker:03d}",
+                "history_date": str(date.date()),
+                "publication_id": "pub-complete",
+                "payload": {"date": str(date.date()), "close": 100 + session},
+            }
+            for ticker in range(ticker_count)
+            for session, date in enumerate(pd.bdate_range("2026-06-11", periods=sessions))
+        ]
+        return all_rows[offset : offset + 1000]
+
+    scanner.supabase_select = select
+    try:
+        inherited = scanner.fetch_previous_behavior_history("2026-07-23")
+    finally:
+        scanner.supabase_select = original_select
+
+    assert len(inherited) == ticker_count * sessions
+    coverage = pd.DataFrame(inherited).groupby("ticker")["history_date"].nunique()
+    assert len(coverage) == ticker_count and int(coverage.min()) == sessions
+    tickers = [f"T{ticker:03d}" for ticker in range(ticker_count)]
+    assert scanner.incremental_history_ready(inherited, tickers, sessions)
+    partial = [row for row in inherited if int(row["ticker"][1:]) < 33]
+    assert not scanner.incremental_history_ready(partial, tickers, sessions)
+
+
 def audit_rolling_window_and_modes() -> None:
     rows = []
     for index, date in enumerate(pd.bdate_range("2026-03-02", periods=61)):
@@ -230,9 +307,11 @@ def audit_artifact_integrity() -> None:
 def main() -> None:
     audit_ohlcv_modes()
     audit_incremental_settlement()
+    audit_supabase_history_pagination()
+    audit_daily_history_inherits_full_publication()
     audit_rolling_window_and_modes()
     audit_artifact_integrity()
-    print({"incrementalPipelineUAT": "ok", "cases": 4})
+    print({"incrementalPipelineUAT": "ok", "cases": 6})
 
 
 if __name__ == "__main__":

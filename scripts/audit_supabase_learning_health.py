@@ -232,7 +232,18 @@ def main() -> None:
             assert exc.code == 1
         else:
             raise AssertionError(f"{integrity_state} must fail closed")
-    print({"supabaseLearningHealthAudit": "ok", "cases": 9})
+    original_request = health.request_json
+    health.request_json = lambda *_args, **_kwargs: ([{}] * 1000, None)
+    try:
+        try:
+            health.request_all_json("watchlist_behavior_history?select=*", max_pages=2)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("health audit must fail closed at its pagination guard")
+    finally:
+        health.request_json = original_request
+    print({"supabaseLearningHealthAudit": "ok", "cases": 10})
 
 
 if __name__ == "__main__":

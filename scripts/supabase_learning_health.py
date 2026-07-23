@@ -103,8 +103,10 @@ def request_all_json(path: str, *, page_size: int = 1000, max_pages: int = 50) -
         page_rows, _ = request_json(page_path)
         rows.extend(page_rows)
         if len(page_rows) < page_size:
-            break
-    return rows
+            return rows
+    raise RuntimeError(
+        f"Supabase health audit exceeded the guarded pagination limit ({page_size * max_pages} rows): {path}"
+    )
 
 
 def count_rows(table: str, filters: str) -> int:
