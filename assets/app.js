@@ -1045,6 +1045,9 @@ function learningReadout(row) {
   const defensiveAction = action === "WAIT" || action === "WAIT / AVOID" || action === "EXIT PRESSURE";
   const distinctTickers = Number(payloadValue(row, "learning_distinct_ticker_count"));
   const evaluationDates = Number(payloadValue(row, "learning_evaluation_date_count"));
+  const baselineSamples = Number(payloadValue(row, "learning_baseline_sample_count"));
+  const baselineDates = Number(payloadValue(row, "learning_baseline_evaluation_date_count"));
+  const baselineWeight = Number(payloadValue(row, "learning_baseline_weight"));
   const promotionEligible = learningBoolean(payloadValue(row, "learning_promotion_eligible"));
   const reportingOnly = learningBoolean(payloadValue(row, "learning_reporting_only"));
   const promotionState = String(payloadValue(row, "learning_promotion_state") || "").trim().toUpperCase();
@@ -1063,11 +1066,14 @@ function learningReadout(row) {
     && promotionEligible === true
     && reportingOnly !== true
     && promotionState !== "REPORTING_ONLY";
-  if (!eligible) return `Reviewed ${coverage}. Validation is incomplete, so learning did not improve today's recommendation.`;
+  const stabilization = Number.isFinite(baselineWeight) && baselineWeight > 0
+    ? ` It also used ${fmtNumber(baselineSamples, 0)} older comparable signals${Number.isFinite(baselineDates) ? ` across ${fmtNumber(baselineDates, 0)} earlier market dates` : ""} to keep a short-term run from overreacting.`
+    : "";
+  if (!eligible) return `Reviewed ${coverage}. Validation is incomplete, so learning did not improve today's recommendation.${stabilization}`;
   const adjustmentText = Number.isFinite(adjustment) && Math.abs(adjustment) >= 0.05
     ? ` It adjusted confidence by ${fmtSignedNumber(adjustment, 1)} points.`
     : " It did not materially change confidence.";
-  return `Reviewed ${coverage}.${adjustmentText}`;
+  return `Reviewed ${coverage}.${adjustmentText}${stabilization}`;
 }
 
 function fillabilityReadout(row) {

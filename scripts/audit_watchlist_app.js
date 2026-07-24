@@ -345,7 +345,7 @@ function auditStorageGuard() {
   assert(guard.includes("readonly STAGING_LIMIT_BYTES=220000000"), "staged publication must stay below the operational ceiling");
   assert(guard.includes("readonly HARD_LIMIT_BYTES=250000000"), "database hard cap must be 250,000,000 bytes");
   assert(guard.includes("readonly OHLCV_BARS_PER_TICKER=400"), "OHLCV retention must preserve the full model window");
-  assert(guard.includes("readonly LEARNING_SESSIONS=60"), "outcome retention must follow the learning window");
+  assert(guard.includes("readonly LEARNING_SESSIONS=100"), "outcome retention must cover the learning baseline");
   assert(guard.includes("record_storage_metrics"), "each publication must persist database capacity telemetry");
   assert(guard.includes("rollback_publication"), "failed staging must remove its hidden publication");
   assert(!guard.toLowerCase().includes("vacuum full"), "routine capacity correctness must not depend on VACUUM FULL");

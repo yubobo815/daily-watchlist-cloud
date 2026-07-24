@@ -72,8 +72,14 @@ WALK_FORWARD_MIN_TEST_TRADES = 3
 MAX_EXECUTION_DATA_AGE_DAYS = int(os.getenv("MAX_EXECUTION_DATA_AGE_DAYS", "0"))
 TOP_BUY_TIER_LIMIT = int(os.getenv("TOP_BUY_TIER_LIMIT", "8"))
 BUY_WATCH_TIER_LIMIT = int(os.getenv("BUY_WATCH_TIER_LIMIT", "24"))
+# The recent window drives daily execution. The older portion of the baseline
+# window acts only as a capped stabilizer, so a new regime can still change the
+# recommendation without one noisy week dominating it.
 LEARNING_LOOKBACK_DAYS = int(os.getenv("LEARNING_LOOKBACK_DAYS", "60"))
+LEARNING_BASELINE_DAYS = int(os.getenv("LEARNING_BASELINE_DAYS", "100"))
 DEFAULT_LEARNING_LOOKBACK_DAYS = LEARNING_LOOKBACK_DAYS
+DEFAULT_LEARNING_BASELINE_DAYS = max(LEARNING_LOOKBACK_DAYS, LEARNING_BASELINE_DAYS)
+LEARNING_BASELINE_MAX_WEIGHT = 0.35
 LEARNING_HORIZON_SESSIONS = int(os.getenv("LEARNING_HORIZON_SESSIONS", "5"))
 # Historical replay recalculates expensive per-ticker and walk-forward gates on
 # this cadence. Between refreshes, only earlier replay sessions are reusable.
@@ -3371,7 +3377,9 @@ def restrict_learning_outcomes_to_window(
     return selected
 
 
-def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
+def load_local_signal_outcomes(
+    run_date: str, lookback_days: int = LEARNING_LOOKBACK_DAYS
+) -> pd.DataFrame:
     frames = []
     for path in sorted(Path(".").glob("daily_signal_outcomes_*.csv")):
         stem_date = path.stem.replace("daily_signal_outcomes_", "")
@@ -3383,13 +3391,15 @@ def load_local_signal_outcomes(run_date: str) -> pd.DataFrame:
             print(f"Local signal-outcome history load skipped ({path}): {exc}")
     if not frames:
         return pd.DataFrame()
-    return restrict_learning_outcomes_to_window(pd.concat(frames, ignore_index=True), run_date)
+    return restrict_learning_outcomes_to_window(
+        pd.concat(frames, ignore_index=True), run_date, lookback_days
+    )
 
 
-def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
+def fetch_signal_outcome_history(run_date: str, lookback_days: int = LEARNING_LOOKBACK_DAYS) -> pd.DataFrame:
     try:
         run_timestamp = pd.Timestamp(run_date)
-        cutoff = (run_timestamp - pd.Timedelta(days=max(90, LEARNING_LOOKBACK_DAYS * 3))).date().isoformat()
+        cutoff = (run_timestamp - pd.Timedelta(days=max(150, int(lookback_days) * 3))).date().isoformat()
         validated_runs = supabase_select(
             "watchlist_refresh_runs?select=payload&status=in.(ok,degraded)&"
             f"run_date=lte.{urllib.parse.quote(run_date)}&run_date=gte.{urllib.parse.quote(cutoff)}&limit=200"
@@ -3402,7 +3412,7 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
             and (record.get("payload") or {}).get("publication_id")
         })
         if not publication_ids:
-            return load_local_signal_outcomes(run_date)
+            return load_local_signal_outcomes(run_date, lookback_days)
         publication_filter = ",".join(urllib.parse.quote(value, safe="") for value in publication_ids)
         rows = supabase_select_all(
             "watchlist_signal_outcomes?"
@@ -3415,10 +3425,45 @@ def fetch_signal_outcome_history(run_date: str) -> pd.DataFrame:
             max_pages=25,
         )
         if rows:
-            return restrict_learning_outcomes_to_window(pd.DataFrame([merge_payload_row(row) for row in rows]), run_date)
+            return restrict_learning_outcomes_to_window(
+                pd.DataFrame([merge_payload_row(row) for row in rows]), run_date, lookback_days
+            )
     except RuntimeError as exc:
         print(f"Signal-outcome history fetch skipped: {exc}")
-    return load_local_signal_outcomes(run_date)
+    return load_local_signal_outcomes(run_date, lookback_days)
+
+
+def split_learning_windows(
+    outcomes: pd.DataFrame,
+    run_date: str,
+    recent_days: int,
+    baseline_days: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return non-overlapping recent and older-baseline learning evidence."""
+    baseline = restrict_learning_outcomes_to_window(outcomes, run_date, baseline_days)
+    recent = restrict_learning_outcomes_to_window(outcomes, run_date, recent_days)
+    if baseline.empty or recent.empty or "evaluation_run_date" not in baseline.columns:
+        return recent, baseline.iloc[0:0].copy()
+    recent_dates = set(pd.to_datetime(recent["evaluation_run_date"], errors="coerce").dropna().dt.normalize())
+    older = baseline.loc[
+        ~pd.to_datetime(baseline["evaluation_run_date"], errors="coerce").dt.normalize().isin(recent_dates)
+    ].copy()
+    older.attrs["learning_window"] = {
+        "lookback_days": max(0, int(baseline_days) - int(recent_days)),
+        "evaluation_date_min": "",
+        "evaluation_date_max": "",
+        "evaluation_session_count": 0,
+    }
+    if not older.empty:
+        dates = pd.to_datetime(older["evaluation_run_date"], errors="coerce").dropna().dt.normalize()
+        if not dates.empty:
+            older.attrs["learning_window"] = {
+                "lookback_days": max(0, int(baseline_days) - int(recent_days)),
+                "evaluation_date_min": dates.min().date().isoformat(),
+                "evaluation_date_max": dates.max().date().isoformat(),
+                "evaluation_session_count": int(dates.nunique()),
+            }
+    return recent, older
 
 
 def build_learning_stats(
@@ -4135,7 +4180,12 @@ def apply_reporting_only_directional_state(rows: list[dict]) -> dict:
     return metrics
 
 
-def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]) -> None:
+def apply_learning_adjustments(
+    rows: list[dict],
+    learning_stats: dict[str, dict],
+    baseline_stats: Optional[dict[str, dict]] = None,
+) -> None:
+    baseline_stats = baseline_stats or {}
     for row in rows:
         candidates = learning_key_candidates_for(row)
         exact_key, exact_scope, _ = candidates[0]
@@ -4153,6 +4203,8 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         stats = exact_stats
         if (not stats or int(stats.get("sample_count", 0)) < LEARNING_MIN_SAMPLES) and fallback:
             selected_key, selected_scope, selected_weight, stats = fallback
+
+        baseline = baseline_stats.get(selected_key, {}) if selected_key else {}
 
         if not stats or int(stats.get("sample_count", 0)) < LEARNING_MIN_SAMPLES:
             row["learning_sample_count"] = int(report_stats.get("sample_count", 0)) if report_stats else 0
@@ -4177,6 +4229,9 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
             row["learning_reporting_only"] = True
             row["learning_promotion_state"] = "REPORTING_ONLY"
             row["learning_adjustment"] = 0.0
+            row["learning_baseline_sample_count"] = int(baseline.get("sample_count", 0))
+            row["learning_baseline_evaluation_date_count"] = int(baseline.get("evaluation_date_count", 0))
+            row["learning_baseline_weight"] = 0.0
             row["learning_scope"] = report_scope
             row["learning_key_used"] = report_key
             row["learning_plan"] = (
@@ -4199,6 +4254,19 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         execution_samples = int(stats.get("execution_sample_count", 0))
         adjustment = avg_score * 8.0 + (working_rate - failed_rate) * 4.0 + trap_rate * 2.0
         adjustment *= selected_weight
+        baseline_samples = int(baseline.get("execution_sample_count", 0))
+        baseline_weight = 0.0
+        if baseline_samples >= LEARNING_MIN_SAMPLES:
+            baseline_adjustment = (
+                float(baseline.get("execution_avg_score", 0.0)) * 8.0
+                + (float(baseline.get("execution_working_rate", 0.0)) - float(baseline.get("execution_failed_rate", 0.0))) * 4.0
+                + float(baseline.get("execution_trap_avoided_rate", 0.0)) * 2.0
+            ) * selected_weight
+            baseline_weight = min(
+                LEARNING_BASELINE_MAX_WEIGHT,
+                LEARNING_BASELINE_MAX_WEIGHT * baseline_samples / (baseline_samples + 12.0),
+            )
+            adjustment = adjustment * (1.0 - baseline_weight) + baseline_adjustment * baseline_weight
         adjustment = max(-LEARNING_ADJUSTMENT_CAP, min(LEARNING_ADJUSTMENT_CAP, adjustment))
 
         anti_level = str(row.get("anti_signal_level") or "NONE").upper()
@@ -4315,8 +4383,13 @@ def apply_learning_adjustments(rows: list[dict], learning_stats: dict[str, dict]
         row["learning_reporting_only"] = reporting_only
         row["learning_promotion_state"] = promotion_state
         row["learning_adjustment"] = round(float(effective_adjustment), 2)
+        row["learning_baseline_sample_count"] = int(baseline.get("sample_count", 0))
+        row["learning_baseline_evaluation_date_count"] = int(baseline.get("evaluation_date_count", 0))
+        row["learning_baseline_weight"] = round(baseline_weight, 3)
         row["learning_scope"] = selected_scope
         row["learning_key_used"] = selected_key
+        if baseline_weight:
+            plan = f"{plan} Older comparable evidence contributes {baseline_weight * 100:.0f}% stabilization."
         row["learning_plan"] = plan
         sample_confidence = min(0.90, int(stats.get("sample_count", 0)) / (int(stats.get("sample_count", 0)) + 12.0))
         diversity_confidence = min(1.0, distinct_tickers / LEARNING_CONFIRM_MIN_DISTINCT_TICKERS) * min(1.0, evaluation_dates / LEARNING_CONFIRM_MIN_EVALUATION_DATES)
@@ -7417,7 +7490,8 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true", help="Fetch fresh data from configured market data providers instead of using cached CSV files.")
     parser.add_argument("--years", type=int, default=1)
     parser.add_argument("--history-days", type=int, default=30, help="Number of recent trading days to include in behavior history.")
-    parser.add_argument("--learning-lookback-days", type=int, default=DEFAULT_LEARNING_LOOKBACK_DAYS, help="Number of recent trading days to replay for learning samples.")
+    parser.add_argument("--learning-lookback-days", type=int, default=DEFAULT_LEARNING_LOOKBACK_DAYS, help="Recent trading sessions used for daily learning sensitivity.")
+    parser.add_argument("--learning-baseline-days", type=int, default=DEFAULT_LEARNING_BASELINE_DAYS, help="Longer learning baseline used only as a capped stabilizer.")
     parser.add_argument(
         "--full-ohlcv-refresh",
         action="store_true",
@@ -7481,7 +7555,7 @@ def main() -> None:
         )
     effective_mode = "weekly_rebuild" if needs_bootstrap else refresh_mode
     if needs_bootstrap:
-        print("Explicit calibration bootstrap enabled; rebuilding the bounded 60-session state.")
+        print("Explicit calibration bootstrap enabled; rebuilding the bounded learning state.")
     benchmark_frames: dict[str, pd.DataFrame] = {}
     for benchmark in ("SPY", "QQQ", "SMH"):
         try:
@@ -7497,7 +7571,8 @@ def main() -> None:
         except Exception as exc:
             print(f"Benchmark context unavailable for {benchmark}: {exc}")
     market_permission = market_permission_from_frames(benchmark_frames)
-    replay_days = max(args.history_days, args.learning_lookback_days)
+    args.learning_baseline_days = max(args.learning_lookback_days, args.learning_baseline_days)
+    replay_days = max(args.history_days, args.learning_baseline_days)
 
     for ticker in tickers:
         try:
@@ -7614,7 +7689,7 @@ def main() -> None:
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
     rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
-    prior_outcomes = fetch_signal_outcome_history(today)
+    prior_outcomes = fetch_signal_outcome_history(today, args.learning_baseline_days)
     if needs_bootstrap:
         # An explicit state migration starts a new canonical outcome identity
         # space; never mix samples from an incompatible model contract.
@@ -7631,11 +7706,11 @@ def main() -> None:
                 prior_outcomes,
             )
             canonical_outcomes = combine_signal_outcomes(prior_outcomes, newly_settled_outcomes)
-            backfilled_outcomes = rebuild_canonical_signal_outcomes(canonical_outcomes, raw_frames)
+            verified_incremental_outcomes = rebuild_canonical_signal_outcomes(canonical_outcomes, raw_frames)
             parity_report = calibration_parity_report(
                 canonical_outcomes,
-                backfilled_outcomes,
-                replay_start_dates(raw_frames, args.learning_lookback_days),
+                verified_incremental_outcomes,
+                replay_start_dates(raw_frames, args.learning_baseline_days),
             )
             parity_report["state"] = "PASSED" if parity_report["passed"] else "FAILED"
             if not parity_report["passed"]:
@@ -7647,6 +7722,14 @@ def main() -> None:
                 build_backfilled_signal_outcomes(learning_history_rows)
             )
             newly_settled_outcomes = backfilled_outcomes
+            # Rebuild older evidence from the canonical OHLCV store. Verified
+            # frozen production outcomes win for overlapping dates.
+            replayed_outcomes = attach_walk_forward_predictions(
+                build_backfilled_signal_outcomes(learning_history_rows)
+            )
+            backfilled_outcomes = combine_signal_outcomes(
+                replayed_outcomes, verified_incremental_outcomes
+            )
         outcome_candidates = combine_signal_outcomes(prior_outcomes, backfilled_outcomes)
     else:
         newly_settled_outcomes = build_incremental_signal_outcomes(
@@ -7656,13 +7739,14 @@ def main() -> None:
         )
         backfilled_outcomes = pd.DataFrame()
         outcome_candidates = combine_signal_outcomes(prior_outcomes, newly_settled_outcomes)
-    learning_history = restrict_learning_outcomes_to_window(
-        outcome_candidates,
-        today,
-        args.learning_lookback_days,
+    learning_history, baseline_learning_history = split_learning_windows(
+        outcome_candidates, today, args.learning_lookback_days, args.learning_baseline_days
     )
     learning_stats = build_learning_stats(learning_history, today, args.learning_lookback_days)
-    apply_learning_adjustments(rows, learning_stats)
+    baseline_learning_stats = build_learning_stats(
+        baseline_learning_history, today, args.learning_baseline_days
+    )
+    apply_learning_adjustments(rows, learning_stats, baseline_learning_stats)
     fillability_stats = build_fillability_stats(learning_history)
     apply_fillability_adjustments(rows, fillability_stats)
     calibration_artifact = None
@@ -7769,6 +7853,7 @@ def main() -> None:
             "newly_settled_signal_outcomes": int(len(newly_settled_outcomes)),
             "calibration_parity": parity_report,
             "learning_lookback_days": args.learning_lookback_days,
+            "learning_baseline_days": args.learning_baseline_days,
             "learning_model_version": LEARNING_MODEL_VERSION,
             "learning_horizon_sessions": LEARNING_HORIZON_SESSIONS,
             "learning_evaluation_date_min": learning_window.get("evaluation_date_min", ""),

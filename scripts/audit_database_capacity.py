@@ -130,7 +130,7 @@ def assert_capacity_contract() -> None:
         "readonly MAX_TICKERS=250",
         "readonly OHLCV_BARS_PER_TICKER=400",
         "readonly OHLCV_MAX_ROWS=100000",
-        "readonly LEARNING_SESSIONS=60",
+        "readonly LEARNING_SESSIONS=100",
         "readonly CALIBRATION_MAX_ARTIFACTS=8",
         "readonly CALIBRATION_MAX_BYTES=25165824",
         "readonly MAX_STAGED_PUBLICATION_BYTES=140000000",
@@ -161,4 +161,4 @@ if __name__ == "__main__":
     assert_ohlcv_window()
     assert_payload_compaction()
     assert_capacity_contract()
-    print("Database capacity audit passed: compact payloads, 400-bar OHLCV, 60-session learning, and transactional guards verified.")
+    print("Database capacity audit passed: compact payloads, 400-bar OHLCV, 100-session learning baseline, and transactional guards verified.")
