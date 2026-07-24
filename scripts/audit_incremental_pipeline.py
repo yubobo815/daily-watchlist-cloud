@@ -106,6 +106,9 @@ def audit_incremental_settlement() -> None:
     assert frozen[-1]["action"] == "SETUP FORMING" and frozen[-1]["prediction_state"] == "FINAL"
     rebuilt = scanner.rebuild_canonical_signal_outcomes(outcome, {"TEST": bars})
     assert len(rebuilt) == 1 and rebuilt.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
+    legacy = outcome.copy()
+    legacy.loc[legacy.index[0], "entry_model_version"] = ""
+    assert scanner.calibration_parity_report(legacy, legacy, {"TEST": "2026-06-01"})["incremental_settled"] == 0
     replay_starts = {"TEST": "2026-06-01", "NEW": "2026-06-01", "OLD": "2026-06-01"}
     assert scanner.calibration_parity_report(outcome, outcome, replay_starts)["passed"] is True
     changed = outcome.copy()

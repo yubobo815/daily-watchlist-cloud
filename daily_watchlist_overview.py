@@ -974,7 +974,7 @@ OHLCV_RETENTION_BARS = int(os.getenv("OHLCV_RETENTION_BARS", "400"))
 OHLCV_MIN_READY_BARS = int(os.getenv("OHLCV_MIN_READY_BARS", str(OHLCV_RETENTION_BARS)))
 OHLCV_INCREMENTAL_YEARS = float(os.getenv("OHLCV_INCREMENTAL_YEARS", "0.1"))
 SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES", "8192"))
-SUPABASE_HISTORY_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_HISTORY_PAYLOAD_MAX_BYTES", "6144"))
+SUPABASE_HISTORY_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_HISTORY_PAYLOAD_MAX_BYTES", "8192"))
 SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES", "2048"))
 SUPABASE_HISTORY_PAYLOAD_ALIASES = (
     "date",
@@ -3134,8 +3134,16 @@ def signal_outcome_identity(row: dict) -> tuple[str, str, str, int]:
     return (
         str(row.get("ticker") or "").upper(),
         canonical_date(row.get("signal_run_date")),
-        str(row.get("entry_model_version") or LEARNING_MODEL_VERSION),
+        str(row.get("entry_model_version") or ""),
         int(numeric_or_none(row.get("label_horizon_sessions")) or LEARNING_HORIZON_SESSIONS),
+    )
+
+
+def is_current_learning_outcome(row: dict) -> bool:
+    """Exclude legacy or unversioned samples from current-model reconciliation."""
+    return (
+        str(row.get("entry_model_version") or "") == LEARNING_MODEL_VERSION
+        and int(numeric_or_none(row.get("label_horizon_sessions")) or 0) == LEARNING_HORIZON_SESSIONS
     )
 
 
@@ -3261,7 +3269,7 @@ def calibration_parity_report(
         result = {}
         for raw in frame.to_dict(orient="records"):
             row = merge_payload_row(raw)
-            if str(row.get("path_status") or "").upper() != "SETTLED":
+            if str(row.get("path_status") or "").upper() != "SETTLED" or not is_current_learning_outcome(row):
                 continue
             result[signal_outcome_identity(row)] = (
                 str(row.get("outcome_label") or "").upper(),
@@ -7740,6 +7748,7 @@ def main() -> None:
             parity_report["state"] = "PASSED" if parity_report["passed"] else "FAILED"
             if not parity_report["passed"]:
                 raise SystemExit(f"Weekly calibration parity failed closed: {json.dumps(parity_report, sort_keys=True)}")
+            backfilled_outcomes = verified_incremental_outcomes
         else:
             # Explicit first-run bootstrap has no frozen production decisions;
             # seed from the bounded no-lookahead rule replay once.

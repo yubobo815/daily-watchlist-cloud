@@ -69,7 +69,7 @@ def assert_payload_compaction() -> None:
 
     repeated_plan = "Execution blocked until the current market-data session is available."
     near_limit = {
-        "core_evidence": "x" * 5800,
+        "core_evidence": "x" * (scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES - 325),
         "anti_signal_plan": repeated_plan,
         "execution_plan": repeated_plan,
         "freshness_plan": repeated_plan,
