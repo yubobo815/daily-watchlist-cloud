@@ -191,8 +191,8 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("skip the trade if price opens or runs above the maximum entry"), "BUY guidance must state the no-chase rule");
   assert(appSource.includes("function fillabilityReadout(row)"), "entry fillability must be explained in natural language");
   assert(appSource.includes("Price plan"), "active levels must use a concise reader-facing label");
-  assert(appSource.includes('return "PENDING"'), "missing execution evidence must use a reader-facing status instead of a gate label");
-  assert(appSource.includes('if (antiSignal === "BLOCK") return "AVOID"'), "anti-signal blocks must suppress the numeric quality display with an actionable label");
+  assert(appSource.includes('return "NEEDS VERIFICATION"'), "missing execution evidence must use a reader-facing readiness status");
+  assert(appSource.includes('if (antiSignal === "BLOCK") return "DO NOT ENTER"'), "anti-signal blocks must suppress the numeric readiness display with an actionable label");
   assert(!appSource.includes('"GATE BLOCK"'), "reader-facing UI must not expose the internal gate-block label");
   assert(!appSource.includes("Trend quality ${fmtConviction(latest)} / 100"), "ticker diagnostics must not present adjusted rank as synthetic trend quality");
   assert(appSource.includes("Why we see it this way"), "ticker panel must use a reader-facing evidence label");
