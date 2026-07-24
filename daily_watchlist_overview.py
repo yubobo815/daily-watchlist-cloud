@@ -994,6 +994,23 @@ COMPACT_NARRATIVE_DUPLICATE_RULES = (
     ("execution_plan", "next_day_plan"),
 )
 
+# History rows can accumulate several versions of explanatory copy as the
+# learning model evolves. These are presentation-only fallbacks; evict them
+# in order rather than letting a single verbose row abort the daily publish.
+COMPACT_PAYLOAD_EVICTION_ORDER = (
+    "data_provider_error",
+    "feedback_plan",
+    "learning_plan",
+    "operator_plan",
+    "operator_state_plan",
+    "entry_zone_plan",
+    "next_day_plan",
+    "freshness_plan",
+    "execution_plan",
+    "contextual_plan",
+    "anti_signal_plan",
+)
+
 
 def should_sync_supabase_snapshot(report: pd.DataFrame, run_date: str) -> tuple[bool, str]:
     if ALLOW_STALE_SUPABASE_SYNC:
@@ -1188,7 +1205,15 @@ def compact_payload(row: dict, typed_record: dict, *, aliases: tuple[str, ...] =
         for key, value in row.items()
         if key not in excluded and value not in (None, "", [], {})
     })
-    payload_bytes = len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
+    def payload_size() -> int:
+        return len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
+
+    payload_bytes = payload_size()
+    for key in COMPACT_PAYLOAD_EVICTION_ORDER:
+        if payload_bytes <= max_bytes:
+            break
+        payload.pop(key, None)
+        payload_bytes = payload_size()
     if payload_bytes > max_bytes:
         raise ValueError(f"Compact Supabase payload is {payload_bytes} bytes; limit is {max_bytes} bytes.")
     return payload

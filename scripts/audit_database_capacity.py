@@ -103,6 +103,18 @@ def assert_payload_compaction() -> None:
     assert "indicator_state_version" not in compacted
     assert "execution_fill_model_version" not in compacted
 
+    overflow_payload = scanner.compact_payload(
+        {
+            "action": "SETUP FORMING",
+            "operator_plan": "x" * 7000,
+            "anti_signal_plan": "Keep core risk context.",
+        },
+        {"action": "SETUP FORMING"},
+        max_bytes=128,
+    )
+    assert "operator_plan" not in overflow_payload
+    assert overflow_payload["anti_signal_plan"] == "Keep core risk context."
+
     distinct_plans = scanner.deduplicate_payload_narratives({
         "operator_plan": "Operator pressure is neutral.",
         "operator_state_plan": "Accumulation remains constructive.",
