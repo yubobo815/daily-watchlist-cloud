@@ -42,6 +42,37 @@ RUN_INFO_FIELDS = frozenset(
     """.split()
 )
 
+# These fields support the current trade plan and its explanation on a ticker
+# page. Scanner-only calibration diagnostics remain in Supabase rather than
+# being repeated in every browser download.
+TICKER_SNAPSHOT_FIELDS = WATCHLIST_FIELDS | frozenset(
+    """
+    active_protective_stop adaptive_mode adjusted_score anti_signal_plan buyer_score
+    contextual_overlay contextual_plan data_provider data_provider_status
+    distance_from_ref_zone_pct entry_quality_label event_risk execution_fill_sample_count
+    execution_plan execution_priority execution_style feedback_plan feedback_quality
+    last_outcome_label last_outcome_reason learning_adjustment
+    learning_distinct_ticker_count learning_evaluation_date_count learning_model_version
+    learning_plan learning_promotion_eligible learning_promotion_state
+    learning_reporting_only learning_sample_count market_context model_version
+    next_day_bias_score operator_plan operator_pressure_score operator_state_plan
+    operator_state_score prediction_downside_probability prediction_horizon_sessions
+    prediction_model_version prediction_no_edge_probability prediction_upside_probability
+    profit_stage psychology reason_codes seller_score signal_quality transition_label
+    transition_score volatility_regime
+    """.split()
+)
+
+# Thirty history rows are rendered as a concise timeline. Its calculations do
+# not need verbose plans, learning notes, or per-row model diagnostics.
+HISTORY_FIELDS = frozenset(
+    """
+    action adjusted_score close data_date date day_change_pct high low name open
+    operator_pressure operator_state reason_codes run_date score setup ticker
+    volume_state
+    """.split()
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -188,7 +219,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     ticker_paths: dict[str, str] = {}
     for ticker in tickers:
         rows = sorted(
-            history_by_ticker.get(ticker, []),
+            (project_row(row, HISTORY_FIELDS) for row in history_by_ticker.get(ticker, [])),
             key=lambda row: (row_date(row), stable_row_key(row)),
             reverse=True,
         )[:MAX_TICKER_HISTORY_ROWS]
@@ -201,7 +232,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 "publication_id": publication_id,
                 "run_date": run_date,
                 "ticker": ticker,
-                "snapshot": latest_by_ticker[ticker] if ticker in latest_by_ticker else None,
+                "snapshot": (
+                    project_row(latest_by_ticker[ticker], TICKER_SNAPSHOT_FIELDS)
+                    if ticker in latest_by_ticker
+                    else None
+                ),
                 "historyRows": rows,
                 "runInfo": project_run_info(metadata),
             },
