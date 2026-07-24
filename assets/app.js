@@ -27,7 +27,7 @@ const UI_LABELS = {
   columns: {
     ticker: "Ticker",
     action: "Signal",
-    score: "Quality",
+    score: "Signal readiness",
     entry_est: "Entry plan",
     stop_est: "Protection",
     risk_pct_to_stop: "Downside",
@@ -822,9 +822,9 @@ function qualityConstraintLabel(row) {
   const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
   const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
   const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
-  if (freshnessBlocked) return "DATA OLD";
-  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "PENDING";
-  if (antiSignal === "BLOCK") return "AVOID";
+  if (freshnessBlocked) return "DATA NEEDS REFRESH";
+  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "NEEDS VERIFICATION";
+  if (antiSignal === "BLOCK") return "DO NOT ENTER";
   if (antiSignal === "CAUTION") return "USE CAUTION";
   return "";
 }
@@ -868,7 +868,7 @@ function fmtConviction(rowOrScore) {
 function renderQualityScore(row) {
   const blockedLabel = qualityConstraintLabel(row);
   if (blockedLabel) {
-    return `<span class="table-score score-blocked" title="A numeric score would be misleading until the required checks are clear">${blockedLabel}</span>`;
+    return `<span class="table-score score-blocked" title="A numeric readiness score would be misleading until the required checks are clear">${blockedLabel}</span>`;
   }
   return `<span class="table-score score-${strengthTone(row)}">${escapeHtml(fmtConviction(row))}</span>`;
 }
@@ -2761,7 +2761,7 @@ function pressureSummary(rows, summaryApi) {
   const recentRows = rows.slice(-5);
   const direction = comparison.shift;
   const currentKind = actionKind(rows.at(-1).action);
-  const staleReminder = qualityConstraintLabel(rows.at(-1)) === "DATA OLD"
+  const staleReminder = qualityConstraintLabel(rows.at(-1)) === "DATA NEEDS REFRESH"
     ? " Today's data is stale, so this historical pressure is descriptive only."
     : "";
   const defensiveReminder = ["exit", "avoid"].includes(currentKind)
@@ -2796,7 +2796,7 @@ function pressureSummary(rows, summaryApi) {
 function historyInterpretation(latest, priceMovePct, summaryApi) {
   const kind = actionKind(latest.action);
   const state = summaryApi.interpretationState(kind, {
-    stale: qualityConstraintLabel(latest) === "DATA OLD",
+    stale: qualityConstraintLabel(latest) === "DATA NEEDS REFRESH",
     checksClear: executionChecksClear(latest),
   });
   if (state === "stale-exit") return "Today's data is stale. Keep the defensive Exit posture until fresh data confirms otherwise.";
