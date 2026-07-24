@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Build deterministic, versioned static data for the GitHub Pages app."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import re
+import shutil
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA_VERSION = 1
+MAX_TICKER_HISTORY_ROWS = 30
+SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+LATEST_FIELDS = frozenset(
+    """
+    action active_protective_stop adaptive_mode adjusted_score anti_signal_level
+    anti_signal_plan buy_tier buyer_score close contextual_overlay contextual_plan
+    data_date data_provider data_provider_error data_provider_status date day_change_pct
+    days_to_report distance_from_ref_zone_pct entry_est entry_model_version
+    entry_quality_label entry_zone_high entry_zone_low entry_zone_plan event_risk
+    execution_fill_probability execution_fill_sample_count execution_fill_state
+    execution_plan execution_priority execution_style extension_state feedback_plan
+    feedback_quality freshness_block freshness_plan freshness_status high last_outcome_label
+    last_outcome_reason learning_adjustment learning_distinct_ticker_count
+    learning_evaluation_date_count learning_model_version learning_plan
+    learning_promotion_eligible learning_promotion_state learning_reporting_only
+    learning_sample_count low market_context market_permission model_version name
+    next_day_bias next_day_bias_score next_day_plan notes open operator_plan
+    operator_pressure operator_pressure_score operator_state operator_state_plan
+    operator_state_score personality_setup_allowed position_value_1k_risk post_tp1_stop
+    prediction_confidence prediction_downside_probability prediction_horizon_sessions
+    prediction_model_version prediction_no_edge_probability prediction_state
+    prediction_upside_probability profit_stage psychology reason_codes risk_pct_to_stop
+    risk_permission run_date score seller_score setup signal_quality stop_est take_profit_1
+    take_profit_1_reduce_pct target_est ticker ticker_permission transition_label
+    transition_score volatility_regime volume_state walk_forward_permission
+    """.split()
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--latest", default="daily_watchlist_overview_latest.csv")
+    parser.add_argument("--history", default="watchlist_behavior_history_latest.csv")
+    parser.add_argument("--metadata", default="daily_watchlist_run_metadata_latest.json")
+    parser.add_argument("--output", default="public/data")
+    return parser.parse_args()
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Required CSV does not exist: {path}")
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError(f"CSV has no header: {path}")
+        # Older publishers nested a complete second copy of each row here.
+        return [
+            {key: value for key, value in row.items() if key and key != "payload"}
+            for row in reader
+        ]
+
+
+def read_metadata(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Required metadata does not exist: {path}")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"Metadata must be a JSON object: {path}")
+    return value
+
+
+def project_latest_row(row: dict[str, str]) -> dict[str, str]:
+    return {key: value for key, value in row.items() if key in LATEST_FIELDS}
+
+
+def required_text(value: Any, field: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"Metadata field {field!r} is required")
+    return text
+
+
+def safe_segment(value: str) -> str:
+    """Return a stable path segment without trusting source-controlled values."""
+    if SAFE_SEGMENT_RE.fullmatch(value) and value not in {".", ".."}:
+        return value
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "item"
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    return f"{stem[:64]}-{digest}"
+
+
+def row_ticker(row: dict[str, str], source: str) -> str:
+    ticker = str(row.get("ticker") or "").strip().upper()
+    if not ticker:
+        raise ValueError(f"{source} contains a row without a ticker")
+    row["ticker"] = ticker
+    return ticker
+
+
+def row_date(row: dict[str, str]) -> str:
+    return str(row.get("history_date") or row.get("date") or row.get("run_date") or "")
+
+
+def stable_row_key(row: dict[str, str]) -> str:
+    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(path)
+
+
+def build(args: argparse.Namespace) -> dict[str, Any]:
+    latest_rows = read_csv(Path(args.latest))
+    history_rows = read_csv(Path(args.history))
+    metadata = read_metadata(Path(args.metadata))
+    publication_id = required_text(metadata.get("publication_id"), "publication_id")
+    run_date = required_text(metadata.get("run_date"), "run_date")
+
+    latest_by_ticker: dict[str, dict[str, str]] = {}
+    for row in latest_rows:
+        ticker = row_ticker(row, "latest CSV")
+        if ticker in latest_by_ticker:
+            raise ValueError(f"Latest CSV contains duplicate ticker: {ticker}")
+        latest_by_ticker[ticker] = row
+
+    history_by_ticker: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in history_rows:
+        history_by_ticker[row_ticker(row, "history CSV")].append(row)
+
+    tickers = sorted(set(latest_by_ticker) | set(history_by_ticker))
+    ticker_segments: dict[str, str] = {}
+    used_segments: dict[str, str] = {}
+    for ticker in tickers:
+        segment = safe_segment(ticker)
+        collision_key = segment.casefold()
+        if collision_key in used_segments and used_segments[collision_key] != ticker:
+            raise ValueError(
+                f"Ticker path collision: {ticker!r} and {used_segments[collision_key]!r}"
+            )
+        used_segments[collision_key] = ticker
+        ticker_segments[ticker] = segment
+
+    output = Path(args.output)
+    publication_segment = safe_segment(publication_id)
+    run_relative = Path("runs") / publication_segment
+    run_output = output / run_relative
+    if run_output.exists():
+        shutil.rmtree(run_output)
+    ticker_output = run_output / "tickers"
+
+    sorted_latest = [project_latest_row(latest_by_ticker[ticker]) for ticker in sorted(latest_by_ticker)]
+    latest_payload = {
+        "schema_version": SCHEMA_VERSION,
+        "publication_id": publication_id,
+        "run_date": run_date,
+        "runInfo": metadata,
+        "rows": sorted_latest,
+    }
+    write_json(run_output / "latest.json", latest_payload)
+
+    ticker_paths: dict[str, str] = {}
+    for ticker in tickers:
+        rows = sorted(
+            history_by_ticker.get(ticker, []),
+            key=lambda row: (row_date(row), stable_row_key(row)),
+            reverse=True,
+        )[:MAX_TICKER_HISTORY_ROWS]
+        relative_path = run_relative / "tickers" / f"{ticker_segments[ticker]}.json"
+        ticker_paths[ticker] = relative_path.as_posix()
+        write_json(
+            output / relative_path,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "publication_id": publication_id,
+                "run_date": run_date,
+                "ticker": ticker,
+                "snapshot": project_latest_row(latest_by_ticker[ticker]) if ticker in latest_by_ticker else None,
+                "historyRows": rows,
+                "runInfo": metadata,
+            },
+        )
+
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "publication_id": publication_id,
+        "run_date": run_date,
+        "latest_path": (run_relative / "latest.json").as_posix(),
+        "ticker_base_path": (run_relative / "tickers").as_posix(),
+        "ticker_count": len(tickers),
+        "ticker_paths": ticker_paths,
+    }
+    # The mutable pointer is written last so readers never see a partial publication.
+    write_json(output / "manifest.json", manifest)
+    return manifest
+
+
+def main() -> None:
+    manifest = build(parse_args())
+    print(
+        f"Published {manifest['ticker_count']} tickers for "
+        f"{manifest['publication_id']} to {manifest['latest_path']}"
+    )
+
+
+if __name__ == "__main__":
+    main()

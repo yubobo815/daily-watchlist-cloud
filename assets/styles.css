@@ -275,6 +275,8 @@ body[data-page="watchlist"] .card strong { font-size: 26px; }
 .watchlist-workspace .search-shell, .watchlist-workspace .control { border-color: #c9c3b8; background: #fffdf9; color: #262529; box-shadow: none; }
 .watchlist-workspace .search { color: #262529; }.watchlist-workspace .search::placeholder { color: #77736d; }
 .watchlist-workspace .count { color: #706c65; }
+.watchlist-pagination { display: flex; justify-content: center; padding: 16px; border-top: 1px solid var(--line-soft); }
+.watchlist-pagination .button { min-width: 150px; }
 .watchlist-workspace .read-stack strong { color: #262529; font-size: 12px; line-height: 1.35; }
 .watchlist-workspace .read-stack small { display: none; }
 .watchlist-workspace .badge { min-height: 20px; padding: 2px 6px; font-size: 9px; }

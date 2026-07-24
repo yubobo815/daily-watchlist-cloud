@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "audit:watchlist": "node scripts/audit_watchlist_app.js && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_context_overlays.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_supabase_learning_health.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_database_capacity.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_incremental_pipeline.py",
+    "audit:watchlist": "node scripts/audit_frontend_architecture.js && node scripts/audit_watchlist_app.js && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_context_overlays.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_supabase_learning_health.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_database_capacity.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_incremental_pipeline.py",
     "vercel-build": "echo Static watchlist app ready"
   }
 }

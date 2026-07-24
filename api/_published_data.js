@@ -23,12 +23,55 @@ const LEARNING_EVIDENCE_FIELDS = [
   "learning_promotion_state",
 ];
 
-async function fetchPublishedJson(name) {
-  const response = await fetch(`${PUBLISHED_BASE_URL}/${name}?v=${Date.now()}`, { cache: "no-store" });
+function publishedUrl(path) {
+  const normalizedPath = String(path || "").trim().replace(/^\/+/, "");
+  if (!normalizedPath || normalizedPath.includes("..") || /[?#]/.test(normalizedPath)) {
+    throw new Error("Published data path is invalid.");
+  }
+  return `${PUBLISHED_BASE_URL}/${normalizedPath.replace(/^data\//, "")}`;
+}
+
+async function fetchPublishedJson(path, { mutable = false } = {}) {
+  const response = await fetch(publishedUrl(path), {
+    // The manifest is the mutable pointer. Publication-scoped artifacts never
+    // change, so runtimes and upstream caches can safely retain them.
+    cache: mutable ? "no-cache" : "force-cache",
+  });
   if (!response.ok) {
-    throw new Error(`Published ${name} returned HTTP ${response.status}.`);
+    throw new Error(`Published ${path} returned HTTP ${response.status}.`);
   }
   return response.json();
+}
+
+async function publishedManifest() {
+  const manifest = await fetchPublishedJson("manifest.json", { mutable: true });
+  const publicationId = String(manifest?.publication_id || "").trim();
+  const runDate = String(manifest?.run_date || "").trim();
+  const latestPath = String(manifest?.latest_path || "").trim();
+  const tickerBasePath = String(manifest?.ticker_base_path || "").trim().replace(/\/+$/, "");
+  const tickerPaths = manifest?.ticker_paths && typeof manifest.ticker_paths === "object" ? manifest.ticker_paths : null;
+  if (!publicationId || !runDate || !latestPath || !tickerBasePath || !tickerPaths) {
+    throw new Error("Published manifest is incomplete.");
+  }
+  const latestVersion = latestPath.match(/(?:^|\/)runs\/([^/]+)\//)?.[1];
+  const tickerVersion = tickerBasePath.match(/(?:^|\/)runs\/([^/]+)(?:\/|$)/)?.[1];
+  if (!latestVersion || latestVersion !== tickerVersion) {
+    throw new Error("Published manifest paths are not scoped to its publication.");
+  }
+  // Validate both paths before returning the manifest.
+  publishedUrl(latestPath);
+  publishedUrl(tickerBasePath);
+  return { ...manifest, publication_id: publicationId, run_date: runDate, latest_path: latestPath, ticker_base_path: tickerBasePath, ticker_paths: tickerPaths };
+}
+
+function assertPublication(payload, manifest, label) {
+  const payloadPublicationId = String(
+    payload?.publication_id || payload?.runInfo?.publication_id || payload?.runInfo?.payload?.publication_id || "",
+  ).trim();
+  const payloadRunDate = String(payload?.run_date || payload?.latest || "").trim();
+  if (payloadPublicationId !== manifest.publication_id || payloadRunDate !== String(manifest.run_date || "").trim()) {
+    throw new Error(`Published ${label} does not match the active manifest.`);
+  }
 }
 
 function normalizeFallbackRow(row) {
@@ -99,7 +142,9 @@ function fallbackLatestResponse(data, sourceName) {
 
 async function publishedLatestPayload() {
   try {
-    const latestData = await fetchPublishedJson("latest.json");
+    const manifest = await publishedManifest();
+    const latestData = await fetchPublishedJson(manifest.latest_path);
+    assertPublication(latestData, manifest, "latest payload");
     return fallbackLatestResponse(latestData, "published_pages");
   } catch {
     return fallbackLatestResponse(staticLatestPayload(), "static_bundle");
@@ -109,25 +154,29 @@ async function publishedLatestPayload() {
 async function publishedTickerPayload(ticker, profile = {}) {
   try {
     const normalized = normalizeTicker(ticker);
-    const [latestData, historyData] = await Promise.all([
-      fetchPublishedJson("latest.json"),
-      fetchPublishedJson("history.json"),
-    ]);
-    const rows = Array.isArray(latestData.rows) ? latestData.rows.map(normalizeFallbackRow) : [];
-    const snapshot = rows.find((row) => normalizeTicker(row.ticker) === normalized) || null;
-    const rawHistoryRows = Array.isArray(historyData.by_ticker?.[normalized])
-      ? historyData.by_ticker[normalized]
-      : (Array.isArray(historyData.rows) ? historyData.rows.filter((row) => normalizeTicker(row.ticker) === normalized) : []);
+    const manifest = await publishedManifest();
+    const tickerPath = String(manifest.ticker_paths[normalized] || "");
+    if (!tickerPath.startsWith(`${manifest.ticker_base_path}/`)) throw new Error(`${normalized} is not included in the active publication.`);
+    const tickerData = await fetchPublishedJson(tickerPath);
+    assertPublication(tickerData, manifest, `${normalized} payload`);
+    if (normalizeTicker(tickerData?.ticker) !== normalized) throw new Error(`Published ${normalized} payload has the wrong ticker.`);
+    const rawSnapshot = tickerData?.snapshot && typeof tickerData.snapshot === "object"
+      ? tickerData.snapshot
+      : null;
+    const snapshot = rawSnapshot ? normalizeFallbackRow(rawSnapshot) : null;
+    const rawHistoryRows = Array.isArray(tickerData?.historyRows)
+      ? tickerData.historyRows
+      : (Array.isArray(tickerData?.history_rows) ? tickerData.history_rows : []);
     const historyRows = rawHistoryRows
       .map(normalizeFallbackRow)
       .sort((a, b) => String(b.history_date || b.data_date || b.date || "").localeCompare(String(a.history_date || a.data_date || a.date || "")));
-    const latest = latestData.run_date || snapshot?.run_date || historyRows[0]?.run_date || "";
+    const latest = tickerData.latest || tickerData.run_date || snapshot?.run_date || historyRows[0]?.run_date || manifest.run_date || "";
     return {
       ticker: normalized,
       latest,
       snapshot,
       historyRows,
-      runInfo: fallbackRunInfo(latestData.runInfo, latest, snapshot ? 1 : 0, "published_pages"),
+      runInfo: fallbackRunInfo(tickerData.runInfo, latest, snapshot ? 1 : 0, "published_pages"),
       profile,
     };
   } catch {

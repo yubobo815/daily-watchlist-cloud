@@ -145,11 +145,10 @@ const JSON_CACHE_PREFIX = "daily-trade-copilot:json:v1:";
 const API_CACHE_PREFIX = "daily-trade-copilot:api:v1:";
 const FOCUS_LIST_KEY = "daily-trade-copilot:focus-tickers:v1";
 const FOCUS_PIN_KEY = "daily-trade-copilot:focus-pin:v1";
-const STATIC_FALLBACK_SCORE_CAP = 49;
-const STATIC_FALLBACK_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
-const PUBLISHED_LATEST_JSON_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/latest.json";
-const PUBLISHED_HISTORY_JSON_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/history.json";
-const PUBLISHED_HISTORY_CSV_URL = "https://yubobo815.github.io/daily-watchlist-cloud/watchlist_behavior_history_latest.csv";
+const PUBLISHED_DATA_BASE_URL = "https://yubobo815.github.io/daily-watchlist-cloud/data/";
+const INITIAL_WATCHLIST_ROWS = 40;
+const LOCAL_STATIC_DATA_MODE = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+  && new URLSearchParams(window.location.search).get("dataMode") === "static";
 
 function copyText(key, replacements = {}) {
   const text = UI_LABELS.text[key] || key;
@@ -415,7 +414,9 @@ const state = {
   focusMessage: "",
   focusSyncing: false,
   runInfo: null,
-  selectedTicker: ""
+  selectedTicker: "",
+  rowLimit: INITIAL_WATCHLIST_ROWS,
+  staticManifest: null,
 };
 
 const APP_NOTIFICATION_HISTORY = "daily-watchlist-notification-history";
@@ -1190,7 +1191,7 @@ async function focusApiFetch(method = "GET", tickers = null) {
 }
 
 async function loadCloudFocusTickers() {
-  if (!state.focusPin) return false;
+  if (!state.focusPin || isGithubPagesHost()) return false;
   try {
     state.focusSyncing = true;
     state.focusTickers = await focusApiFetch("GET");
@@ -1206,7 +1207,7 @@ async function loadCloudFocusTickers() {
 }
 
 async function saveCloudFocusTickers() {
-  if (!state.focusPin) return false;
+  if (!state.focusPin || isGithubPagesHost()) return false;
   try {
     state.focusSyncing = true;
     state.focusTickers = await focusApiFetch("PUT", state.focusTickers);
@@ -1222,6 +1223,7 @@ async function saveCloudFocusTickers() {
 }
 
 async function ensureFocusPin() {
+  if (isGithubPagesHost()) return true;
   if (state.focusPin) return true;
   const pin = window.prompt("Enter your Focus List PIN");
   if (!pin) {
@@ -1245,7 +1247,7 @@ async function toggleFocusTicker(ticker) {
     : [...state.focusTickers, normalised].sort();
   saveFocusTickers();
   renderWatchlist();
-  await saveCloudFocusTickers();
+  if (!isGithubPagesHost()) await saveCloudFocusTickers();
   renderWatchlist();
 }
 
@@ -1626,141 +1628,66 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   renderMarketRail(runInfo, rows);
 }
 
-function staticFallbackRunDate(payload) {
-  return payload?.run_date || payload?.latest || payload?.runInfo?.run_date || payload?.runInfo?.latest_data_date || "";
-}
-
-function staticFallbackNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function capStaticFallbackScore(value, cap = STATIC_FALLBACK_SCORE_CAP) {
-  const score = staticFallbackNumber(value);
-  return score === null ? value : Math.min(score, cap);
-}
-
-function appendStaticFallbackReason(payload, code) {
-  const raw = payload.reason_codes;
-  const codes = Array.isArray(raw)
-    ? [...raw]
-    : (typeof raw === "string" && raw ? raw.split(",").map((value) => value.trim()) : []);
-  if (!codes.includes(code)) codes.push(code);
-  payload.reason_codes = codes.filter(Boolean);
-}
-
-function normalizeStaticFallbackRow(row, fallbackRunDate = "") {
-  const next = { ...(row || {}) };
-  const payload = next.payload && typeof next.payload === "object" ? { ...next.payload } : {};
-  const plan = "Execution blocked: this is bundled fallback data. Refresh live Supabase data before acting.";
-
-  next.run_date = next.run_date || fallbackRunDate;
-  next.data_date = next.data_date || next.date || next.history_date;
-  next.name = displaySecurityName(next.name, next.ticker) || next.name || next.ticker;
-  payload.data_provider = "static_bundle";
-  payload.data_provider_status = "STALE_STATIC_FALLBACK";
-  payload.data_provider_error = payload.data_provider_error || "Live database unavailable; bundled static data is not execution-grade.";
-  next.learning_promotion_eligible = false;
-  payload.learning_promotion_eligible = false;
-  next.learning_reporting_only = true;
-  payload.learning_reporting_only = true;
-  next.learning_promotion_state = "REPORTING_ONLY";
-  payload.learning_promotion_state = "REPORTING_ONLY";
-  payload.data_age_days = payload.data_age_days ?? next.data_age_days ?? "";
-  payload.freshness_block = "YES";
-  payload.freshness_status = "STATIC_FALLBACK_BLOCK";
-  payload.freshness_plan = plan;
-  payload.buy_tier = payload.buy_tier === "EXIT RISK" ? payload.buy_tier : "SETUP ONLY";
-  payload.execution_priority = Math.max(Number(payload.execution_priority || 4), 4);
-  payload.execution_plan = plan;
-  payload.signal_quality = "STATIC FALLBACK - NEEDS GATE PROOF";
-  payload.transition_label = "Needs Gate Proof";
-  payload.transition_score = capStaticFallbackScore(payload.transition_score ?? next.transition_score ?? -25, -25);
-  payload.next_day_bias = "EXECUTION BLOCKED";
-  payload.next_day_plan = plan;
-  payload.audit_gate_status = "STATIC_FALLBACK";
-  payload.personality_setup_allowed = "NO";
-  next.personality_setup_allowed = "NO";
-
-  STATIC_FALLBACK_GATE_FIELDS.forEach((field) => {
-    payload[field] = "UNKNOWN";
-    next[field] = "UNKNOWN";
-  });
-  appendStaticFallbackReason(payload, "static_fallback_block");
-  appendStaticFallbackReason(payload, "data_stale_block");
-  appendStaticFallbackReason(payload, "missing_audit_gates");
-  appendStaticFallbackReason(payload, "personality_setup_not_allowed");
-
-  if (["BUY CANDIDATE", "STRONG CONTINUATION"].includes(next.action)) {
-    next.action = "SETUP FORMING";
-    payload.signal_stage = "SETUP";
-  }
-  payload.adjusted_score = capStaticFallbackScore(payload.adjusted_score ?? next.adjusted_score ?? next.score);
-  next.adjusted_score = capStaticFallbackScore(next.adjusted_score ?? payload.adjusted_score ?? next.score);
-  next.notes = [next.notes, "Static fallback lacks current audit-gate proof"].filter(Boolean).join("; ");
-  next.payload = payload;
-  return next;
-}
-
-async function fetchJsonNoStore(path, errorPrefix = "Static fallback") {
-  const response = await fetch(path, { cache: "no-store" });
+async function fetchStaticJson(path, { mutable = false, errorPrefix = "Published data" } = {}) {
+  const response = await fetch(path, { cache: mutable ? "no-cache" : "force-cache" });
   if (!response.ok) throw new Error(`${errorPrefix} returned HTTP ${response.status}.`);
   return response.json();
 }
 
-async function fetchStaticJson(path, publishedUrl = "") {
-  if (publishedUrl) {
-    try {
-      return await fetchJsonNoStore(`${publishedUrl}?v=${Date.now()}`, "Published fallback");
-    } catch {}
-  }
-  return fetchJsonNoStore(path);
+function isGithubPagesHost() {
+  return window.location.hostname.endsWith(".github.io") || LOCAL_STATIC_DATA_MODE;
 }
 
-function parseCsvLine(line) {
-  const values = [];
-  let value = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-    if (quoted && char === "\"" && next === "\"") {
-      value += "\"";
-      index += 1;
-    } else if (char === "\"") {
-      quoted = !quoted;
-    } else if (!quoted && char === ",") {
-      values.push(value);
-      value = "";
-    } else {
-      value += char;
-    }
-  }
-  values.push(value);
-  return values;
+function publishedManifestUrl() {
+  return isGithubPagesHost() ? new URL("./data/manifest.json", window.location.href).href : `${PUBLISHED_DATA_BASE_URL}manifest.json`;
 }
 
-function parseCsv(text) {
-  const lines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(Boolean);
-  const headers = parseCsvLine(lines.shift() || "");
-  return lines.map((line) => {
-    const values = parseCsvLine(line);
-    return headers.reduce((row, header, index) => {
-      row[header] = values[index] ?? "";
-      return row;
-    }, {});
-  });
+function resolvePublishedPath(path, manifestUrl) {
+  if (!path || path.startsWith("/") || path.includes("..") || path.includes("//") || !/^[A-Za-z0-9_./-]+\.json$/.test(path)) {
+    throw new Error("Published manifest contains an invalid data path.");
+  }
+  const resolved = new URL(path, manifestUrl);
+  if (resolved.origin !== new URL(manifestUrl).origin) throw new Error("Published data must remain on the manifest origin.");
+  return resolved.href;
+}
+
+async function loadStaticManifest() {
+  const manifestUrl = publishedManifestUrl();
+  const manifest = await fetchStaticJson(manifestUrl, { mutable: true, errorPrefix: "Published manifest" });
+  if (!manifest?.publication_id || !manifest?.run_date || !manifest?.latest_path || !manifest?.ticker_base_path) {
+    throw new Error("Published manifest is incomplete.");
+  }
+  const latestVersion = String(manifest.latest_path).match(/^runs\/([^/]+)\/latest\.json$/)?.[1];
+  const tickerVersion = String(manifest.ticker_base_path).match(/^runs\/([^/]+)\/tickers$/)?.[1];
+  if (!latestVersion || latestVersion !== tickerVersion || typeof manifest.ticker_paths !== "object") {
+    throw new Error("Published manifest paths are not scoped to one publication.");
+  }
+  state.staticManifest = { ...manifest, manifestUrl };
+  return state.staticManifest;
+}
+
+function validatePublishedPayload(payload, manifest) {
+  if (payload?.publication_id !== manifest.publication_id || payload?.run_date !== manifest.run_date) {
+    throw new Error("Published data version does not match its manifest.");
+  }
+  return payload;
 }
 
 async function loadStaticLatestRows() {
-  const fallback = await fetchStaticJson("./data/latest.json", PUBLISHED_LATEST_JSON_URL);
-  const fallbackRunDate = staticFallbackRunDate(fallback);
+  const manifest = state.staticManifest || await loadStaticManifest();
+  const payload = validatePublishedPayload(
+    await fetchStaticJson(resolvePublishedPath(manifest.latest_path, manifest.manifestUrl)),
+    manifest
+  );
   return {
-    latest: fallbackRunDate,
+    latest: payload.run_date,
     previous: "",
-    rows: (fallback.rows || []).map((row) => normalizeStaticFallbackRow(row, fallbackRunDate)),
-    previousRows: [],
-    runInfo: fallback.runInfo || null,
+    rows: (payload.rows || []).map((row) => ({
+      ...row,
+      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
+    })),
+    previousRows: payload.previousRows || [],
+    runInfo: payload.runInfo || null,
   };
 }
 
@@ -1768,42 +1695,45 @@ function uniqueHistoryDateCount(rows) {
   return new Set(rows.map((row) => row.history_date || row.data_date || row.date).filter(Boolean)).size;
 }
 
-async function loadPublishedTickerHistory(ticker) {
-  const response = await fetch(`${PUBLISHED_HISTORY_CSV_URL}?v=${Date.now()}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Published history returned HTTP ${response.status}.`);
-  return parseCsv(await response.text())
-    .filter((row) => normaliseTicker(row.ticker) === ticker)
-    .map((row) => normalizeStaticFallbackRow({
-      ...row,
-      history_date: row.history_date || row.data_date || row.date || row.run_date,
-      data_date: row.data_date || row.date || row.history_date,
-      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
-    }, row.run_date))
-    .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
-}
-
 async function loadStaticTickerHistory(ticker) {
-  const fallback = await fetchStaticJson("./data/history.json", PUBLISHED_HISTORY_JSON_URL);
-  const rawRows = fallback.by_ticker?.[ticker] || fallback.by_ticker?.[ticker.replace(".", "-")] || (fallback.rows || []).filter((row) => row.ticker === ticker);
-  let rows = rawRows
-    .map((row) => normalizeStaticFallbackRow({
+  const manifest = state.staticManifest || await loadStaticManifest();
+  const safeTicker = normaliseTicker(ticker).replace(/[^A-Z0-9._-]/g, "");
+  const tickerPath = String(manifest.ticker_paths?.[safeTicker] || "");
+  if (!tickerPath.startsWith(`${manifest.ticker_base_path}/`)) throw new Error("Ticker is not included in the active publication.");
+  const payload = validatePublishedPayload(
+    await fetchStaticJson(resolvePublishedPath(tickerPath, manifest.manifestUrl)),
+    manifest
+  );
+  if (normaliseTicker(payload.ticker) !== safeTicker) throw new Error("Published ticker payload does not match the requested ticker.");
+  const rows = (payload.historyRows || payload.rows || [])
+    .map((row) => ({
       ...row,
       history_date: row.data_date || row.date || row.run_date,
       data_date: row.data_date || row.date,
       name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
-    }, fallback.run_date || ""))
+    }))
     .sort((a, b) => String(b.history_date).localeCompare(String(a.history_date)));
-  if (uniqueHistoryDateCount(rows) < 5) {
-    rows = await loadPublishedTickerHistory(ticker);
+  if (payload.snapshot && rows[0]) {
+    rows[0] = {
+      ...rows[0],
+      ...payload.snapshot,
+      history_date: rows[0].history_date,
+      data_date: payload.snapshot.data_date || payload.snapshot.date || rows[0].data_date,
+      name: payload.snapshot.name || rows[0].name,
+    };
   }
   if (uniqueHistoryDateCount(rows) < 5) {
-    throw new Error("Live history is unavailable and the published archive does not have enough history for this ticker.");
+    throw new Error("Published data does not have enough history for this ticker.");
   }
-  const fallbackRunDate = fallback.run_date || rows.map((row) => row.run_date).filter(Boolean).sort().at(-1) || rows[0]?.history_date || "";
   return {
-    latest: rows[0]?.run_date || fallbackRunDate,
-    name: rows[0]?.name || "",
+    ticker: safeTicker,
+    latest: payload.run_date,
+    name: payload.snapshot?.name || rows[0]?.name || "",
     rows,
+    snapshot: payload.snapshot || rows[0] || null,
+    historyRows: rows,
+    runInfo: payload.runInfo || null,
+    profile: payload.profile || {},
   };
 }
 
@@ -2556,18 +2486,20 @@ function renderNotificationCenter() {
   });
 }
 
-function renderWatchlist() {
+function renderWatchlist({ refreshOverview = true } = {}) {
   const counts = { buy: 0, continue: 0, setup: 0, watch: 0, exit: 0, avoid: 0 };
   state.rows.forEach((row) => {
     counts[actionKind(row.action)] += 1;
   });
-  renderCards(counts);
-  renderDailyBrief(counts);
-  renderTodayFocus();
-  renderSignalChanges();
-  renderPriceMovers();
-  renderFocusList();
-  renderNotificationCenter();
+  if (refreshOverview) {
+    renderCards(counts);
+    renderDailyBrief(counts);
+    renderTodayFocus();
+    renderSignalChanges();
+    renderPriceMovers();
+    renderFocusList();
+    renderNotificationCenter();
+  }
 
   const needle = state.query.trim().toLowerCase();
   const searchActive = Boolean(needle);
@@ -2599,23 +2531,21 @@ function renderWatchlist() {
   }
 
   const columns = watchlistColumns();
+  const renderedRows = state.visibleRows.slice(0, state.rowLimit);
   document.querySelector("#watchlist-head").innerHTML = `<tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>`;
-  document.querySelector("#watchlist-body").innerHTML = state.visibleRows.map((row) => `
+  document.querySelector("#watchlist-body").innerHTML = renderedRows.map((row) => `
     <tr class="row-${actionKind(row.action)} ${row.ticker === state.selectedTicker ? "selected" : ""}" style="--score-pct: ${fmtConviction(row)}%">
       ${columns.map(([key]) => `<td class="${["score", "operator_state_score", "operator_pressure_score", "close", "day_change_pct", "entry_est", "stop_est", "target_est", "risk_pct_to_stop", "position_value_1k_risk", "price_summary"].includes(key) ? "num" : ""}">${renderWatchlistCell(row, key)}</td>`).join("")}
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");
-  document.querySelectorAll("[data-select-ticker]").forEach((button) => button.addEventListener("click", () => selectTicker(button.dataset.selectTicker)));
-  document.querySelectorAll("[data-focus-ticker]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      toggleFocusTicker(button.dataset.focusTicker);
-    });
-  });
-  attachFocusControls();
-  document.querySelector("#count").textContent = `${state.visibleRows.length} / ${state.rows.length} ${copyText("shown")}`;
+  if (refreshOverview) attachFocusControls();
+  document.querySelector("#count").textContent = `${renderedRows.length} / ${state.visibleRows.length} filtered · ${state.rows.length} total`;
+  const showMore = document.querySelector("#show-more");
+  if (showMore) {
+    showMore.classList.toggle("hidden", renderedRows.length >= state.visibleRows.length);
+    showMore.textContent = `Show ${Math.min(INITIAL_WATCHLIST_ROWS, state.visibleRows.length - renderedRows.length)} more`;
+  }
   const mobileCount = document.querySelector("#mobile-search-count");
   if (mobileCount) {
     mobileCount.textContent = searchActive
@@ -2628,7 +2558,7 @@ function renderWatchlist() {
   const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
   if (watchlistTitle) watchlistTitle.textContent = searchActive ? copyText("searchResults") : copyText("watchlist");
   document.querySelector("#empty").classList.toggle("hidden", state.visibleRows.length > 0);
-  renderTickerDetailPanel();
+  if (refreshOverview || searchActive) renderTickerDetailPanel();
 }
 
 function scrollToWatchlistResults() {
@@ -2683,11 +2613,16 @@ async function initWatchlist() {
     if (searchInput.value !== state.query) searchInput.value = state.query;
     if (mobileSearchInput && mobileSearchInput.value !== state.query) mobileSearchInput.value = state.query;
   };
+  let searchFrame = 0;
   const updateSearch = (value, shouldScroll = true) => {
     state.query = value;
+    state.rowLimit = INITIAL_WATCHLIST_ROWS;
     syncSearchClear();
-    renderWatchlist();
-    if (shouldScroll && state.query.trim()) scrollToWatchlistResults();
+    cancelAnimationFrame(searchFrame);
+    searchFrame = requestAnimationFrame(() => {
+      renderWatchlist({ refreshOverview: false });
+      if (shouldScroll && state.query.trim()) scrollToWatchlistResults();
+    });
   };
   searchInput.addEventListener("input", (event) => {
     updateSearch(event.target.value);
@@ -2710,18 +2645,37 @@ async function initWatchlist() {
   document.querySelectorAll("[data-mobile-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.filter = button.dataset.mobileFilter || "all";
+      state.rowLimit = INITIAL_WATCHLIST_ROWS;
       renderWatchlist();
       scrollToWatchlistResults();
     });
   });
   document.querySelector("#sort").addEventListener("change", (event) => {
     state.sort = event.target.value;
-    renderWatchlist();
+    state.rowLimit = INITIAL_WATCHLIST_ROWS;
+    renderWatchlist({ refreshOverview: false });
+  });
+  document.querySelector("#show-more")?.addEventListener("click", () => {
+    state.rowLimit += INITIAL_WATCHLIST_ROWS;
+    renderWatchlist({ refreshOverview: false });
+  });
+  document.querySelector("#watchlist-body")?.addEventListener("click", (event) => {
+    const focusButton = event.target.closest("[data-focus-ticker]");
+    if (focusButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFocusTicker(focusButton.dataset.focusTicker);
+      return;
+    }
+    const tickerButton = event.target.closest("[data-select-ticker]");
+    if (tickerButton) selectTicker(tickerButton.dataset.selectTicker);
   });
   syncSearchClear();
   initTabNavigation();
   try {
-    const latestPayload = await appApiFetch("/api/watchlist/latest", { fresh: true, ttl: 0 });
+    const latestPayload = isGithubPagesHost()
+      ? await loadStaticLatestRows()
+      : await appApiFetch("/api/watchlist/latest", { fresh: true, ttl: 0 });
     state.rows = (latestPayload.rows || [])
       .map((row) => ({ ...row, name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker }));
     state.previousRows = latestPayload.previousRows || [];
@@ -2988,7 +2942,9 @@ async function loadHistory(ticker) {
   document.querySelector("#run-status").classList.remove("bad", "warn");
   document.querySelector("#run-status").classList.add("loading");
   try {
-    const tickerPayload = await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`, { fresh: true, ttl: 0 });
+    const tickerPayload = isGithubPagesHost()
+      ? await loadStaticTickerHistory(state.ticker)
+      : await appApiFetch(`/api/ticker/${encodeURIComponent(state.ticker)}`, { fresh: true, ttl: 0 });
     const latest = tickerPayload.latest;
     state.tickerName = displaySecurityName(tickerPayload.snapshot?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
@@ -3007,8 +2963,8 @@ async function loadHistory(ticker) {
       document.title = historyDisplayTitle();
       state.historyRows = fallback.rows;
       const marketData = historyDateSummary(state.historyRows);
-      setRefreshSummary(fallback.latest, `${marketData} · saved validated data`, state.historyRows);
-      renderCompanyBrief({});
+      setRefreshSummary(fallback.latest, `${marketData} · saved validated data`, state.historyRows, fallback.runInfo);
+      renderCompanyBriefWithFallback(state.ticker, fallback.profile || {});
       renderHistoryRows();
     } catch (fallbackError) {
       state.historyRows = [];
