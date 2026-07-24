@@ -315,7 +315,6 @@ body.ticker-page .detail-diagnostics { padding-top: 10px; border-top: 1px solid 
 body.ticker-page .detail-diagnostics summary { cursor: pointer; color: #4b4842; font-weight: 750; }
 body.ticker-page .moment-card, body.ticker-page .lookback-card { border-color: #d2cdc4; background: #fffdf9; }
 body.ticker-page .history-visual, body.ticker-page .visual-summary { border-color: #d2cdc4; background: #fffdf9; }
-body.ticker-page #company-context:has(.company-context-empty) { display: none; }
 
 @media (max-width: 960px) {
   body[data-page="watchlist"] .editorial-hero { min-height: 0; padding: 12px 4px 8px !important; }
@@ -1976,10 +1975,6 @@ body[data-page="history"] .company-brief {
   box-shadow: none;
 }
 
-.company-context-empty {
-  margin-top: 8px;
-}
-
 .history-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
@@ -3566,8 +3561,7 @@ body.ticker-page .visual-summary { background: var(--panel-strong); border-color
 body.ticker-page .latest-metrics > div > span,
 body.ticker-page .latest-rationale,
 body.ticker-page .detail-diagnostics,
-body.ticker-page .moment-card .subtle,
-body.ticker-page .company-context-empty { color: var(--muted); }
+body.ticker-page .moment-card .subtle { color: var(--muted); }
 body.ticker-page .ticker-input { border-color: var(--border-strong, #3b4b5e); color: var(--ink); background: var(--field); }
 body.ticker-page .ticker-input::placeholder { color: var(--muted); }
 body.ticker-page .button.primary { color: #ffffff; background: #3f6557; }

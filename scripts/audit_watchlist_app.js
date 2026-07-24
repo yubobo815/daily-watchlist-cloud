@@ -72,6 +72,10 @@ function tickerSearchAliases(row) {
   return [...new Set([ticker, ticker.replace("-", ".")].filter(Boolean))];
 }
 
+function companySearchTerms(row) {
+  return [row.ticker, row.name].filter(Boolean).map((value) => String(value).toLowerCase());
+}
+
 function exactTickerSearchNeedle(query, rows) {
   const ticker = normaliseSearchTicker(query);
   if (!ticker || !/^[A-Z0-9.-]{1,8}$/.test(ticker)) return "";
@@ -81,17 +85,21 @@ function exactTickerSearchNeedle(query, rows) {
 function auditSearchBehavior() {
   const source = fs.readFileSync("assets/app.js", "utf8");
   assert(source.includes("function exactTickerSearchNeedle"), "watchlist search must include exact ticker matching");
+  assert(source.includes("function companySearchTerms"), "watchlist search must index company names alongside ticker aliases");
+  assert(source.includes("...companySearchTerms(row),"), "company names must be included in the searchable watchlist text");
   assert(source.includes("rowMatchesSearch(row, state.query, exactTickerNeedle)"), "watchlist render must use ticker-aware search matching");
   assert(source.includes("if (searchActive && state.visibleRows.length === 1)"), "a unique search result must become the selected ticker");
 
   const rows = staticLatestPayload().rows || [];
   const muNeedle = exactTickerSearchNeedle("MU", rows);
   const muMatches = rows.filter((row) => tickerSearchAliases(row).includes(muNeedle)).map((row) => row.ticker);
-  const micronMatches = rows.filter((row) => String(row.name || "").toLowerCase().includes("micron")).map((row) => row.ticker);
+  const micronMatches = rows.filter((row) => companySearchTerms(row).some((term) => term.includes("micron"))).map((row) => row.ticker);
 
   assert(muNeedle === "MU", "MU query must resolve to exact ticker search");
   assert(muMatches.length === 1 && muMatches[0] === "MU", `MU exact search must only match MU, got ${muMatches.join(",")}`);
   assert(micronMatches.includes("MU"), "company-name search for Micron must still find MU");
+  assert(!source.includes("Built-in fallback profile"), "company context must not present static fallback copy as live information");
+  assert(source.includes("function hasMeaningfulCompanyProfile"), "company context must require a substantive company summary");
 
   return {
     muNeedle,

@@ -182,28 +182,6 @@ function executionQueues(counts) {
   ];
 }
 
-const COMPANY_PROFILE_FALLBACKS = {
-  AAPL: ["Consumer Technology", "Apple designs iPhone, Mac, iPad, wearables, services, and related software ecosystems.", "apple.com"],
-  AMD: ["Semiconductors", "Advanced Micro Devices designs CPUs, GPUs, adaptive chips, and data-center accelerators.", "amd.com"],
-  AMZN: ["Internet Retail & Cloud", "Amazon operates e-commerce marketplaces, logistics, advertising, subscriptions, and AWS cloud services.", "amazon.com"],
-  AVGO: ["Semiconductors & Infrastructure Software", "Broadcom supplies semiconductor connectivity products and infrastructure software for enterprise and cloud customers.", "broadcom.com"],
-  CSCO: ["Networking & Security", "Cisco provides networking hardware, software, cybersecurity, observability, and collaboration products for enterprises and service providers.", "cisco.com"],
-  CSX: ["Rail Transportation", "CSX operates a major freight railroad network across the eastern United States.", "csx.com"],
-  DELL: ["Technology Hardware", "Dell provides PCs, servers, storage, networking, and infrastructure solutions for consumers and enterprises.", "dell.com"],
-  GOOGL: ["Internet Services", "Alphabet operates Google Search, YouTube, Android, cloud services, advertising platforms, and AI products.", "abc.xyz"],
-  GOOG: ["Internet Services", "Alphabet operates Google Search, YouTube, Android, cloud services, advertising platforms, and AI products.", "abc.xyz"],
-  META: ["Social Platforms", "Meta operates Facebook, Instagram, WhatsApp, Messenger, ads infrastructure, AI products, and Reality Labs.", "meta.com"],
-  MRVL: ["Semiconductors", "Marvell designs data-infrastructure semiconductors for cloud, networking, storage, wireless, and automotive markets.", "marvell.com"],
-  MSFT: ["Software & Cloud", "Microsoft provides productivity software, Windows, Azure cloud, gaming, security, and AI infrastructure.", "microsoft.com"],
-  MU: ["Memory Semiconductors", "Micron manufactures DRAM, NAND, and memory/storage products used in data centers, PCs, mobile, and automotive markets.", "micron.com"],
-  NVDA: ["AI Semiconductors", "NVIDIA designs GPUs, networking, systems, and software platforms for AI, gaming, professional visualization, and data centers.", "nvidia.com"],
-  ORCL: ["Enterprise Software & Cloud", "Oracle provides enterprise databases, cloud infrastructure, business applications, and industry software.", "oracle.com"],
-  PANW: ["Cybersecurity", "Palo Alto Networks provides network security, cloud security, security operations, and threat-intelligence platforms.", "paloaltonetworks.com"],
-  PLTR: ["Data Analytics Software", "Palantir provides data integration, analytics, ontology, and AI operating platforms for commercial and government customers.", "palantir.com"],
-  TSLA: ["Electric Vehicles & Energy", "Tesla designs electric vehicles, energy storage systems, solar products, charging infrastructure, and autonomous-driving software.", "tesla.com"],
-  WDC: ["Data Storage Hardware", "Western Digital designs and manufactures hard disk drives, flash storage, SSDs, and data-center storage products for cloud, enterprise, client, and consumer markets.", "westerndigital.com"],
-};
-
 const SECURITY_NAME_FALLBACKS = {
   AAPL: "Apple",
   ABBV: "AbbVie",
@@ -445,6 +423,16 @@ function tickerSearchAliases(row) {
   return [...new Set([ticker, ticker.replace("-", ".")].filter(Boolean))];
 }
 
+function companySearchTerms(row) {
+  const ticker = normaliseTicker(row?.ticker);
+  return [...new Set([
+    row?.ticker,
+    row?.name,
+    displaySecurityName(row?.name, ticker),
+    SECURITY_NAME_FALLBACKS[ticker],
+  ].map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 function exactTickerSearchNeedle(query, rows) {
   const ticker = normaliseSearchTicker(query);
   if (!ticker || !/^[A-Z0-9.-]{1,8}$/.test(ticker)) return "";
@@ -512,6 +500,11 @@ function safeWebsite(value) {
 function renderCompanyBrief(profile) {
   const target = document.querySelector("#company-context");
   if (!target) return;
+  if (!hasMeaningfulCompanyProfile(profile)) {
+    setCompanyContextAvailable(false);
+    target.innerHTML = "";
+    return;
+  }
   const summary = cleanSummaryText(profile?.business_summary);
   const highlights = String(profile?.latest_report_highlights || "").trim();
   const nextReport = String(profile?.next_report_date || "").trim();
@@ -520,18 +513,9 @@ function renderCompanyBrief(profile) {
   const source = String(profile?.profile_source || "Company profile").trim();
   const summaryPreview = summary.length > 260 ? `${summary.slice(0, 257).replace(/\s+\S*$/, "")}...` : summary;
 
-  if (!summary && !highlights && !nextReport && !website && !industry) {
-    setCompanyContextAvailable(false);
-    target.innerHTML = `
-      <h2>About the company</h2>
-      <div class="company-context-empty subtle">Company information is not available.</div>
-    `;
-    return;
-  }
-
   setCompanyContextAvailable(true);
   target.innerHTML = `
-    <h2>About the company</h2>
+    <h2>Company context</h2>
     <details class="company-brief">
       <summary>
         ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
@@ -556,63 +540,25 @@ function setCompanyContextAvailable(available) {
   if (tab) tab.hidden = !available;
 }
 
-function hasCompanyProfile(profile) {
-  return Boolean(
-    cleanSummaryText(profile?.business_summary)
-    || String(profile?.latest_report_highlights || "").trim()
-    || String(profile?.next_report_date || "").trim()
-    || safeWebsite(profile?.website)
-    || [profile?.sector, profile?.industry].filter(Boolean).join(" · ")
-  );
-}
-
-function fallbackCompanyProfile(ticker) {
-  const [industry, summary, domain] = COMPANY_PROFILE_FALLBACKS[normaliseTicker(ticker)] || [];
-  if (!summary) return {};
-  return {
-    business_summary: summary,
-    website: `https://${domain}`,
-    industry,
-    latest_report_highlights: "Live report highlights unavailable in fallback profile.",
-    next_report_date: "Check investor relations",
-    profile_source: "Built-in fallback profile",
-  };
-}
-
 function isIncompleteCompanySummary(profile) {
   const summary = cleanSummaryText(profile?.business_summary);
   return !summary || summary.length < 100 || summary.split(/\s+/).filter(Boolean).length < 14;
 }
 
-function enrichCompanyProfile(ticker, profile = {}) {
-  const fallback = fallbackCompanyProfile(ticker);
-  if (!hasCompanyProfile(fallback)) return profile || {};
-  if (!hasCompanyProfile(profile)) return fallback;
-  if (!isIncompleteCompanySummary(profile)) return profile;
-
-  return {
-    ...fallback,
-    ...profile,
-    business_summary: fallback.business_summary,
-    website: safeWebsite(profile.website) || fallback.website,
-    industry: profile.industry || fallback.industry,
-    profile_source: profile.profile_source
-      ? `${profile.profile_source}; summary fallback`
-      : fallback.profile_source,
-  };
+function hasMeaningfulCompanyProfile(profile) {
+  return !isIncompleteCompanySummary(profile);
 }
 
 async function renderCompanyBriefWithFallback(ticker, profile) {
-  const enrichedProfile = enrichCompanyProfile(ticker, profile || {});
-  if (hasCompanyProfile(enrichedProfile)) {
-    renderCompanyBrief(enrichedProfile);
+  if (hasMeaningfulCompanyProfile(profile)) {
+    renderCompanyBrief(profile);
     return;
   }
 
-  renderCompanyBrief(fallbackCompanyProfile(ticker) || profile || {});
+  renderCompanyBrief({});
   try {
     const fallbackProfile = await appApiFetch(`/api/company?ticker=${encodeURIComponent(ticker)}`, 6 * 60 * 60 * 1000);
-    if (hasCompanyProfile(fallbackProfile)) renderCompanyBrief(fallbackProfile);
+    if (hasMeaningfulCompanyProfile(fallbackProfile)) renderCompanyBrief(fallbackProfile);
   } catch {
     // Company context is useful, but ticker behavior should remain usable without it.
   }
@@ -1879,6 +1825,7 @@ function renderReasonSummary(row) {
 
 function searchableRowText(row) {
   return [
+    ...companySearchTerms(row),
     ...WATCHLIST_COLUMN_KEYS.map((key) => row[key]),
     ACTION_LABELS[row.action] || row.action,
     setupLabel(row.setup),
@@ -2937,10 +2884,7 @@ async function loadHistory(ticker) {
   document.querySelector("#history-title").textContent = state.ticker;
   document.querySelector("#ticker-name").innerHTML = "";
   setCompanyContextAvailable(false);
-  document.querySelector("#company-context").innerHTML = `
-    <h2>About the company</h2>
-    <div class="company-context-empty subtle">Loading company information...</div>
-  `;
+  document.querySelector("#company-context").innerHTML = "";
   document.title = state.ticker;
   window.history.replaceState(null, "", `./ticker.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
