@@ -17,29 +17,28 @@ from typing import Any
 SCHEMA_VERSION = 1
 MAX_TICKER_HISTORY_ROWS = 30
 SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-LATEST_FIELDS = frozenset(
+# The ticker view needs the full current snapshot, but the watchlist only needs
+# enough data to rank, explain, and open a trade plan. Keeping those separate
+# prevents every daily publication from growing with diagnostics intended for
+# a single-stock page.
+WATCHLIST_FIELDS = frozenset(
     """
-    action active_protective_stop adaptive_mode adjusted_score anti_signal_level
-    anti_signal_plan buy_tier buyer_score close contextual_overlay contextual_plan
-    data_date data_provider data_provider_error data_provider_status date day_change_pct
-    days_to_report distance_from_ref_zone_pct entry_est entry_model_version
-    entry_quality_label entry_zone_high entry_zone_low entry_zone_plan event_risk
-    execution_fill_probability execution_fill_sample_count execution_fill_state
-    execution_plan execution_priority execution_style extension_state feedback_plan
-    feedback_quality freshness_block freshness_plan freshness_status high last_outcome_label
-    last_outcome_reason learning_adjustment learning_distinct_ticker_count
-    learning_evaluation_date_count learning_model_version learning_plan
-    learning_promotion_eligible learning_promotion_state learning_reporting_only
-    learning_sample_count low market_context market_permission model_version name
-    next_day_bias next_day_bias_score next_day_plan notes open operator_plan
-    operator_pressure operator_pressure_score operator_state operator_state_plan
-    operator_state_score personality_setup_allowed position_value_1k_risk post_tp1_stop
-    prediction_confidence prediction_downside_probability prediction_horizon_sessions
-    prediction_model_version prediction_no_edge_probability prediction_state
-    prediction_upside_probability profit_stage psychology reason_codes risk_pct_to_stop
-    risk_permission run_date score seller_score setup signal_quality stop_est take_profit_1
-    take_profit_1_reduce_pct target_est ticker ticker_permission transition_label
-    transition_score volatility_regime volume_state walk_forward_permission
+    action anti_signal_level buy_tier close data_date date day_change_pct
+    entry_est entry_zone_high entry_zone_low entry_zone_plan execution_fill_probability
+    execution_fill_state extension_state freshness_block freshness_status
+    market_permission name next_day_bias next_day_plan notes operator_pressure
+    operator_state personality_setup_allowed position_value_1k_risk post_tp1_stop
+    prediction_confidence prediction_state risk_pct_to_stop risk_permission run_date
+    score setup stop_est take_profit_1 take_profit_1_reduce_pct target_est ticker
+    ticker_permission volume_state walk_forward_permission
+    """.split()
+)
+
+RUN_INFO_FIELDS = frozenset(
+    """
+    earliest_data_date history_rows latest_data_date learning_history_rows
+    live_access_message live_access_ok notes run_date scanner_version status
+    symbols_analyzed symbols_failed symbols_stale_cache symbols_total
     """.split()
 )
 
@@ -76,8 +75,17 @@ def read_metadata(path: Path) -> dict[str, Any]:
     return value
 
 
-def project_latest_row(row: dict[str, str]) -> dict[str, str]:
-    return {key: value for key, value in row.items() if key in LATEST_FIELDS}
+def project_row(row: dict[str, str], fields: frozenset[str]) -> dict[str, str]:
+    return {key: value for key, value in row.items() if key in fields}
+
+
+def project_run_info(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Publish a stable operational summary, not arbitrary scanner diagnostics."""
+    run_info = {key: metadata[key] for key in RUN_INFO_FIELDS if key in metadata}
+    stale_blocks = metadata.get("payload", {}).get("stale_execution_blocks")
+    if stale_blocks is not None:
+        run_info["payload"] = {"stale_execution_blocks": stale_blocks}
+    return run_info
 
 
 def required_text(value: Any, field: str) -> str:
@@ -164,12 +172,15 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         shutil.rmtree(run_output)
     ticker_output = run_output / "tickers"
 
-    sorted_latest = [project_latest_row(latest_by_ticker[ticker]) for ticker in sorted(latest_by_ticker)]
+    sorted_latest = [
+        project_row(latest_by_ticker[ticker], WATCHLIST_FIELDS)
+        for ticker in sorted(latest_by_ticker)
+    ]
     latest_payload = {
         "schema_version": SCHEMA_VERSION,
         "publication_id": publication_id,
         "run_date": run_date,
-        "runInfo": metadata,
+        "runInfo": project_run_info(metadata),
         "rows": sorted_latest,
     }
     write_json(run_output / "latest.json", latest_payload)
@@ -190,9 +201,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 "publication_id": publication_id,
                 "run_date": run_date,
                 "ticker": ticker,
-                "snapshot": project_latest_row(latest_by_ticker[ticker]) if ticker in latest_by_ticker else None,
+                "snapshot": latest_by_ticker[ticker] if ticker in latest_by_ticker else None,
                 "historyRows": rows,
-                "runInfo": metadata,
+                "runInfo": project_run_info(metadata),
             },
         )
 
