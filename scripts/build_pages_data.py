@@ -53,6 +53,7 @@ TICKER_SNAPSHOT_FIELDS = WATCHLIST_FIELDS | frozenset(
     execution_plan execution_priority execution_style feedback_plan feedback_quality
     last_outcome_label last_outcome_reason learning_adjustment
     learning_distinct_ticker_count learning_evaluation_date_count learning_model_version
+    learning_baseline_sample_count learning_baseline_evaluation_date_count learning_baseline_weight
     learning_plan learning_promotion_eligible learning_promotion_state
     learning_reporting_only learning_sample_count market_context model_version
     next_day_bias_score operator_plan operator_pressure_score operator_state_plan

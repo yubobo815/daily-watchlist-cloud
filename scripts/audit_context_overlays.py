@@ -291,14 +291,22 @@ def audit_defensive_learning_shows_samples_without_promotion():
     assert_true(float(current["adjusted_score"]) == 20.0, "EXIT adjusted score must remain unchanged by positive defense learning")
 
 
-def audit_learning_lookback_supports_60_day_window():
+def audit_learning_windows_keep_recent_and_baseline_roles_separate():
     history_rows = [
         {**row(str(date.date()), "BUY CANDIDATE", 100 + day, setup="MOMENTUM BUY"), "ticker": "MU"}
-        for day, date in enumerate(pd.bdate_range("2026-04-01", periods=60), start=1)
+        for day, date in enumerate(pd.bdate_range("2026-01-02", periods=100), start=1)
     ]
     learning_outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
-    assert_true(dwo.DEFAULT_LEARNING_LOOKBACK_DAYS == 60, "learning should use a broader outcome window than the displayed history")
-    assert_true(len(learning_outcomes) == 59, "60 replayed days should create one outcome per prior signal")
+    assert_true(dwo.DEFAULT_LEARNING_LOOKBACK_DAYS == 60, "recent learning should remain sensitive to current conditions")
+    assert_true(dwo.DEFAULT_LEARNING_BASELINE_DAYS == 100, "learning should retain a longer stability baseline")
+    recent, baseline = dwo.split_learning_windows(learning_outcomes, "2026-12-31", 60, 100)
+    recent_dates = set(pd.to_datetime(recent["evaluation_run_date"]).dt.normalize())
+    baseline_dates = set(pd.to_datetime(baseline["evaluation_run_date"]).dt.normalize())
+    assert_true(len(learning_outcomes) == 99, "100 replayed days should create one outcome per prior signal")
+    assert_true(len(recent_dates) == 60, "recent window must retain 60 evaluation sessions")
+    all_dates = set(pd.to_datetime(learning_outcomes["evaluation_run_date"]).dt.normalize())
+    assert_true(baseline_dates == all_dates - recent_dates, "baseline window must retain every older available session")
+    assert_true(not recent_dates.intersection(baseline_dates), "recent and baseline evidence must not double-count sessions")
 
 
 def audit_learning_key_uses_behavior_not_ticker_identity():
@@ -1211,7 +1219,7 @@ def main():
     audit_ambiguous_daily_path_is_excluded_from_learning()
     audit_non_executable_signal_is_excluded_from_risk_path_learning()
     audit_defensive_learning_shows_samples_without_promotion()
-    audit_learning_lookback_supports_60_day_window()
+    audit_learning_windows_keep_recent_and_baseline_roles_separate()
     audit_learning_key_uses_behavior_not_ticker_identity()
     audit_action_display_labels_match_product_ui()
     audit_learning_can_upgrade_building_execution_tier()

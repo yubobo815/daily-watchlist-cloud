@@ -21,7 +21,7 @@ on:
         type: boolean
   schedule:
     # Monday-Thursday US sessions use the incremental path. Friday's session
-    # performs the bounded 60-session rebuild and calibration parity gate.
+    # performs the bounded 100-session rebuild and calibration parity gate.
     - cron: "0 23 * * 1-4"
     - cron: "0 23 * * 5"
 
@@ -137,9 +137,9 @@ jobs:
           DATA_PROVIDER_PRIORITY: polygon,twelvedata,stooq,yahoo
           MARKET_DATA_TIMEOUT_SECONDS: "12"
         # Two years of source OHLCV leaves enough post-warmup bars for the
-        # 60-session learning replay. Supabase still retains only 30 display
+        # 100-session learning baseline. Supabase still retains only 30 display
         # days plus a capped compact outcome table.
-        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60 --refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}" ${{ steps.time_gate.outputs.bootstrap_arg }}
+        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60 --learning-baseline-days 100 --refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}" ${{ steps.time_gate.outputs.bootstrap_arg }}
 
       - name: Audit Supabase learning health
         if: steps.time_gate.outputs.run == 'true'

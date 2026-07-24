@@ -4066,6 +4066,26 @@ body.ticker-page .decision-callout p { font-size: 14px; line-height: 1.55; }
 body.ticker-page .score-factors strong { font-size: 13px; line-height: 1.5; }
 body.ticker-page .detail-diagnostics > summary { display: flex; min-height: 44px; align-items: center; font-size: 13px; }
 
+/* Expanded diagnostics are supporting evidence, not cards within a card. */
+body.ticker-page .detail-diagnostics[open] .score-explainer {
+  gap: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+body.ticker-page .detail-diagnostics[open] .score-factors {
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+body.ticker-page .detail-diagnostics[open] .score-factors > div {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+body.ticker-page .detail-diagnostics[open] .score-factors > div:last-child {
+  border-bottom: 0;
+}
+
 body.ticker-page :is(a, button, input, summary):focus-visible {
   outline: 3px solid #356b58;
   outline-offset: 3px;
