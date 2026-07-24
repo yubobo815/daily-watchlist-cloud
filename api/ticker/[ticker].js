@@ -44,19 +44,17 @@ async function handler(request, response) {
     return;
   }
 
+  let publishedFallback;
+  const getPublishedFallback = async (profile = {}) => {
+    if (!publishedFallback) {
+      publishedFallback = publishedTickerPayload(ticker, profile);
+    }
+    return publishedFallback;
+  };
+
   try {
     // The list page is snapshot-led, so detail must use the identical current run.
     const [latest] = await recentRunDates(1);
-    const published = await publishedTickerPayload(ticker, {});
-    if (
-      published.runInfo?.status === "published_fallback"
-      && published.latest
-      && (!latest || String(published.latest) > String(latest))
-    ) {
-      response.setHeader("Cache-Control", "public, max-age=0, s-maxage=15, stale-while-revalidate=30");
-      response.status(200).json(published);
-      return;
-    }
     if (!latest) {
       throw new Error("No complete Supabase run is available.");
     }
@@ -70,6 +68,14 @@ async function handler(request, response) {
       withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {}),
     ]);
     if (!committedPublicationMatches(latestRunInfo, [...snapshotRows, ...historyRows])) {
+      const published = await getPublishedFallback(profile);
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json(published);
+      return;
+    }
+
+    if (snapshotRows.length === 0 && historyRows.length === 0) {
+      const published = await getPublishedFallback(profile);
       response.setHeader("Cache-Control", "no-store");
       response.status(200).json(published);
       return;
@@ -97,7 +103,7 @@ async function handler(request, response) {
     console.error(error);
     const profile = await withTimeout(fetchCompanyProfile(ticker).catch(() => ({})), 1800, {});
     response.setHeader("Cache-Control", "no-store");
-    response.status(200).json(await publishedTickerPayload(ticker, profile));
+    response.status(200).json(await getPublishedFallback(profile));
   }
 }
 

@@ -215,7 +215,7 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
   assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
-  assert(tickerSource.includes("behavior-summary-20260723") && pageSource.includes("behavior-summary-20260723"), "both app surfaces must load the current shared application bundle");
+  assert(tickerSource.includes("frontend-data-20260724") && pageSource.includes("frontend-data-20260724"), "both app surfaces must load the current shared application bundle");
   assert(!appSource.includes("Optional chart"), "ticker detail must remove the optional scanner chart");
   assert(!appSource.includes("Daily scanner bars"), "ticker detail must remove scanner-chart jargon");
   assert(!stylesSource.includes(".chart-details") && !stylesSource.includes(".history-chart"), "removed chart styles must not remain as dead UI code");
@@ -462,69 +462,31 @@ function auditStaticFallbackNormalization() {
 
 async function auditBrowserFallbackNormalization() {
   const source = fs.readFileSync("assets/app.js", "utf8");
-  const start = source.indexOf("function staticFallbackNumber");
-  const end = source.indexOf("async function fetchJsonNoStore");
-  assert(start >= 0 && end > start, "browser fallback must define a conservative normalizer");
-  const normalizeStaticFallbackRow = new Function(
-    "displaySecurityName",
-    "STATIC_FALLBACK_SCORE_CAP",
-    "STATIC_FALLBACK_GATE_FIELDS",
-    `${source.slice(start, end)}; return normalizeStaticFallbackRow;`
-  )(
-    (name) => name || "",
-    49,
-    ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"]
-  );
-  const row = normalizeStaticFallbackRow({
-    ticker: "BROWSER",
-    action: "BUY CANDIDATE",
-    score: 98,
-    market_permission: "ALLOW",
-    ticker_permission: "ALLOW",
-    risk_permission: "ALLOW",
-    payload: { freshness_block: "NO", market_permission: "BLOCK" },
-  }, "2026-07-16");
+  assert(source.includes("validatePublishedPayload"), "browser published data must be bound to a validated manifest version");
+  assert(source.includes("payload?.publication_id !== manifest.publication_id"), "browser published data must reject publication mismatches");
+  assert(source.includes("payload?.run_date !== manifest.run_date"), "browser published data must reject run-date mismatches");
+  assert(!source.includes("PUBLISHED_HISTORY_JSON_URL") && !source.includes("PUBLISHED_HISTORY_CSV_URL"), "browser ticker loading must not download a global history archive");
+  assert(source.includes("loadStaticTickerHistory") && source.includes("manifest.ticker_base_path"), "browser ticker history must use the manifest's per-ticker path");
 
-  assert(row.action === "SETUP FORMING", "browser fallback must downgrade BUY-like actions");
-  assert(gateValues(row).every((value) => value === "UNKNOWN"), "browser fallback must remove stale gate evidence");
-  assert(row.payload.freshness_block === "YES", "browser fallback must block execution");
-  assert(row.personality_setup_allowed === "NO" && row.payload.personality_setup_allowed === "NO", "browser fallback must explicitly block personality setup promotion");
-  assert(row.learning_promotion_eligible === false && row.payload.learning_promotion_eligible === false, "browser fallback must fail closed on learning promotion eligibility");
-  assert(row.learning_reporting_only === true && row.payload.learning_promotion_state === "REPORTING_ONLY", "browser fallback must explicitly mark learning as reporting-only");
-  assert(adjustedScore(row) <= 49, "browser fallback must cap actionable rank");
-  assert(source.includes("loadStaticLatestRows") && source.includes("normalizeStaticFallbackRow(row, fallbackRunDate)"), "browser latest fallback must use the normalizer");
-  assert(source.includes("loadStaticTickerHistory") && source.includes("normalizeStaticFallbackRow({"), "browser ticker history fallback must use the normalizer");
-
-  const loaderStart = source.indexOf("function staticFallbackRunDate");
-  const loaderEnd = source.indexOf("function uniqueHistoryDateCount");
-  assert(loaderStart >= 0 && loaderEnd > loaderStart, "browser fallback loader must remain independently testable");
-  const loadStaticLatestRows = new Function(
-    "fetch",
-    "displaySecurityName",
-    "STATIC_FALLBACK_SCORE_CAP",
-    "STATIC_FALLBACK_GATE_FIELDS",
-    "PUBLISHED_LATEST_JSON_URL",
-    `${source.slice(loaderStart, loaderEnd)}; return loadStaticLatestRows;`
-  )(
-    async () => ({
-      ok: true,
-      json: async () => ({ run_date: "2000-01-01", rows: [{ ticker: "STALE_BROWSER", action: "BUY CANDIDATE", score: 98 }] }),
-    }),
-    (name) => name || "",
-    49,
-    ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"],
-    ""
-  );
-  const stalePayload = await loadStaticLatestRows();
-  assert(stalePayload.rows.length === 1, "stale browser fallback must still render bundled rows");
-  assert(stalePayload.rows[0].payload.freshness_status === "STATIC_FALLBACK_BLOCK", "stale browser fallback rows must remain explicitly blocked");
+  const validationStart = source.indexOf("function validatePublishedPayload");
+  const validationEnd = source.indexOf("async function loadStaticLatestRows");
+  assert(validationStart >= 0 && validationEnd > validationStart, "published payload validation must remain independently testable");
+  const validatePublishedPayload = new Function(
+    `${source.slice(validationStart, validationEnd)}; return validatePublishedPayload;`
+  )();
+  const publication = { publication_id: "publication-a", run_date: "2026-07-23" };
+  assert(validatePublishedPayload({ ...publication, rows: [] }, publication).rows.length === 0, "matching published payload must be accepted");
+  let mismatchRejected = false;
+  try {
+    validatePublishedPayload({ ...publication, publication_id: "publication-b" }, publication);
+  } catch {
+    mismatchRejected = true;
+  }
+  assert(mismatchRejected, "mismatched published payload must fail closed");
 
   return {
-    action: row.action,
-    gates: gateValues(row),
-    freshnessBlock: row.payload.freshness_block,
-    adjustedScore: adjustedScore(row),
-    staleRows: stalePayload.rows.length,
+    publicationValidation: "pass",
+    perTickerHistory: true,
   };
 }
 
@@ -626,6 +588,7 @@ async function auditPublishedFallbackContract() {
     },
   };
   const latestData = {
+    publication_id: "publication-20260716",
     run_date: "2026-07-16",
     runInfo: liveLookingRunInfo,
     rows: [
@@ -633,16 +596,28 @@ async function auditPublishedFallbackContract() {
       { ticker: "SECOND", run_date: "2026-07-16", action: "WATCH TREND", score: 62, payload: {} },
     ],
   };
-  const historyData = {
-    by_ticker: {
-      PUBLISHED: [{ ticker: "PUBLISHED", history_date: "2026-07-15", action: "BUY CANDIDATE", score: 96, payload: learningEvidence }],
-    },
+  const manifestData = {
+    publication_id: "publication-20260716",
+    run_date: "2026-07-16",
+    latest_path: "runs/publication-20260716/latest.json",
+    ticker_base_path: "runs/publication-20260716/tickers",
+    ticker_paths: { PUBLISHED: "runs/publication-20260716/tickers/PUBLISHED.json" },
+  };
+  const tickerData = {
+    publication_id: "publication-20260716",
+    run_date: "2026-07-16",
+    ticker: "PUBLISHED",
+    snapshot: latestData.rows[0],
+    historyRows: [{ ticker: "PUBLISHED", history_date: "2026-07-15", action: "BUY CANDIDATE", score: 96, payload: learningEvidence }],
   };
 
-  const published = await withMockFetch(async (url) => ({
-    ok: true,
-    json: async () => String(url).includes("history.json") ? historyData : latestData,
-  }), async () => {
+  const published = await withMockFetch(async (url) => {
+    const path = String(url);
+    const body = path.endsWith("manifest.json") ? manifestData
+      : path.endsWith("/latest.json") ? latestData
+        : tickerData;
+    return { ok: true, json: async () => body };
+  }, async () => {
     const latest = await publishedLatestPayload();
     const ticker = await publishedTickerPayload("PUBLISHED");
     return { latest, ticker };
