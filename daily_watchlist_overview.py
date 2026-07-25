@@ -85,6 +85,7 @@ LEARNING_HORIZON_SESSIONS = int(os.getenv("LEARNING_HORIZON_SESSIONS", "5"))
 # this cadence. Between refreshes, only earlier replay sessions are reusable.
 REPLAY_AUDIT_GATE_REFRESH_BARS = int(os.getenv("REPLAY_AUDIT_GATE_REFRESH_BARS", "5"))
 MARKET_DATA_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12"))
+MARKET_DATA_PROVIDER_CIRCUIT_FAILURES = int(os.getenv("MARKET_DATA_PROVIDER_CIRCUIT_FAILURES", "2"))
 SELF_SCORE_ACTIONS = {
     "BUY CANDIDATE",
     "STRONG CONTINUATION",
@@ -644,13 +645,51 @@ def fetch_live_chart_from_provider(provider: str, ticker: str, years: int = 3) -
     raise RuntimeError(f"Unsupported data provider: {provider}")
 
 
-def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFrame:
+def provider_failure_is_systemic(exc: Exception) -> bool:
+    """Only open a run-level circuit for transport or provider-wide failures."""
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in ("timed out", "timeout", "http 429", "rate limit", "connection", "temporarily unavailable")
+    )
+
+
+class MarketDataProviderCircuit:
+    """Stop retrying an unavailable provider for every remaining ticker in one run."""
+
+    def __init__(self, failure_limit: int = MARKET_DATA_PROVIDER_CIRCUIT_FAILURES) -> None:
+        self.failure_limit = max(1, int(failure_limit))
+        self.failures: dict[str, int] = {}
+        self.open_providers: set[str] = set()
+
+    def is_open(self, provider: str) -> bool:
+        return provider in self.open_providers
+
+    def record_failure(self, provider: str, exc: Exception) -> None:
+        if not provider_failure_is_systemic(exc):
+            return
+        failures = self.failures.get(provider, 0) + 1
+        self.failures[provider] = failures
+        if failures >= self.failure_limit:
+            self.open_providers.add(provider)
+            print(f"Provider circuit opened for {provider} after {failures} systemic failures.")
+
+
+def fetch_chart(
+    ticker: str,
+    years: int = 3,
+    refresh: bool = False,
+    provider_circuit: Optional[MarketDataProviderCircuit] = None,
+) -> pd.DataFrame:
     cache_path = cache_path_for(ticker, years)
     if cache_path.exists() and not refresh:
         return attach_data_provider(pd.read_csv(cache_path, parse_dates=["date"]), "cache", "CACHE_READ")
 
     errors: list[str] = []
     for provider in configured_data_providers():
+        if provider_circuit and provider_circuit.is_open(provider):
+            errors.append(f"{provider}: provider circuit open")
+            continue
         try:
             df = fetch_live_chart_from_provider(provider, ticker, years)
             reject_stale_live_frame(df, ticker, provider)
@@ -658,6 +697,8 @@ def fetch_chart(ticker: str, years: int = 3, refresh: bool = False) -> pd.DataFr
             return df
         except Exception as exc:
             errors.append(f"{provider}: {exc}")
+            if provider_circuit:
+                provider_circuit.record_failure(provider, exc)
 
     if cache_path.exists():
         return attach_data_provider(
@@ -1089,7 +1130,13 @@ def persist_ohlcv_to_supabase(ticker: str, frame: pd.DataFrame) -> None:
     supabase_upsert_batches("watchlist_ohlcv", records, ["ticker", "data_date"])
 
 
-def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool, force_full: bool = False) -> pd.DataFrame:
+def load_or_refresh_ohlcv(
+    ticker: str,
+    years: int,
+    refresh: bool,
+    force_full: bool = False,
+    provider_circuit: Optional[MarketDataProviderCircuit] = None,
+) -> pd.DataFrame:
     """Use durable OHLCV locally, fetching a full seed only when it is absent."""
     stored = load_ohlcv_from_supabase(ticker) if refresh else pd.DataFrame()
     needs_seed = len(stored) < OHLCV_MIN_READY_BARS or force_full
@@ -1099,7 +1146,12 @@ def load_or_refresh_ohlcv(ticker: str, years: int, refresh: bool, force_full: bo
     # Once seeded, request a short window and only write dates that are new or
     # recent enough to correct provider revisions. This keeps daily syncs small.
     try:
-        live = fetch_chart(ticker, years=years if needs_seed else OHLCV_INCREMENTAL_YEARS, refresh=refresh)
+        live = fetch_chart(
+            ticker,
+            years=years if needs_seed else OHLCV_INCREMENTAL_YEARS,
+            refresh=refresh,
+            provider_circuit=provider_circuit,
+        )
     except Exception as exc:
         if stored.empty or force_full:
             raise
@@ -7589,6 +7641,7 @@ def main() -> None:
     effective_mode = "weekly_rebuild" if needs_bootstrap else refresh_mode
     if needs_bootstrap:
         print("Explicit calibration bootstrap enabled; rebuilding the bounded learning state.")
+    provider_circuit = MarketDataProviderCircuit()
     benchmark_frames: dict[str, pd.DataFrame] = {}
     for benchmark in ("SPY", "QQQ", "SMH"):
         try:
@@ -7600,6 +7653,7 @@ def main() -> None:
                     years=args.years,
                     refresh=args.refresh,
                     force_full=args.full_ohlcv_refresh,
+                    provider_circuit=provider_circuit,
                 )
         except Exception as exc:
             print(f"Benchmark context unavailable for {benchmark}: {exc}")
@@ -7607,7 +7661,8 @@ def main() -> None:
     args.learning_baseline_days = max(args.learning_lookback_days, args.learning_baseline_days)
     replay_days = max(args.history_days, args.learning_baseline_days)
 
-    for ticker in tickers:
+    for ticker_index, ticker in enumerate(tickers, start=1):
+        print(f"Refreshing {ticker_index}/{len(tickers)}: {display_ticker(ticker)}", flush=True)
         try:
             if args.cache_only or (args.refresh and not live_access_ok):
                 df = cached_chart(ticker, years=args.years)
@@ -7621,6 +7676,7 @@ def main() -> None:
                     years=args.years,
                     refresh=args.refresh,
                     force_full=args.full_ohlcv_refresh,
+                    provider_circuit=provider_circuit,
                 )
             raw_frames[ticker] = df
             row = classify_and_score(ticker, df, market_permission=market_permission)

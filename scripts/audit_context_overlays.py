@@ -819,7 +819,7 @@ def audit_ohlcv_cache_reuses_persistent_history():
     original_persist = dwo.persist_ohlcv_to_supabase
     dwo.load_ohlcv_from_supabase = lambda ticker: stored.copy()
 
-    def fetch_recent(ticker, years, refresh):
+    def fetch_recent(ticker, years, refresh, provider_circuit=None):
         calls["years"] = years
         return live.copy()
 

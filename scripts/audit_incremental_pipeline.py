@@ -42,7 +42,7 @@ def audit_ohlcv_modes() -> None:
     originals = scanner.load_ohlcv_from_supabase, scanner.fetch_chart, scanner.persist_ohlcv_to_supabase
     scanner.load_ohlcv_from_supabase = lambda _ticker: stored.copy()
 
-    def fetch(_ticker, years, refresh):
+    def fetch(_ticker, years, refresh, provider_circuit=None):
         calls.append((years, refresh))
         return scanner.attach_data_provider(live.copy(), "polygon", "LIVE_OK")
 
@@ -268,7 +268,7 @@ def audit_rolling_window_and_modes() -> None:
     workflow = (root / ".github/workflows/daily-watchlist-pages.yml").read_text()
     scanner_source = (root / "daily_watchlist_overview.py").read_text()
     assert "allow_calibration_bootstrap" in workflow
-    assert 'cron: "0 23 * * 1-4"' in workflow and 'cron: "0 23 * * 5"' in workflow
+    assert 'cron: "17 23 * * 1-4"' in workflow and 'cron: "17 23 * * 5"' in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
     assert "parity must never be bypassed implicitly" in scanner_source
     assert workflow.index("Finalize Supabase publication") < workflow.index("Deploy to GitHub Pages")
@@ -321,6 +321,16 @@ def audit_artifact_integrity() -> None:
         scanner.supabase_select = original
 
 
+def audit_provider_circuit() -> None:
+    circuit = scanner.MarketDataProviderCircuit(failure_limit=2)
+    circuit.record_failure("polygon", RuntimeError("Polygon HTTP 404: unknown ticker"))
+    assert not circuit.is_open("polygon")
+    circuit.record_failure("polygon", RuntimeError("request timed out"))
+    assert not circuit.is_open("polygon")
+    circuit.record_failure("polygon", RuntimeError("HTTP 429: rate limit exceeded"))
+    assert circuit.is_open("polygon")
+
+
 def main() -> None:
     audit_ohlcv_modes()
     audit_incremental_settlement()
@@ -328,7 +338,8 @@ def main() -> None:
     audit_daily_history_inherits_full_publication()
     audit_rolling_window_and_modes()
     audit_artifact_integrity()
-    print({"incrementalPipelineUAT": "ok", "cases": 6})
+    audit_provider_circuit()
+    print({"incrementalPipelineUAT": "ok", "cases": 7})
 
 
 if __name__ == "__main__":
