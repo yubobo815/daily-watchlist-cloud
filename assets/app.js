@@ -768,9 +768,18 @@ function qualityConstraintLabel(row) {
   const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
   const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
   const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
+  const marketPermission = String(payloadValue(row, "market_permission") || "").toUpperCase();
+  const riskPermission = String(payloadValue(row, "risk_permission") || "").toUpperCase();
+  const tickerPermission = String(payloadValue(row, "ticker_permission") || "").toUpperCase();
+  const walkForwardPermission = String(payloadValue(row, "walk_forward_permission") || "").toUpperCase();
   if (freshnessBlocked) return "DATA NEEDS REFRESH";
-  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "NEEDS VERIFICATION";
   if (antiSignal === "BLOCK") return "DO NOT ENTER";
+  if (marketPermission === "BLOCK") return "MARKET BLOCKED";
+  if (riskPermission === "BLOCK") return "RISK BLOCKED";
+  if (tickerPermission === "BLOCK") return "TICKER BLOCKED";
+  if (walkForwardPermission === "BLOCK") return "SETUP FAILED";
+  if (walkForwardPermission === "INSUFFICIENT") return "SETUP UNPROVEN";
+  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "NEEDS VERIFICATION";
   if (antiSignal === "CAUTION") return "USE CAUTION";
   return "";
 }

@@ -200,6 +200,8 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("function fillabilityReadout(row)"), "entry fillability must be explained in natural language");
   assert(appSource.includes("Price plan"), "active levels must use a concise reader-facing label");
   assert(appSource.includes('return "NEEDS VERIFICATION"'), "missing execution evidence must use a reader-facing readiness status");
+  assert(appSource.includes('return "MARKET BLOCKED"'), "market blocks must be presented as a concrete decision reason");
+  assert(appSource.includes('return "SETUP UNPROVEN"'), "insufficient walk-forward evidence must be distinguished from a market block");
   assert(appSource.includes('if (antiSignal === "BLOCK") return "DO NOT ENTER"'), "anti-signal blocks must suppress the numeric readiness display with an actionable label");
   assert(!appSource.includes('"GATE BLOCK"'), "reader-facing UI must not expose the internal gate-block label");
   assert(!appSource.includes("Trend quality ${fmtConviction(latest)} / 100"), "ticker diagnostics must not present adjusted rank as synthetic trend quality");
