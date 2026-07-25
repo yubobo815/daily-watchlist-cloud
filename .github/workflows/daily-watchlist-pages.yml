@@ -22,8 +22,10 @@ on:
   schedule:
     # Monday-Thursday US sessions use the incremental path. Friday's session
     # performs the bounded 100-session rebuild and calibration parity gate.
-    - cron: "0 23 * * 1-4"
-    - cron: "0 23 * * 5"
+    # Avoid the top-of-hour Actions scheduling peak; GitHub may otherwise
+    # delay scheduled runs substantially under load.
+    - cron: "17 23 * * 1-4"
+    - cron: "17 23 * * 5"
 
 permissions:
   contents: read
