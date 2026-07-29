@@ -1874,8 +1874,7 @@ function renderCards(counts) {
   const cards = document.querySelector("#cards");
   cards.innerHTML = executionQueues(counts).map((queue) => `
     <button class="card execution-queue tone-${queue.key} ${!state.query.trim() && state.filter === queue.filter ? "active" : ""}" type="button" data-filter="${queue.filter}">
-      <span>${escapeHtml(queue.label)}</span>
-      <strong>${queue.count}</strong>
+      <span class="queue-primary"><span>${escapeHtml(queue.label)}</span><strong>${queue.count}</strong></span>
       <small>${escapeHtml(queue.detail)}</small>
     </button>
   `).join("");

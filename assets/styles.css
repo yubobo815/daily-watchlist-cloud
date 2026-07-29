@@ -4186,18 +4186,76 @@ body.ticker-page :is(a, button, input, summary):focus-visible {
   }
 }
 
-/* v3.2 flat editorial surfaces: information uses rhythm and rules, not nested cards. */
+/* v3.3 concept workspace: one editorial flow from market context to decision. */
+body[data-page="watchlist"] {
+  background: var(--bg);
+}
+
+body[data-page="watchlist"] .shell {
+  width: min(100%, 1580px);
+  padding: 0 24px 32px;
+  background: var(--panel);
+}
+
+body[data-page="watchlist"] .market-rail {
+  min-height: 64px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+body[data-page="watchlist"] .editorial-hero {
+  display: block;
+  min-height: 0;
+  margin: 0;
+  padding: 24px 12px 20px !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-page="watchlist"] .editorial-hero .brand-mark { display: none; }
+body[data-page="watchlist"] .editorial-hero .brand-name {
+  font-size: clamp(48px, 5vw, 76px);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+body[data-page="watchlist"] .hero-brief {
+  display: block;
+  margin-top: 15px;
+  padding: 0;
+  border: 0;
+}
+
+body[data-page="watchlist"] .hero-brief .eyebrow,
+body[data-page="watchlist"] .hero-brief dl { display: none; }
+body[data-page="watchlist"] .hero-brief p {
+  max-width: none;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+body[data-page="watchlist"] #status,
+body[data-page="watchlist"] #run-status,
+body[data-page="watchlist"] #app-disclaimer { display: none; }
+
 body[data-page="watchlist"] .cards {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  margin: 0 0 12px;
+  margin: 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
 
 body[data-page="watchlist"] .card {
-  min-height: 82px;
-  padding: 14px 20px;
+  display: grid;
+  grid-template-columns: minmax(105px, 0.7fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: 22px;
+  min-height: 126px;
+  padding: 18px 28px;
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
@@ -4209,11 +4267,33 @@ body[data-page="watchlist"] .card:last-child { border-right: 0; }
 body[data-page="watchlist"] .card:hover,
 body[data-page="watchlist"] .card.active { transform: none; background: var(--panel-strong); box-shadow: none; }
 body[data-page="watchlist"] .execution-queue::after { display: none; }
-body[data-page="watchlist"] .card span { margin-bottom: 5px; }
-body[data-page="watchlist"] .card strong { font-family: Georgia, "Times New Roman", serif; font-size: 30px; font-weight: 400; }
+body[data-page="watchlist"] .queue-primary { display: grid; gap: 8px; margin: 0; }
+body[data-page="watchlist"] .queue-primary > span {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 760;
+  letter-spacing: 0.07em;
+}
+body[data-page="watchlist"] .tone-buy .queue-primary > span,
+body[data-page="watchlist"] .tone-buy .queue-primary strong { color: var(--tone-buy); }
+body[data-page="watchlist"] .tone-building .queue-primary > span,
+body[data-page="watchlist"] .tone-building .queue-primary strong { color: var(--tone-setup); }
+body[data-page="watchlist"] .tone-risk .queue-primary > span,
+body[data-page="watchlist"] .tone-risk .queue-primary strong { color: var(--tone-exit); }
+body[data-page="watchlist"] .card strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 40px;
+  font-weight: 400;
+}
+body[data-page="watchlist"] .card small {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
 
 body[data-page="watchlist"] .watchlist-workspace {
-  border: 1px solid var(--line);
+  border: 0;
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: var(--panel);
   box-shadow: none;
@@ -4237,8 +4317,31 @@ body[data-page="watchlist"] .watchlist-workspace .watchlist-heading,
 body[data-page="watchlist"] .watchlist-workspace .controls,
 body[data-page="watchlist"] .watchlist-workspace th { background: transparent; }
 
+body[data-page="watchlist"] .watchlist-workspace .watchlist-heading { border-bottom: 1px solid var(--line); }
 body[data-page="watchlist"] .watchlist-workspace .controls { border-bottom: 1px solid var(--line); }
-body[data-page="watchlist"] .ticker-detail-panel { padding: 24px 22px; background: transparent; }
+body[data-page="watchlist"] .ticker-detail-panel {
+  top: 0;
+  padding: 30px 30px 36px;
+  background: transparent;
+}
+body[data-page="watchlist"] .detail-panel-head h2 { font-size: 46px; line-height: 1; }
+body[data-page="watchlist"] .detail-price { margin: 24px 0 14px; }
+body[data-page="watchlist"] .detail-price strong { font-size: 38px; }
+body[data-page="watchlist"] .detail-diagnostics { margin-top: 22px; border-top: 1px solid var(--line); }
+body[data-page="watchlist"] .score-factors > div {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+body[data-page="watchlist"] .secondary-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  margin-top: 20px;
+}
+body[data-page="watchlist"] .profit-alert-center { margin: 0; }
 
 .ticker-detail-panel .decision-callout,
 body.ticker-page .decision-callout {
@@ -4384,10 +4487,23 @@ body.ticker-page .lookback-main { justify-items: start; }
 body.ticker-page .lookback-price { justify-self: end; }
 
 @media (max-width: 960px) {
+  body[data-page="watchlist"] .shell { padding: 0 12px 88px; }
+  body[data-page="watchlist"] .market-rail { min-height: 50px; padding: 0; }
+  body[data-page="watchlist"] .editorial-hero { padding: 18px 2px 16px !important; }
+  body[data-page="watchlist"] .editorial-hero .brand-name { font-size: 42px; }
+  body[data-page="watchlist"] .hero-brief { margin-top: 10px; }
+  body[data-page="watchlist"] .hero-brief p { font-size: 12px; }
   body[data-page="watchlist"] .cards { gap: 0; }
-  body[data-page="watchlist"] .card { min-height: 64px; padding: 10px 8px; }
+  body[data-page="watchlist"] .card {
+    display: block;
+    min-height: 78px;
+    padding: 11px 9px;
+  }
   body[data-page="watchlist"] .card strong { font-size: 24px; }
   body[data-page="watchlist"] .card small { display: none; }
+  body[data-page="watchlist"] .queue-primary { gap: 5px; }
+  body[data-page="watchlist"] .queue-primary > span { font-size: 10px; }
+  body[data-page="watchlist"] .secondary-tools { grid-template-columns: 1fr; gap: 10px; margin-top: 14px; }
 
   body .editorial-hero {
     border: 0;
@@ -4427,7 +4543,26 @@ body.ticker-page .lookback-price { justify-self: end; }
 }
 
 @media (min-width: 961px) {
-  body[data-page="watchlist"] .watchlist-workspace { grid-template-columns: minmax(0, 1fr) 360px; }
+  body[data-page="watchlist"] .watchlist-workspace { grid-template-columns: minmax(0, 1fr) minmax(390px, 36%); }
+  body[data-page="watchlist"] .watchlist-workspace .table-wrap {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+  body[data-page="watchlist"] .watchlist-workspace .watchlist-heading {
+    min-height: 86px;
+    padding: 0 20px;
+  }
+  body[data-page="watchlist"] .watchlist-workspace .controls {
+    grid-template-columns: minmax(240px, 1fr) minmax(190px, 250px) auto;
+    min-height: 86px;
+    margin: 0;
+    padding: 18px 20px 18px 0;
+  }
+  body[data-page="watchlist"] .watchlist-workspace table,
+  body[data-page="watchlist"] .watchlist-workspace .empty,
+  body[data-page="watchlist"] .watchlist-workspace .watchlist-pagination { grid-column: 1 / -1; }
+  body[data-page="watchlist"] .watchlist-workspace th,
+  body[data-page="watchlist"] .watchlist-workspace td { padding-top: 16px; padding-bottom: 16px; }
 }
 
 @media (max-width: 520px) {
