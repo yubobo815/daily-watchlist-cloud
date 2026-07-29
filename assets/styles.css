@@ -4381,6 +4381,45 @@ body[data-page="watchlist"] .secondary-tools .utility-drawer-body {
 }
 body[data-page="watchlist"] .secondary-tools .utility-drawer-body > section { margin: 0 0 14px; }
 body[data-page="watchlist"] .secondary-tools .utility-drawer-body > section:last-child { margin-bottom: 0; }
+body[data-page="watchlist"] .utility-drawer-body .section-heading { margin: 8px 0 7px; }
+body[data-page="watchlist"] .utility-drawer-body .focus-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+body[data-page="watchlist"] .utility-drawer-body .focus-item,
+body[data-page="watchlist"] .utility-drawer-body .change-card {
+  grid-template-rows: auto;
+  gap: 5px;
+  padding: 9px 10px;
+  border-top-width: 3px;
+  border-radius: 10px;
+}
+body[data-page="watchlist"] .utility-drawer-body .focus-item strong,
+body[data-page="watchlist"] .utility-drawer-body .change-card-head strong { font-size: 14px; }
+body[data-page="watchlist"] .utility-drawer-body .focus-main span,
+body[data-page="watchlist"] .utility-drawer-body .change-card-head span,
+body[data-page="watchlist"] .utility-drawer-body .focus-meta { font-size: 10.5px; }
+body[data-page="watchlist"] .utility-drawer-body .focus-meta,
+body[data-page="watchlist"] .utility-drawer-body .change-card-body,
+body[data-page="watchlist"] .utility-drawer-body .change-chips { min-height: 22px; gap: 4px; }
+body[data-page="watchlist"] .utility-drawer-body .reason-row { gap: 3px; min-height: 18px; }
+body[data-page="watchlist"] .utility-drawer-body .reason-chip {
+  min-height: 17px;
+  padding: 1px 5px;
+  font-size: 9px;
+}
+body[data-page="watchlist"] .utility-drawer-body .change-rail { border-radius: 10px; }
+body[data-page="watchlist"] .utility-drawer-body .change-track { gap: 8px; }
+body[data-page="watchlist"] .utility-drawer-body .change-card { flex-basis: 205px; }
+body[data-page="watchlist"] .utility-drawer-body .focus-list-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+body[data-page="watchlist"] .utility-drawer-body .focus-list-item {
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 9px;
+}
 
 .ticker-detail-panel .decision-callout,
 body.ticker-page .decision-callout {
@@ -4534,6 +4573,11 @@ body.ticker-page .lookback-price { justify-self: end; }
   body[data-page="watchlist"] .secondary-tools #market-activity > summary { min-height: 32px; padding: 6px 8px; }
   body[data-page="watchlist"] .secondary-tools .notification-body,
   body[data-page="watchlist"] .secondary-tools .utility-drawer-body { width: 100%; max-height: 68vh; }
+  body[data-page="watchlist"] .utility-drawer-body .focus-grid,
+  body[data-page="watchlist"] .utility-drawer-body .focus-list-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body[data-page="watchlist"] .utility-drawer-body .focus-item,
+  body[data-page="watchlist"] .utility-drawer-body .change-card { padding: 8px; }
+  body[data-page="watchlist"] .utility-drawer-body .change-card { flex-basis: min(190px, 72vw); }
   body[data-page="watchlist"] .editorial-hero { padding: 18px 2px 16px !important; }
   body[data-page="watchlist"] .editorial-hero .brand-name { font-size: 42px; }
   body[data-page="watchlist"] .hero-brief { margin-top: 10px; }
