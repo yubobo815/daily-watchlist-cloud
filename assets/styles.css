@@ -4185,3 +4185,255 @@ body.ticker-page :is(a, button, input, summary):focus-visible {
     #market-activity .focus-list-item { background: #1b2420; }
   }
 }
+
+/* v3.2 flat editorial surfaces: information uses rhythm and rules, not nested cards. */
+body[data-page="watchlist"] .cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 0 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+body[data-page="watchlist"] .card {
+  min-height: 82px;
+  padding: 14px 20px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-page="watchlist"] .card:last-child { border-right: 0; }
+body[data-page="watchlist"] .card:hover,
+body[data-page="watchlist"] .card.active { transform: none; background: var(--panel-strong); box-shadow: none; }
+body[data-page="watchlist"] .execution-queue::after { display: none; }
+body[data-page="watchlist"] .card span { margin-bottom: 5px; }
+body[data-page="watchlist"] .card strong { font-family: Georgia, "Times New Roman", serif; font-size: 30px; font-weight: 400; }
+
+body[data-page="watchlist"] .watchlist-workspace {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  box-shadow: none;
+}
+
+body[data-page="watchlist"] .notification-center,
+body[data-page="watchlist"] #market-activity {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body[data-page="watchlist"] .notification-center > summary,
+body[data-page="watchlist"] #market-activity > summary { padding-right: 2px; padding-left: 2px; }
+body[data-page="watchlist"] .notification-center[open] > summary,
+body[data-page="watchlist"] #market-activity[open] > summary { background: transparent; }
+
+body[data-page="watchlist"] .watchlist-workspace .watchlist-heading,
+body[data-page="watchlist"] .watchlist-workspace .controls,
+body[data-page="watchlist"] .watchlist-workspace th { background: transparent; }
+
+body[data-page="watchlist"] .watchlist-workspace .controls { border-bottom: 1px solid var(--line); }
+body[data-page="watchlist"] .ticker-detail-panel { padding: 24px 22px; background: transparent; }
+
+.ticker-detail-panel .decision-callout,
+body.ticker-page .decision-callout {
+  padding: 4px 0 4px 16px;
+  border: 0;
+  border-left: 3px solid var(--tone-watch);
+  border-radius: 0;
+  background: transparent;
+}
+
+.ticker-detail-panel .decision-callout.tone-buy,
+.ticker-detail-panel .decision-callout.tone-continue,
+body.ticker-page .decision-callout.tone-buy,
+body.ticker-page .decision-callout.tone-continue { border-left-color: var(--tone-buy); }
+.ticker-detail-panel .decision-callout.tone-setup,
+.ticker-detail-panel .decision-callout.tone-watch,
+body.ticker-page .decision-callout.tone-setup,
+body.ticker-page .decision-callout.tone-watch { border-left-color: var(--tone-setup); }
+.ticker-detail-panel .decision-callout.tone-exit,
+.ticker-detail-panel .decision-callout.tone-avoid,
+body.ticker-page .decision-callout.tone-exit,
+body.ticker-page .decision-callout.tone-avoid { border-left-color: var(--tone-exit); }
+
+.ticker-detail-panel .decision-callout strong,
+body.ticker-page .decision-callout strong { font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 400; }
+.ticker-detail-panel .decision-callout p,
+body.ticker-page .decision-callout p { margin-top: 5px; }
+
+.ticker-detail-panel .inactive-plan,
+body.ticker-page .inactive-plan {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.ticker-detail-panel .active-plan,
+body.ticker-page .active-plan { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ticker-detail-panel .detail-diagnostics { padding-top: 16px; border-top: 0; }
+.ticker-detail-panel .detail-diagnostics h3 { margin: 0 0 8px; color: var(--ink); font-size: 12px; }
+.ticker-detail-panel .score-explainer { padding-top: 0; border-top: 1px solid var(--line); }
+.ticker-detail-panel .score-factors { gap: 0; }
+.ticker-detail-panel .score-factors > div {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.ticker-page { background: var(--bg); }
+body.ticker-page .shell { background: var(--bg); }
+body.ticker-page .ticker-hero {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(520px, 1.1fr);
+  gap: 40px;
+  min-height: 176px;
+  padding: 22px 28px !important;
+  background: transparent;
+}
+
+body.ticker-page .ticker-hero-tools { display: grid; align-content: center; gap: 16px; }
+body.ticker-page #ticker-form { width: 100%; margin: 0; }
+body.ticker-page .ticker-hero-brief {
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 20px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line);
+  border-left: 0;
+}
+
+body.ticker-page .history-grid {
+  grid-template-columns: minmax(420px, 1fr) minmax(0, 1.1fr);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  box-shadow: none;
+}
+
+body.ticker-page .panel { background: transparent; }
+body.ticker-page #snapshot { padding: 30px 28px; border-right: 1px solid var(--line); }
+body.ticker-page #behavior { padding: 30px 32px; }
+body.ticker-page .latest-card { gap: 16px; padding: 0; border-left: 0; background: transparent; }
+body.ticker-page .latest-head,
+body.ticker-page .latest-price { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+body.ticker-page .detail-diagnostics { padding-top: 18px; border-top: 0; }
+body.ticker-page .detail-diagnostics h3 { margin-bottom: 10px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+
+body.ticker-page .history-visual { gap: 0; border: 0; background: transparent; }
+body.ticker-page .behavior-summary { border-top: 1px solid var(--line); }
+body.ticker-page .behavior-summary > div { grid-template-columns: 126px minmax(0, 1fr); padding: 13px 0; }
+body.ticker-page .behavior-summary > .behavior-summary-head { grid-template-columns: 126px minmax(0, 1fr); gap: 12px; }
+body.ticker-page .behavior-summary-head > strong { font-family: inherit; font-size: 14px; font-weight: 580; }
+body.ticker-page .behavior-action { grid-template-columns: 126px minmax(0, 1fr); padding: 13px 0; border-bottom: 1px solid var(--line); }
+
+body.ticker-page #timeline { gap: 0; margin-top: 28px; }
+body.ticker-page #timeline > h3 { margin: 0 0 8px; font-family: Georgia, "Times New Roman", serif; font-size: 20px; font-weight: 400; }
+body.ticker-page .moment-card {
+  position: relative;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 18px;
+  margin: 0 0 0 7px;
+  padding: 14px 0 14px 26px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+body.ticker-page .moment-card + .moment-card { margin-top: 0; }
+body.ticker-page .moment-card::before {
+  content: "";
+  position: absolute;
+  top: 19px;
+  left: -5px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--tone-avoid);
+}
+body.ticker-page .moment-card.tone-buy::before,
+body.ticker-page .moment-card.tone-continue::before { background: var(--tone-buy); }
+body.ticker-page .moment-card.tone-setup::before,
+body.ticker-page .moment-card.tone-watch::before { background: var(--tone-setup); }
+body.ticker-page .moment-card.tone-exit::before,
+body.ticker-page .moment-card.tone-avoid::before { background: var(--tone-exit); }
+
+body.ticker-page .raw-history { margin-top: 8px; border: 0; background: transparent; }
+body.ticker-page .raw-history summary { border-top: 1px solid var(--line); }
+body.ticker-page .lookback-grid { grid-template-columns: 1fr; gap: 0; margin-top: 0; }
+body.ticker-page .lookback-card {
+  grid-template-columns: 120px 100px minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 0;
+  padding: 11px 0;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+body.ticker-page .lookback-main { justify-items: start; }
+body.ticker-page .lookback-price { justify-self: end; }
+
+@media (max-width: 960px) {
+  body[data-page="watchlist"] .cards { gap: 0; }
+  body[data-page="watchlist"] .card { min-height: 64px; padding: 10px 8px; }
+  body[data-page="watchlist"] .card strong { font-size: 24px; }
+  body[data-page="watchlist"] .card small { display: none; }
+
+  body .editorial-hero {
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  body[data-page="watchlist"] .watchlist-workspace { border: 0; background: transparent; }
+  body[data-page="watchlist"] .watchlist-workspace .table-wrap {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  body[data-page="watchlist"] .watchlist-workspace #watchlist-body tr {
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  body[data-page="watchlist"] .watchlist-workspace #watchlist-body td { background: transparent; }
+  body.ticker-page .ticker-hero { display: grid; grid-template-columns: 1fr; gap: 14px; padding: 12px 4px 16px !important; }
+  body.ticker-page .ticker-hero-tools { gap: 0; }
+  body.ticker-page .ticker-hero-brief { display: none; }
+  body.ticker-page .history-grid { border: 0; background: transparent; }
+  body.ticker-page #snapshot,
+  body.ticker-page #behavior { padding: 22px 0; border: 0; border-bottom: 1px solid var(--line); }
+  body.ticker-page .decision-callout { padding: 2px 0 2px 13px; }
+  body.ticker-page .behavior-summary > div,
+  body.ticker-page .behavior-summary > .behavior-summary-head,
+  body.ticker-page .behavior-action { grid-template-columns: 92px minmax(0, 1fr); }
+  body.ticker-page .moment-card { grid-template-columns: 72px minmax(0, 1fr); gap: 12px; padding-left: 20px; }
+  body.ticker-page .lookback-card { grid-template-columns: 82px minmax(0, 1fr) auto; }
+  body.ticker-page .lookback-meta { display: none; }
+}
+
+@media (min-width: 961px) {
+  body[data-page="watchlist"] .watchlist-workspace { grid-template-columns: minmax(0, 1fr) 360px; }
+}
+
+@media (max-width: 520px) {
+  body.ticker-page .behavior-summary > div,
+  body.ticker-page .behavior-summary > .behavior-summary-head,
+  body.ticker-page .behavior-action { grid-template-columns: 1fr; gap: 6px; }
+  body.ticker-page .moment-card { grid-template-columns: 1fr; gap: 6px; }
+  body.ticker-page .lookback-card { grid-template-columns: 70px minmax(0, 1fr) auto; gap: 8px; }
+}
