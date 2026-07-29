@@ -935,19 +935,31 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
 
     endpoint = f"{url}/rest/v1/{table}?on_conflict={urllib.parse.quote(','.join(conflict_columns))}"
     payload = json.dumps(records).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=payload,
-        method="POST",
-        headers=supabase_headers(key),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status not in {200, 201, 204}:
-                raise RuntimeError(f"Supabase upsert to {table} returned HTTP {resp.status}")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"Supabase upsert to {table} failed with HTTP {exc.code}: {body}") from exc
+    for attempt in range(1, max(1, SUPABASE_UPSERT_MAX_ATTEMPTS) + 1):
+        req = urllib.request.Request(
+            endpoint,
+            data=payload,
+            method="POST",
+            headers=supabase_headers(key),
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                if resp.status not in {200, 201, 204}:
+                    raise RuntimeError(f"Supabase upsert to {table} returned HTTP {resp.status}")
+            return
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")[:1000]
+            retryable = exc.code in {408, 429, 500, 502, 503, 504}
+            if not retryable or attempt >= SUPABASE_UPSERT_MAX_ATTEMPTS:
+                raise RuntimeError(f"Supabase upsert to {table} failed with HTTP {exc.code}: {body}") from exc
+        except (TimeoutError, URLError, OSError) as exc:
+            if attempt >= SUPABASE_UPSERT_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"Supabase upsert to {table} failed after {attempt} attempts: {exc}"
+                ) from exc
+        delay = SUPABASE_UPSERT_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+        print(f"Supabase upsert to {table} transiently failed; retrying batch in {delay:.2f}s.")
+        time.sleep(delay)
 
 
 def supabase_select(path: str) -> list[dict]:
@@ -1008,6 +1020,8 @@ SUPABASE_SNAPSHOT_RETENTION_DAYS = int(os.getenv("SUPABASE_SNAPSHOT_RETENTION_DA
 SUPABASE_OUTCOME_RETENTION_DAYS = int(os.getenv("SUPABASE_OUTCOME_RETENTION_DAYS", "120"))
 SUPABASE_REFRESH_RUN_RETENTION_DAYS = int(os.getenv("SUPABASE_REFRESH_RUN_RETENTION_DAYS", "60"))
 SUPABASE_UPSERT_BATCH_SIZE = int(os.getenv("SUPABASE_UPSERT_BATCH_SIZE", "100"))
+SUPABASE_UPSERT_MAX_ATTEMPTS = int(os.getenv("SUPABASE_UPSERT_MAX_ATTEMPTS", "4"))
+SUPABASE_UPSERT_RETRY_BASE_SECONDS = float(os.getenv("SUPABASE_UPSERT_RETRY_BASE_SECONDS", "0.75"))
 ALLOW_STALE_SUPABASE_SYNC = os.getenv("ALLOW_STALE_SUPABASE_SYNC", "").strip().lower() in {"1", "true", "yes"}
 # 400 sessions covers indicator warm-up plus the 60-session learning replay,
 # while keeping the persistent raw-data layer well below the database budget.

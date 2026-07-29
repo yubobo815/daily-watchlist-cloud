@@ -27,6 +27,40 @@ def audit_generated_history_javascript_is_valid():
             subprocess.run(["node", "--check", str(script_path)], check=True, capture_output=True, text=True)
 
 
+def audit_supabase_upsert_retries_transient_timeout():
+    attempts = []
+
+    class Response:
+        status = 201
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    original_credentials = dwo.supabase_credentials
+    original_urlopen = dwo.urllib.request.urlopen
+    original_sleep = dwo.time.sleep
+    try:
+        dwo.supabase_credentials = lambda: ("https://example.invalid", "test-key")
+
+        def urlopen(*_args, **_kwargs):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise TimeoutError("temporary read timeout")
+            return Response()
+
+        dwo.urllib.request.urlopen = urlopen
+        dwo.time.sleep = lambda _seconds: None
+        dwo.supabase_upsert("watchlist_signal_outcomes", [{"ticker": "MU"}], ["ticker"])
+        assert_true(len(attempts) == 2, "transient Supabase timeout must retry the idempotent batch")
+    finally:
+        dwo.supabase_credentials = original_credentials
+        dwo.urllib.request.urlopen = original_urlopen
+        dwo.time.sleep = original_sleep
+
+
 def assert_true(condition, message):
     if not condition:
         raise AssertionError(message)
@@ -1261,6 +1295,7 @@ def audit_fillability_fails_closed():
 
 def main():
     audit_generated_history_javascript_is_valid()
+    audit_supabase_upsert_retries_transient_timeout()
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
     audit_profit_plan_adapts_to_volatility_regime()
@@ -1337,7 +1372,7 @@ def main():
     audit_fillability_fails_closed()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 75,
+        "cases": 76,
     })
 
 

@@ -467,6 +467,8 @@ def main(*, finalize: bool = False, activate: bool = False) -> None:
 
     metrics = {
         "run_date": run_date,
+        "publication_status": latest.get("status"),
+        "sync_state": latest_payload.get("sync_state"),
         "run_health_history_rows": latest.get("history_rows"),
         "snapshot_rows": len(snapshot_rows),
         "behavior_history_rows": len(history_rows),
