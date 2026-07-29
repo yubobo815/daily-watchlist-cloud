@@ -145,6 +145,8 @@ def assert_capacity_contract() -> None:
         "readonly LEARNING_SESSIONS=100",
         "readonly CALIBRATION_MAX_ARTIFACTS=8",
         "readonly CALIBRATION_MAX_BYTES=8000000",
+        "readonly SNAPSHOT_MAX_ROWS=750",
+        "readonly SNAPSHOT_MAX_BYTES=12000000",
         "readonly MAX_STAGED_PUBLICATION_BYTES=85000000",
         "readonly OHLCV_MAX_BYTES=65000000",
         "readonly BEHAVIOR_MAX_BYTES=40000000",

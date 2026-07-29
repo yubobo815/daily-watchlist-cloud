@@ -20,6 +20,7 @@ def audit_generated_history_javascript_is_valid():
         scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
         assert_true(scripts, "generated history page must contain executable JavaScript")
         assert_true("__ACTION_DISPLAY_LABELS__" not in html and "json.dumps(" not in html, "generated history page contains an unreplaced template expression")
+        assert_true("watchlist_behavior_history_latest.csv" not in html and "loadStaticHistory" in html, "generated history fallback must use versioned per-ticker payloads")
         for index, script in enumerate(scripts):
             script_path = Path(directory) / f"inline-{index}.js"
             script_path.write_text(script, encoding="utf-8")

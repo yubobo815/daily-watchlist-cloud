@@ -428,6 +428,7 @@ function auditAtomicPublicationContract() {
   assert(schema.includes("('watchlist_snapshots', array['publication_id', 'ticker'])") && schema.includes("('watchlist_behavior_history', array['publication_id', 'ticker', 'history_date'])"), "snapshot and history staging rows must be versioned by publication");
   assert(workflow.includes("github-pages-rollback") && workflow.includes("Restore previous Pages publication after failed commit"), "a failed Pages/database commit must redeploy the prior publication");
   assert(workflow.includes("verify_pages_publication.py") && pageVerifier.includes("hashlib.sha256") && pageVerifier.includes("ticker_count") && pageVerifier.includes("site_files"), "Pages verification must validate payload, UI integrity, and ticker mappings");
+  assert(pageVerifier.includes("set(tickers) != set(ticker_paths)"), "Pages verification must reject a latest payload missing any manifest ticker");
   assert(rollbackBuilder.includes("site_files.items()") && rollbackBuilder.includes("Published site file failed integrity validation") && !rollbackBuilder.includes("--template"), "Pages rollback must preserve the manifest's complete verified site inventory");
   assert(workflow.includes("Retry previous Pages publication restore") && workflow.includes("Verify restored Pages publication"), "Pages rollback must retry and verify compensation");
   assert(workflow.includes('psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -1'), "schema migration must run in one database transaction");

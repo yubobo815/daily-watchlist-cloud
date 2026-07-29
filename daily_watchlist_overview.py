@@ -6940,7 +6940,6 @@ def write_history_html(path: Path) -> None:
     <section class="controls">
       <input id="ticker" value="ORCL" aria-label="Ticker">
       <button id="load" type="button">Show History</button>
-      <a class="link-button" href="watchlist_behavior_history_latest.csv">Download History CSV</a>
     </section>
     <section class="cards" id="cards"></section>
     <section class="timeline" id="timeline"></section>
@@ -6961,33 +6960,6 @@ def write_history_html(path: Path) -> None:
     const timeline = document.querySelector("#timeline");
     const rowsBody = document.querySelector("#rows");
     let historyRows = [];
-
-    function parseCSV(text) {
-      const lines = text.trim().split(/\\r?\\n/);
-      const headers = lines.shift().split(",");
-      return lines.map((line) => {
-        const cells = [];
-        let current = "";
-        let quoted = false;
-        for (let i = 0; i < line.length; i += 1) {
-          const char = line[i];
-          const next = line[i + 1];
-          if (char === '"' && quoted && next === '"') {
-            current += '"';
-            i += 1;
-          } else if (char === '"') {
-            quoted = !quoted;
-          } else if (char === "," && !quoted) {
-            cells.push(current);
-            current = "";
-          } else {
-            current += char;
-          }
-        }
-        cells.push(current);
-        return Object.fromEntries(headers.map((header, index) => [header, cells[index] || ""]));
-      });
-    }
 
     function actionKind(action) {
       if (action === "BUY CANDIDATE") return "buy";
@@ -7037,10 +7009,19 @@ def write_history_html(path: Path) -> None:
       return rows.map((row) => row.payload || row);
     }
 
-    async function loadCsvHistory() {
-      const response = await fetch("watchlist_behavior_history_latest.csv");
-      if (!response.ok) throw new Error("History CSV is not available.");
-      return parseCSV(await response.text());
+    async function loadStaticHistory(ticker) {
+      const manifestResponse = await fetch("data/manifest.json", { cache: "no-store" });
+      if (!manifestResponse.ok) throw new Error("Published history index is not available.");
+      const manifest = await manifestResponse.json();
+      const relativePath = manifest.ticker_paths?.[ticker];
+      if (!relativePath) return [];
+      const payloadResponse = await fetch(`data/${relativePath}`, { cache: "no-store" });
+      if (!payloadResponse.ok) throw new Error("Published ticker history is not available.");
+      const payload = await payloadResponse.json();
+      if (payload.publication_id !== manifest.publication_id || payload.ticker !== ticker) {
+        throw new Error("Published ticker history does not match the active publication.");
+      }
+      return Array.isArray(payload.historyRows) ? payload.historyRows : [];
     }
 
     function renderTicker() {
@@ -7097,8 +7078,10 @@ def write_history_html(path: Path) -> None:
         try {
           historyRows = await loadSupabaseHistory(ticker);
         } catch {
-          historyRows = await loadCsvHistory();
+          historyRows = await loadStaticHistory(ticker);
         }
+      } else {
+        historyRows = await loadStaticHistory(ticker);
       }
       renderTicker();
     }
@@ -7107,10 +7090,10 @@ def write_history_html(path: Path) -> None:
       .then(() => {
         const ticker = (new URLSearchParams(window.location.search).get("ticker") || input.value || "ORCL").toUpperCase();
         input.value = ticker;
-        return hasSupabaseConfig() ? loadSupabaseHistory(ticker) : loadCsvHistory();
+        return hasSupabaseConfig() ? loadSupabaseHistory(ticker) : loadStaticHistory(ticker);
       })
-      .then((rows) => rows || loadCsvHistory())
-      .catch(() => loadCsvHistory())
+      .then((rows) => rows || loadStaticHistory(input.value))
+      .catch(() => loadStaticHistory(input.value))
       .then((rows) => {
         historyRows = rows;
         const ticker = new URLSearchParams(window.location.search).get("ticker");
@@ -7118,7 +7101,7 @@ def write_history_html(path: Path) -> None:
         renderTicker();
       })
       .catch(() => {
-        timeline.innerHTML = '<div class="empty">History CSV is not available yet. It will appear after the next successful refresh.</div>';
+        timeline.innerHTML = '<div class="empty">Published history is not available yet. It will appear after the next successful refresh.</div>';
       });
     loadButton.addEventListener("click", showTicker);
     input.addEventListener("keydown", (event) => {

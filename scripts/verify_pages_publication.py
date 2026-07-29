@@ -62,7 +62,7 @@ def main() -> None:
         if relative_path == manifest["latest_path"]:
             rows = payload.get("rows")
             tickers = [str(row.get("ticker") or "") for row in rows] if isinstance(rows, list) else []
-            if not tickers or len(tickers) != len(set(tickers)) or not set(tickers).issubset(ticker_paths):
+            if not tickers or len(tickers) != len(set(tickers)) or set(tickers) != set(ticker_paths):
                 raise RuntimeError("Latest payload has missing, duplicate, or unknown tickers.")
         else:
             expected_ticker = str(integrity.get("ticker") or "")
