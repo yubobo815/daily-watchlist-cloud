@@ -287,9 +287,9 @@ declare
 begin
   perform pg_advisory_xact_lock(741852963);
   if coalesce((
-    select generation
-    from public.watchlist_publication_control
-    where control_key = 'active'
+    select control.generation
+    from public.watchlist_publication_control control
+    where control.control_key = 'active'
   ), 0) <> p_expected_generation then
     raise exception 'Publication generation changed; expected %', p_expected_generation;
   end if;

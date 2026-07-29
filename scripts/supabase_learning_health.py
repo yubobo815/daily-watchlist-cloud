@@ -137,12 +137,17 @@ def activate_publication(publication_id: str) -> None:
                 raise RuntimeError("Active publication pointer changed during activation.")
             if int(activated[0].get("generation") or -1) != expected_generation + 1:
                 raise RuntimeError("Active publication generation changed during activation.")
-    except Exception:
+    except Exception as exc:
         # The RPC can commit even if its response is lost. Confirm the pointer
         # before compensating so Pages and Supabase cannot be rolled back apart.
         confirmed_publication_id, _ = publication_control()
         if confirmed_publication_id == publication_id:
             return
+        if isinstance(exc, urllib.error.HTTPError):
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"Activation RPC failed with HTTP {exc.code}: {body[:500]}"
+            ) from exc
         raise
 
 

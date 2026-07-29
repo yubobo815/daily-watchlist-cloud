@@ -437,6 +437,7 @@ function auditAtomicPublicationContract() {
   assert(workflow.indexOf("Verify restored Pages publication") < workflow.indexOf("Roll back inactive Supabase publication"), "staged data must remain recoverable until the previous Pages publication is verified");
   assert(workflow.includes('psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -1'), "schema migration must run in one database transaction");
   assert(schema.includes("watchlist_publication_control") && schema.includes("('watchlist_snapshots', 'publication_id', 'watchlist_snapshots_publication_fk', 'c', 'cascade')"), "database staging must have an active pointer and cascading publication ownership");
+  assert(schema.includes("select control.generation") && !schema.includes("select generation\n    from public.watchlist_publication_control"), "activation generation lookup must not collide with the table-return output parameter");
   assert(latestApi.includes("publication_id=eq.") && tickerApi.includes("publication_id=eq."), "list and detail APIs must select the active validated publication only");
   assert(scanner.includes('"learning_model_version": LEARNING_MODEL_VERSION'), "publication metadata must declare the active learning model");
   assert(scanner.includes('"learning_horizon_sessions": LEARNING_HORIZON_SESSIONS'), "publication metadata must declare the active learning horizon");
