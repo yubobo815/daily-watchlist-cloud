@@ -276,10 +276,12 @@ def audit_rolling_window_and_modes() -> None:
     assert 'cron: "17 23 * * 1-4"' in workflow and 'cron: "17 23 * * 5"' in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
     assert "parity must never be bypassed implicitly" in scanner_source
-    assert workflow.index("Mark Supabase publication validated") < workflow.index("Deploy to GitHub Pages")
+    assert workflow.index("Mark Supabase publication validated") < workflow.index("Deploy immutable Pages artifact")
     assert workflow.index("Verify deployed Pages publication") < workflow.index("Activate Supabase publication")
-    assert "if: always() && steps.time_gate.outputs.run == 'true' && steps.activate_publication.outcome == 'success'" in workflow
-    assert 'if [ "${{ github.event.schedule }}" = "17 23 * * 5" ]' in workflow
+    assert "build-publication:" in workflow and "deploy-pages:" in workflow and "verify-and-activate:" in workflow
+    assert "restore-pages-after-failed-activation:" in workflow
+    assert 'EVENT_SCHEDULE: ${{ github.event.schedule }}' in workflow
+    assert 'if [ "$EVENT_SCHEDULE" = "17 23 * * 5" ]' in workflow
 
 
 def audit_artifact_integrity() -> None:

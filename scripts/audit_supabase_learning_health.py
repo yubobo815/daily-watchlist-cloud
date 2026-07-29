@@ -243,7 +243,33 @@ def main() -> None:
             raise AssertionError("health audit must fail closed at its pagination guard")
     finally:
         health.request_json = original_request
-    print({"supabaseLearningHealthAudit": "ok", "cases": 10})
+
+    original_control = health.publication_control
+    original_credentials = health.credentials
+    original_urlopen = health.urllib.request.urlopen
+    controls = iter((("prior-publication", 7), (PUBLICATION_ID, 8)))
+    health.publication_control = lambda: next(controls)
+    health.credentials = lambda: ("https://example.supabase.co", "test-key")
+    health.urllib.request.urlopen = lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("lost response"))
+    try:
+        health.activate_publication(PUBLICATION_ID)
+    finally:
+        health.publication_control = original_control
+        health.credentials = original_credentials
+        health.urllib.request.urlopen = original_urlopen
+
+    health.publication_control = lambda: ("prior-publication", 7)
+    health.assert_publication_inactive(PUBLICATION_ID)
+    health.publication_control = lambda: (PUBLICATION_ID, 8)
+    try:
+        health.assert_publication_inactive(PUBLICATION_ID)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Pages rollback must stop when the candidate publication is active")
+    finally:
+        health.publication_control = original_control
+    print({"supabaseLearningHealthAudit": "ok", "cases": 13})
 
 
 if __name__ == "__main__":

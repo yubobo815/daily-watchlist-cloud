@@ -411,7 +411,7 @@ function auditAtomicPublicationContract() {
   const rollbackBuilder = fs.readFileSync("scripts/build_pages_rollback.py", "utf8");
   assert(scanner.includes('final_metadata["status"] = "pending_audit"'), "scanner must keep a synced run hidden until database audit passes");
   assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Enforce staged database ceiling"), "database health audit must precede staged capacity enforcement");
-  assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy to GitHub Pages"), "an oversized staged publication must roll back before deployment");
+  assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy immutable Pages artifact"), "an oversized staged publication must roll back before deployment");
   assert(workflow.indexOf("Activate Supabase publication") < workflow.indexOf("Reclaim Supabase replay storage"), "retention must never run before pointer activation");
   assert(workflow.indexOf("Upload Pages artifact") < workflow.indexOf("Mark Supabase publication validated"), "the immutable Pages artifact must be staged before database validation");
   assert(workflow.indexOf("Verify deployed Pages publication") < workflow.indexOf("Activate Supabase publication"), "the active database pointer must move only after deployed manifest verification");
@@ -426,11 +426,15 @@ function auditAtomicPublicationContract() {
   assert(scanner.includes("fetch_active_publication_run()"), "learning must resolve outcomes through the active publication pointer");
   assert(scanner.includes('["publication_id", "signal_run_date", "evaluation_run_date", "ticker"]'), "outcome upserts must preserve publication versions");
   assert(schema.includes("('watchlist_snapshots', array['publication_id', 'ticker'])") && schema.includes("('watchlist_behavior_history', array['publication_id', 'ticker', 'history_date'])"), "snapshot and history staging rows must be versioned by publication");
-  assert(workflow.includes("github-pages-rollback") && workflow.includes("Restore previous Pages publication after failed commit"), "a failed Pages/database commit must redeploy the prior publication");
+  assert(workflow.includes("github-pages-rollback") && workflow.includes("Restore previous Pages publication"), "a failed Pages/database commit must redeploy the prior publication");
   assert(workflow.includes("verify_pages_publication.py") && pageVerifier.includes("hashlib.sha256") && pageVerifier.includes("ticker_count") && pageVerifier.includes("site_files"), "Pages verification must validate payload, UI integrity, and ticker mappings");
   assert(pageVerifier.includes("set(tickers) != set(ticker_paths)"), "Pages verification must reject a latest payload missing any manifest ticker");
   assert(rollbackBuilder.includes("site_files.items()") && rollbackBuilder.includes("Published site file failed integrity validation") && !rollbackBuilder.includes("--template"), "Pages rollback must preserve the manifest's complete verified site inventory");
   assert(workflow.includes("Retry previous Pages publication restore") && workflow.includes("Verify restored Pages publication"), "Pages rollback must retry and verify compensation");
+  assert(workflow.includes("build-publication:") && workflow.includes("deploy-pages:") && workflow.includes("verify-and-activate:"), "build, deployment, and activation must use separate jobs");
+  assert(workflow.indexOf("deploy-pages:") < workflow.indexOf("verify-and-activate:"), "online verification must run only after the Pages deployment job completes");
+  assert(workflow.includes("restore-pages-after-failed-activation:") && workflow.includes("--assert-inactive"), "deployment and activation failures must reconcile the active pointer before compensation");
+  assert(workflow.indexOf("Verify restored Pages publication") < workflow.indexOf("Roll back inactive Supabase publication"), "staged data must remain recoverable until the previous Pages publication is verified");
   assert(workflow.includes('psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -1'), "schema migration must run in one database transaction");
   assert(schema.includes("watchlist_publication_control") && schema.includes("('watchlist_snapshots', 'publication_id', 'watchlist_snapshots_publication_fk', 'c', 'cascade')"), "database staging must have an active pointer and cascading publication ownership");
   assert(latestApi.includes("publication_id=eq.") && tickerApi.includes("publication_id=eq."), "list and detail APIs must select the active validated publication only");

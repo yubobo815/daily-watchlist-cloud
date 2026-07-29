@@ -41,20 +41,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh-and-publish:
+  build-publication:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      should_run: ${{ steps.time_gate.outputs.run }}
+      publication_id: ${{ steps.publication.outputs.publication_id }}
+      run_date: ${{ steps.publication.outputs.run_date }}
+      rollback_publication_id: ${{ steps.publication.outputs.rollback_publication_id }}
 
     steps:
       - name: Determine whether to refresh
         id: time_gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          REQUESTED_REFRESH_MODE: ${{ inputs.refresh_mode }}
+          ALLOW_CALIBRATION_BOOTSTRAP: ${{ inputs.allow_calibration_bootstrap }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            if [[ "${{ github.event.head_commit.message }}" == *"[refresh-watchlist]"* ]]; then
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [[ "$COMMIT_MESSAGE" == *"[refresh-watchlist]"* ]]; then
               echo "run=true" >> "$GITHUB_OUTPUT"
             else
               echo "run=false" >> "$GITHUB_OUTPUT"
@@ -64,10 +72,10 @@ jobs:
             exit 0
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "refresh_mode=${{ inputs.refresh_mode }}" >> "$GITHUB_OUTPUT"
-            if [ "${{ inputs.allow_calibration_bootstrap }}" = "true" ]; then
+            echo "refresh_mode=$REQUESTED_REFRESH_MODE" >> "$GITHUB_OUTPUT"
+            if [ "$ALLOW_CALIBRATION_BOOTSTRAP" = "true" ]; then
               echo "bootstrap_arg=--allow-calibration-bootstrap" >> "$GITHUB_OUTPUT"
             else
               echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
@@ -79,7 +87,7 @@ jobs:
           # Never gate them on the runner's wall-clock hour.
           echo "run=true" >> "$GITHUB_OUTPUT"
           echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event.schedule }}" = "17 23 * * 5" ]; then
+          if [ "$EVENT_SCHEDULE" = "17 23 * * 5" ]; then
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
           else
             echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
@@ -152,8 +160,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         shell: bash
         run: |
-          export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
-          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          export EXPECTED_RUN_DATE EXPECTED_PUBLICATION_ID
           python scripts/supabase_learning_health.py
 
       - name: Enforce staged database ceiling
@@ -198,6 +207,17 @@ jobs:
             --base-url "$PAGE_BASE_URL" \
             --output public-rollback
 
+      - name: Record publication identifiers
+        id: publication
+        if: steps.time_gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          {
+            echo "publication_id=$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+            echo "run_date=$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+            echo "rollback_publication_id=$(cat public-rollback/rollback_publication_id.txt)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Configure Pages
         id: configure_pages
         if: steps.time_gate.outputs.run == 'true'
@@ -231,38 +251,65 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         shell: bash
         run: |
-          export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
-          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          export EXPECTED_RUN_DATE EXPECTED_PUBLICATION_ID
           python scripts/supabase_learning_health.py --finalize
 
-      # Deploy the immutable artifact while the database publication remains
-      # inactive. The active pointer moves only after the deployed manifest is
-      # fetched back and verified against the expected publication id.
-      - name: Deploy to GitHub Pages
-        if: steps.time_gate.outputs.run == 'true'
+      - name: Roll back staged publication after build failure
+        if: always() && steps.time_gate.outputs.run == 'true' && failure()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: scripts/database_capacity_guard.sh rollback
+
+  # Pages marks an environment deployment complete only when this job exits.
+  # Keeping deployment isolated lets the following job observe the new CDN state.
+  deploy-pages:
+    needs: build-publication
+    if: needs.build-publication.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment_retry.outputs.page_url || steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment_retry.outputs.page_url || steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy immutable Pages artifact
         id: deployment
         continue-on-error: true
         uses: actions/deploy-pages@v5
 
       - name: Retry GitHub Pages deployment
-        if: steps.time_gate.outputs.run == 'true' && steps.deployment.outcome == 'failure'
+        if: steps.deployment.outcome == 'failure'
         id: deployment_retry
+        continue-on-error: true
         uses: actions/deploy-pages@v5
 
+  verify-and-activate:
+    needs:
+      - build-publication
+      - deploy-pages
+    if: always() && needs.build-publication.result == 'success' && needs.build-publication.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
       - name: Verify deployed Pages publication
-        if: steps.time_gate.outputs.run == 'true' && (steps.deployment.outcome == 'success' || steps.deployment_retry.outcome == 'success')
-        id: pages_verify
         env:
-          PRIMARY_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-          RETRY_PAGE_URL: ${{ steps.deployment_retry.outputs.page_url }}
+          PAGE_URL: ${{ needs.deploy-pages.outputs.page_url }}
+          EXPECTED_PUBLICATION_ID: ${{ needs.build-publication.outputs.publication_id }}
         shell: bash
         run: |
-          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
-          export PAGE_URL="${RETRY_PAGE_URL:-${PRIMARY_PAGE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}}}"
-          # deploy-pages can report success before the Pages CDN exposes the
-          # new artifact. Allow six minutes, but never activate Supabase until
-          # the complete publication passes its integrity manifest.
-          for attempt in $(seq 1 36); do
+          PAGE_URL="${PAGE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}"
+          for _ in $(seq 1 36); do
             if python scripts/verify_pages_publication.py \
               --base-url "$PAGE_URL" \
               --expected-publication "$EXPECTED_PUBLICATION_ID"; then
@@ -274,20 +321,74 @@ jobs:
           exit 1
 
       - name: Activate Supabase publication
-        if: steps.time_gate.outputs.run == 'true' && steps.pages_verify.outcome == 'success'
-        id: activate_publication
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EXPECTED_RUN_DATE: ${{ needs.build-publication.outputs.run_date }}
+          EXPECTED_PUBLICATION_ID: ${{ needs.build-publication.outputs.publication_id }}
+        run: python scripts/supabase_learning_health.py --activate
+
+  finalize-storage:
+    needs:
+      - build-publication
+      - verify-and-activate
+    if: needs.build-publication.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Reclaim Supabase replay storage
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         shell: bash
         run: |
-          export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
-          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
-          python scripts/supabase_learning_health.py --activate
+          printf '{"publication_id":"%s","run_date":"%s"}\n' \
+            "${{ needs.build-publication.outputs.publication_id }}" \
+            "${{ needs.build-publication.outputs.run_date }}" \
+            > daily_watchlist_run_metadata_latest.json
+          for attempt in 1 2 3; do
+            if scripts/database_capacity_guard.sh finalize; then
+              exit 0
+            fi
+            echo "Final retention attempt $attempt failed; retrying."
+            sleep $((attempt * 10))
+          done
+          exit 1
 
-      - name: Restore previous Pages publication after failed commit
-        if: always() && steps.time_gate.outputs.run == 'true' && (steps.deployment.outcome == 'success' || steps.deployment_retry.outcome == 'success') && (steps.pages_verify.outcome != 'success' || steps.activate_publication.outcome != 'success')
+  restore-pages-after-failed-activation:
+    needs:
+      - build-publication
+      - deploy-pages
+      - verify-and-activate
+    if: always() && needs.build-publication.result == 'success' && needs.build-publication.outputs.should_run == 'true' && needs.verify-and-activate.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.rollback_deployment_retry.outputs.page_url || steps.rollback_deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.rollback_deployment_retry.outputs.page_url || steps.rollback_deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Confirm failed publication is inactive
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EXPECTED_PUBLICATION_ID: ${{ needs.build-publication.outputs.publication_id }}
+        run: python scripts/supabase_learning_health.py --assert-inactive
+
+      - name: Restore previous Pages publication
         id: rollback_deployment
         continue-on-error: true
         uses: actions/deploy-pages@v5
@@ -295,23 +396,36 @@ jobs:
           artifact_name: github-pages-rollback
 
       - name: Retry previous Pages publication restore
-        if: always() && steps.rollback_deployment.outcome == 'failure'
+        if: steps.rollback_deployment.outcome == 'failure'
         id: rollback_deployment_retry
         continue-on-error: true
         uses: actions/deploy-pages@v5
         with:
           artifact_name: github-pages-rollback
 
+  verify-pages-rollback:
+    needs:
+      - build-publication
+      - restore-pages-after-failed-activation
+    if: always() && needs.restore-pages-after-failed-activation.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
       - name: Verify restored Pages publication
-        if: always() && (steps.rollback_deployment.outcome == 'success' || steps.rollback_deployment_retry.outcome == 'success')
-        id: rollback_verify
         env:
-          PRIMARY_PAGE_URL: ${{ steps.rollback_deployment.outputs.page_url }}
-          RETRY_PAGE_URL: ${{ steps.rollback_deployment_retry.outputs.page_url }}
+          PAGE_URL: ${{ needs.restore-pages-after-failed-activation.outputs.page_url }}
+          ROLLBACK_PUBLICATION_ID: ${{ needs.build-publication.outputs.rollback_publication_id }}
         run: |
-          export PAGE_URL="${RETRY_PAGE_URL:-$PRIMARY_PAGE_URL}"
-          export ROLLBACK_PUBLICATION_ID="$(cat public-rollback/rollback_publication_id.txt)"
-          for attempt in $(seq 1 36); do
+          PAGE_URL="${PAGE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}"
+          for _ in $(seq 1 36); do
             if python scripts/verify_pages_publication.py \
               --base-url "$PAGE_URL" \
               --expected-publication "$ROLLBACK_PUBLICATION_ID"; then
@@ -322,14 +436,12 @@ jobs:
           echo "Restored Pages publication could not be verified."
           exit 1
 
-      - name: Reclaim Supabase replay storage
-        if: always() && steps.time_gate.outputs.run == 'true' && steps.activate_publication.outcome == 'success'
+      - name: Roll back inactive Supabase publication
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: scripts/database_capacity_guard.sh finalize
-
-      - name: Roll back incomplete Supabase publication
-        if: always() && steps.time_gate.outputs.run == 'true' && (steps.activate_publication.outcome == 'success' || (steps.deployment.outcome != 'success' && steps.deployment_retry.outcome != 'success') || steps.rollback_verify.outcome == 'success')
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: scripts/database_capacity_guard.sh rollback
+        shell: bash
+        run: |
+          printf '{"publication_id":"%s"}\n' \
+            "${{ needs.build-publication.outputs.publication_id }}" \
+            > daily_watchlist_run_metadata_latest.json
+          scripts/database_capacity_guard.sh rollback

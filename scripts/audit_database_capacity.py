@@ -160,6 +160,7 @@ def assert_capacity_contract() -> None:
         "select source_publication_id from public.watchlist_calibration_artifacts",
         "active_publication_id = :'publication_id'",
         "control.previous_publication_id",
+        "reconcile_active_retention",
     ):
         assert contract in guard, contract
     assert "scripts/database_capacity_guard.sh prepare" in workflow
@@ -167,7 +168,8 @@ def assert_capacity_contract() -> None:
     assert "scripts/database_capacity_guard.sh finalize" in workflow
     assert "scripts/database_capacity_guard.sh rollback" in workflow
     assert workflow.index("Reserve Supabase publishing headroom") < workflow.index("Refresh watchlist")
-    assert workflow.index("Enforce staged database ceiling") < workflow.index("Deploy to GitHub Pages")
+    assert workflow.index("Enforce staged database ceiling") < workflow.index("Deploy immutable Pages artifact")
+    assert "for attempt in 1 2 3" in workflow
     assert "drop constraint if exists watchlist_snapshots_pkey" not in schema
     assert "drop constraint if exists watchlist_behavior_history_pkey" not in schema
     assert "create table if not exists public.watchlist_learning_state" in schema

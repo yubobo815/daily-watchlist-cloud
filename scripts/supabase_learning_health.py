@@ -90,15 +90,24 @@ def mark_run_validated(run_date: str, status: str, publication_id: str) -> None:
             raise RuntimeError("Validated publication changed during compare-and-set.")
 
 
-def publication_generation() -> int:
+def publication_control() -> tuple[str, int]:
     url, key = credentials()
-    endpoint = f"{url}/rest/v1/watchlist_publication_control?select=generation&control_key=eq.active&limit=1"
+    endpoint = f"{url}/rest/v1/watchlist_publication_control?select=active_publication_id,generation&control_key=eq.active&limit=1"
     req = urllib.request.Request(endpoint, headers=headers(key), method="GET")
     with urllib.request.urlopen(req, timeout=30) as resp:
         rows = json.loads(resp.read().decode("utf-8") or "[]")
     if len(rows) > 1:
         raise RuntimeError("Publication control has more than one active row.")
-    return int(rows[0].get("generation") or 0) if rows else 0
+    if not rows:
+        return "", 0
+    return (
+        str(rows[0].get("active_publication_id") or ""),
+        int(rows[0].get("generation") or 0),
+    )
+
+
+def publication_generation() -> int:
+    return publication_control()[1]
 
 
 def activate_publication(publication_id: str) -> None:
@@ -107,7 +116,9 @@ def activate_publication(publication_id: str) -> None:
     control_endpoint = f"{url}/rest/v1/rpc/activate_watchlist_publication"
     control_headers = headers(key)
     control_headers.update({"Content-Type": "application/json"})
-    expected_generation = publication_generation()
+    active_publication_id, expected_generation = publication_control()
+    if active_publication_id == publication_id:
+        return
     req = urllib.request.Request(
         control_endpoint,
         data=json.dumps({
@@ -117,14 +128,33 @@ def activate_publication(publication_id: str) -> None:
         headers=control_headers,
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        activated = json.loads(resp.read().decode("utf-8") or "[]")
-        if resp.status != 200 or len(activated) != 1:
-            raise RuntimeError("Could not switch the active publication pointer.")
-        if str(activated[0].get("active_publication_id") or "") != publication_id:
-            raise RuntimeError("Active publication pointer changed during activation.")
-        if int(activated[0].get("generation") or -1) != expected_generation + 1:
-            raise RuntimeError("Active publication generation changed during activation.")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            activated = json.loads(resp.read().decode("utf-8") or "[]")
+            if resp.status != 200 or len(activated) != 1:
+                raise RuntimeError("Could not switch the active publication pointer.")
+            if str(activated[0].get("active_publication_id") or "") != publication_id:
+                raise RuntimeError("Active publication pointer changed during activation.")
+            if int(activated[0].get("generation") or -1) != expected_generation + 1:
+                raise RuntimeError("Active publication generation changed during activation.")
+    except Exception:
+        # The RPC can commit even if its response is lost. Confirm the pointer
+        # before compensating so Pages and Supabase cannot be rolled back apart.
+        confirmed_publication_id, _ = publication_control()
+        if confirmed_publication_id == publication_id:
+            return
+        raise
+
+
+def assert_publication_inactive(publication_id: str) -> None:
+    """Refuse Pages compensation if the candidate is already active."""
+    if not publication_id:
+        raise RuntimeError("EXPECTED_PUBLICATION_ID is required for activation reconciliation.")
+    active_publication_id, _ = publication_control()
+    if active_publication_id == publication_id:
+        raise RuntimeError(
+            "Candidate publication is already active; preserving the matching Pages publication."
+        )
 
 
 def add_query_param(path: str, key: str, value: str | int) -> str:
@@ -606,10 +636,19 @@ if __name__ == "__main__":
             action="store_true",
             help="Activate a validated publication after the deployed Pages manifest passes verification.",
         )
+        parser.add_argument(
+            "--assert-inactive",
+            action="store_true",
+            help="Fail if the expected publication is active before restoring the previous Pages artifact.",
+        )
         options = parser.parse_args()
-        if options.finalize and options.activate:
-            parser.error("--finalize and --activate are mutually exclusive")
-        main(finalize=options.finalize, activate=options.activate)
+        if sum((options.finalize, options.activate, options.assert_inactive)) > 1:
+            parser.error("--finalize, --activate, and --assert-inactive are mutually exclusive")
+        if options.assert_inactive:
+            assert_publication_inactive(os.getenv("EXPECTED_PUBLICATION_ID", "").strip())
+            print("SUPABASE_PUBLICATION_STATE=INACTIVE")
+        else:
+            main(finalize=options.finalize, activate=options.activate)
     except Exception as exc:
         print(f"SUPABASE_LEARNING_HEALTH=FAIL {exc}")
         sys.exit(1)

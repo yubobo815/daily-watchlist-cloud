@@ -337,12 +337,27 @@ SQL
   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_learning_state, public.watchlist_indicator_state, public.watchlist_calibration_artifacts, public.watchlist_refresh_runs"
 }
 
+reconcile_active_retention() {
+  local active_publication_id active_run_date
+  active_publication_id="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c \
+    "select active_publication_id from public.watchlist_publication_control where control_key = 'active'")"
+  [ -n "$active_publication_id" ] || return 0
+  active_run_date="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -v publication_id="$active_publication_id" -c \
+    "select run_date from public.watchlist_refresh_runs where publication_id = :'publication_id' limit 1")"
+  [ -n "$active_run_date" ] || {
+    echo "Active publication $active_publication_id has no refresh-run metadata."
+    return 1
+  }
+  final_retention "$active_publication_id" "$active_run_date"
+}
+
 publication_id="$(metadata_value publication_id)"
 run_date="$(metadata_value run_date)"
 
 case "$mode" in
   prepare)
     reap_incomplete_publications
+    reconcile_active_retention
     trim_ohlcv
     psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_learning_state, public.watchlist_indicator_state, public.watchlist_calibration_artifacts, public.watchlist_refresh_runs"
     assert_capacity "$WARNING_BYTES" "preflight"
