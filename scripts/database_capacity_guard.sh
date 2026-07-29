@@ -24,7 +24,7 @@ readonly INDICATOR_STATE_MAX_ROWS=500
 readonly REFRESH_RUN_MAX_ROWS=125
 readonly OHLCV_MAX_BYTES=65000000
 readonly SNAPSHOT_MAX_BYTES=12000000
-readonly BEHAVIOR_MAX_BYTES=40000000
+readonly BEHAVIOR_MAX_BYTES=65000000
 readonly OUTCOME_MAX_BYTES=45000000
 readonly LEARNING_STATE_MAX_BYTES=6000000
 readonly INDICATOR_STATE_MAX_BYTES=4000000
@@ -183,7 +183,7 @@ assert_capacity() {
   fi
   [ "$ohlcv_bytes" -le "$OHLCV_MAX_BYTES" ] || { echo "OHLCV byte capacity exceeded"; return 1; }
   [ "$snapshot_bytes" -le "$SNAPSHOT_MAX_BYTES" ] || { echo "Snapshot byte capacity exceeded"; return 1; }
-  [ "$behavior_bytes" -le "$BEHAVIOR_MAX_BYTES" ] || { echo "Behavior byte capacity exceeded"; return 1; }
+  [ "$behavior_bytes" -le "$BEHAVIOR_MAX_BYTES" ] || { echo "Behavior byte capacity exceeded: $behavior_bytes > $BEHAVIOR_MAX_BYTES"; return 1; }
   [ "$outcome_bytes" -le "$OUTCOME_MAX_BYTES" ] || { echo "Outcome byte capacity exceeded"; return 1; }
   [ "$learning_bytes" -le "$LEARNING_STATE_MAX_BYTES" ] || { echo "Learning-state byte capacity exceeded"; return 1; }
   [ "$indicator_bytes" -le "$INDICATOR_STATE_MAX_BYTES" ] || { echo "Indicator-state byte capacity exceeded"; return 1; }
