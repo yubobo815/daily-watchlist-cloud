@@ -385,6 +385,7 @@ const state = {
   query: "",
   sort: "execution_priority-asc",
   historyRows: [],
+  tickerDirectory: [],
   ticker: "ORCL",
   tickerName: "",
   focusTickers: [],
@@ -437,6 +438,43 @@ function exactTickerSearchNeedle(query, rows) {
   const ticker = normaliseSearchTicker(query);
   if (!ticker || !/^[A-Z0-9.-]{1,8}$/.test(ticker)) return "";
   return rows.some((row) => tickerSearchAliases(row).includes(ticker)) ? ticker : "";
+}
+
+function resolveTickerDirectoryQuery(query, rows) {
+  const cleanQuery = String(query || "").trim();
+  if (!cleanQuery) return "";
+  const exactTicker = exactTickerSearchNeedle(cleanQuery, rows);
+  if (exactTicker) return rows.find((row) => tickerSearchAliases(row).includes(exactTicker))?.ticker || "";
+  const needle = cleanQuery.toLowerCase();
+  const exactCompanyMatches = rows.filter((row) => companySearchTerms(row).some((term) => term.toLowerCase() === needle));
+  if (exactCompanyMatches.length === 1) return exactCompanyMatches[0].ticker;
+  if (exactCompanyMatches.length > 1) return "";
+  const matches = rows.filter((row) => companySearchTerms(row).some((term) => term.toLowerCase().includes(needle)));
+  return matches.length === 1 ? matches[0].ticker : "";
+}
+
+function renderTickerDirectory(rows) {
+  const options = document.querySelector("#ticker-options");
+  if (!options) return;
+  options.innerHTML = rows.map((row) => {
+    const company = displaySecurityName(row.name, row.ticker) || row.name || row.ticker;
+    return `<option value="${escapeHtml(row.ticker)}">${escapeHtml(company)}</option>`;
+  }).join("");
+}
+
+async function loadTickerDirectory() {
+  try {
+    const payload = isGithubPagesHost()
+      ? await loadStaticLatestRows()
+      : await appApiFetch("/api/watchlist/latest", { fresh: true, ttl: 0 });
+    state.tickerDirectory = (payload.rows || []).map((row) => ({
+      ...row,
+      name: displaySecurityName(row.name, row.ticker) || row.name || row.ticker,
+    }));
+  } catch {
+    state.tickerDirectory = Object.entries(SECURITY_NAME_FALLBACKS).map(([ticker, name]) => ({ ticker, name }));
+  }
+  renderTickerDirectory(state.tickerDirectory);
 }
 
 function actionKind(action) {
@@ -1820,7 +1858,7 @@ function renderTickerDetailPanel() {
     ${activePlan
       ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(row, { active: true })}</section>`
       : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}
-    <details class="detail-diagnostics"><summary>Why we see it this way</summary>${renderScoreBreakdown(row)}</details>
+    <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
   `;
 }
 
@@ -2534,7 +2572,7 @@ function renderLatestHistoryPanel(latest) {
       ${activePlan
         ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
         : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}
-      <details class="detail-diagnostics"><summary>Why we see it this way</summary>${renderScoreBreakdown(latest)}</details>
+      <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(latest)}</section>
     </div>
   `;
 }
@@ -2731,7 +2769,6 @@ async function loadHistory(ticker) {
   state.tickerName = "";
   document.querySelector("#ticker").value = state.ticker;
   document.querySelector("#history-title").textContent = state.ticker;
-  document.querySelector("#ticker-name").innerHTML = "";
   document.title = state.ticker;
   window.history.replaceState(null, "", `./ticker.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
@@ -2772,11 +2809,19 @@ async function loadHistory(ticker) {
 function initHistory() {
   const params = new URLSearchParams(window.location.search);
   const ticker = normaliseTicker(params.get("ticker"));
+  state.tickerDirectory = Object.entries(SECURITY_NAME_FALLBACKS).map(([symbol, name]) => ({ ticker: symbol, name }));
+  renderTickerDirectory(state.tickerDirectory);
   document.querySelector("#ticker-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    loadHistory(document.querySelector("#ticker").value);
+    const query = document.querySelector("#ticker").value;
+    const resolvedTicker = resolveTickerDirectoryQuery(query, state.tickerDirectory);
+    if (!resolvedTicker) {
+      setStatus(`No unique stock matched "${String(query || "").trim()}". Choose a ticker or company from the list.`, false);
+      return;
+    }
+    loadHistory(resolvedTicker);
   });
-  loadHistory(ticker);
+  loadHistory(ticker).finally(() => loadTickerDirectory());
 }
 
 if (document.body.dataset.page === "history") {

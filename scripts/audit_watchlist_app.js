@@ -83,6 +83,19 @@ function exactTickerSearchNeedle(query, rows) {
   return rows.some((row) => tickerSearchAliases(row).includes(ticker)) ? ticker : "";
 }
 
+function resolveTickerDirectoryQuery(query, rows) {
+  const cleanQuery = String(query || "").trim();
+  if (!cleanQuery) return "";
+  const exactTicker = exactTickerSearchNeedle(cleanQuery, rows);
+  if (exactTicker) return rows.find((row) => tickerSearchAliases(row).includes(exactTicker))?.ticker || "";
+  const needle = cleanQuery.toLowerCase();
+  const exactCompanyMatches = rows.filter((row) => companySearchTerms(row).some((term) => term.toLowerCase() === needle));
+  if (exactCompanyMatches.length === 1) return exactCompanyMatches[0].ticker;
+  if (exactCompanyMatches.length > 1) return "";
+  const matches = rows.filter((row) => companySearchTerms(row).some((term) => term.toLowerCase().includes(needle)));
+  return matches.length === 1 ? matches[0].ticker : "";
+}
+
 function auditSearchBehavior() {
   const source = fs.readFileSync("assets/app.js", "utf8");
   assert(source.includes("function exactTickerSearchNeedle"), "watchlist search must include exact ticker matching");
@@ -99,6 +112,10 @@ function auditSearchBehavior() {
   assert(muNeedle === "MU", "MU query must resolve to exact ticker search");
   assert(muMatches.length === 1 && muMatches[0] === "MU", `MU exact search must only match MU, got ${muMatches.join(",")}`);
   assert(micronMatches.includes("MU"), "company-name search for Micron must still find MU");
+  assert(resolveTickerDirectoryQuery("MU", rows) === "MU", "ticker detail search must resolve exact ticker symbols");
+  assert(resolveTickerDirectoryQuery("Micron", rows) === "MU", "ticker detail search must resolve full displayed company names");
+  assert(resolveTickerDirectoryQuery("icron", rows) === "MU", "ticker detail search must resolve unique company-name fragments");
+  assert(resolveTickerDirectoryQuery("Alphabet", rows) === "", "ticker detail search must not choose arbitrarily between duplicate company names");
   const tickerSource = fs.readFileSync("ticker.html", "utf8");
   assert(!tickerSource.includes("company-context"), "ticker detail must not render company context");
   assert(!source.includes("renderCompanyBrief"), "ticker detail must not fetch or render company context");
@@ -236,6 +253,8 @@ function auditDecisionFunnelUi() {
   assert(!appSource.includes('"GATE BLOCK"'), "reader-facing UI must not expose the internal gate-block label");
   assert(!appSource.includes("Trend quality ${fmtConviction(latest)} / 100"), "ticker diagnostics must not present adjusted rank as synthetic trend quality");
   assert(appSource.includes("Why we see it this way"), "ticker panel must use a reader-facing evidence label");
+  assert(!appSource.includes('<details class="detail-diagnostics">'), "decision evidence must not be collapsed on either app surface");
+  assert(appSource.includes('<section class="detail-diagnostics"><h3>Why we see it this way</h3>'), "decision evidence must be visible by default");
   assert(!appSource.includes("<summary>Diagnostics</summary>"), "ticker panel must not expose an internal diagnostics label");
   assert(!appSource.includes("Weight Model"), "ticker detail must not expose internal model-weight shorthand");
   assert(!appSource.includes("Transition Edge"), "ticker detail must not expose unexplained transition scores");
@@ -251,6 +270,11 @@ function auditDecisionFunnelUi() {
   assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
   assert(!pageSource.includes("Execution tier first"), "watchlist must not retain execution-tier sorting copy");
   assert(!tickerSource.includes("Execution plan"), "ticker detail must not retain execution-plan copy");
+  assert(tickerSource.includes('placeholder="Ticker or company name"'), "ticker detail search must advertise ticker and company matching");
+  assert(appSource.includes("function resolveTickerDirectoryQuery(query, rows)"), "ticker detail must resolve company-name searches through the published directory");
+  assert(appSource.includes("loadHistory(ticker).finally(() => loadTickerDirectory())"), "ticker detail must refresh its search directory without delaying the current stock");
+  assert(!tickerSource.includes('id="ticker-name"'), "ticker detail must not retain an unused company-name node");
+  assert(!tickerSource.includes('class="ticker-switcher"'), "change-stock search must not remain inside the decision card");
   assert(!pageSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "watchlist must not repeat a generic BUY disclaimer");
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");

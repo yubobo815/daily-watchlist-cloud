@@ -289,7 +289,6 @@ body.ticker-page .shell { width: min(100%, 1540px); background: rgba(7, 10, 15, 
 body.ticker-page .ticker-hero { min-height: 112px; padding: 16px 22px !important; }
 body.ticker-page .ticker-hero .brand-name { font-size: clamp(29px, 3vw, 46px); }
 body.ticker-page .ticker-hero h1 { margin: 2px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(26px, 3.2vw, 44px); font-weight: 400; letter-spacing: -0.04em; }
-body.ticker-page .ticker-hero .ticker-name { max-width: none; color: var(--muted); }
 body.ticker-page .ticker-hero #app-disclaimer { display: none; }
 body.ticker-page .history-grid { grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.5fr); gap: 0; border: 1px solid #cfcac0; background: #f7f5f0; }
 body.ticker-page .panel { border: 0; border-radius: 0; color: #252528; background: #f7f5f0; box-shadow: none; }
@@ -297,9 +296,10 @@ body.ticker-page #snapshot { padding: 22px; border-right: 1px solid #d2cdc4; }
 body.ticker-page #behavior { padding: 22px; }
 body.ticker-page .panel h2 { margin: 0; color: #252528; font-family: Georgia, "Times New Roman", serif; font-size: 25px; font-weight: 400; letter-spacing: -0.03em; }
 body.ticker-page .panel-heading { margin-bottom: 14px; }
-body.ticker-page #ticker-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 16px; }
-body.ticker-page #ticker-form label { display: none; }
-body.ticker-page .ticker-input { min-height: 42px; margin: 0; padding: 8px 10px; border: 1px solid #c9c3b8; border-radius: 3px; color: #252528; background: #fffdf9; font-size: 15px; }
+body.ticker-page #ticker-form { width: min(100%, 460px); margin: 14px 0 10px; }
+body.ticker-page #ticker-form label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
+body.ticker-page .ticker-lookup-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+body.ticker-page .ticker-input { min-height: 42px; margin: 0; padding: 8px 10px; border: 1px solid #c9c3b8; border-radius: 3px; color: #252528; background: #fffdf9; font-size: 15px; text-transform: none; }
 body.ticker-page .button.primary { min-height: 42px; border-radius: 3px; }
 body.ticker-page .latest-card { gap: 14px; margin: 0; padding: 0; border-left: 0; border-radius: 0; color: #252528; background: transparent; }
 body.ticker-page .latest-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid #d2cdc4; }
@@ -311,7 +311,7 @@ body.ticker-page .latest-metrics strong { color: #252528; font-size: 12px; }
 body.ticker-page .latest-rationale { margin: 0; color: #4d4a45; font-size: 12px; line-height: 1.5; }
 body.ticker-page .pine-confirmation { color: #74601e; }
 body.ticker-page .detail-diagnostics { padding-top: 10px; border-top: 1px solid #d2cdc4; color: #58544d; font-size: 11px; }
-body.ticker-page .detail-diagnostics summary { cursor: pointer; color: #4b4842; font-weight: 750; }
+body.ticker-page .detail-diagnostics h3 { margin: 0 0 8px; color: #4b4842; font-size: 13px; font-weight: 750; }
 body.ticker-page .moment-card, body.ticker-page .lookback-card { border-color: #d2cdc4; background: #fffdf9; }
 body.ticker-page .history-visual, body.ticker-page .visual-summary { border-color: #d2cdc4; background: #fffdf9; }
 
@@ -2553,10 +2553,6 @@ body[data-page="history"] .raw-history summary {
     display: none;
   }
 
-  body[data-page="history"] .ticker-name {
-    margin-top: 7px;
-  }
-
   .status {
     max-width: 100%;
     padding: 6px 9px;
@@ -2581,22 +2577,6 @@ body[data-page="history"] .raw-history summary {
   body[data-page="history"] #latest-panel {
     order: 1;
     margin-top: 0;
-  }
-
-  body[data-page="history"] #ticker-form {
-    order: 2;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: end;
-    padding: 9px;
-    border: 1px solid var(--line-soft);
-    border-radius: 18px;
-    background: rgba(16, 21, 29, 0.56);
-  }
-
-  body[data-page="history"] #ticker-form label {
-    display: none;
   }
 
   body[data-page="history"] #ticker-form .ticker-input {
@@ -3465,7 +3445,7 @@ body.ticker-page .panel { color: var(--ink); background: var(--panel); }
 body.ticker-page .panel h2,
 body.ticker-page .latest-metrics strong,
 body.ticker-page .latest-rationale,
-body.ticker-page .detail-diagnostics summary { color: var(--ink); }
+body.ticker-page .detail-diagnostics h3 { color: var(--ink); }
 body.ticker-page .latest-metrics,
 body.ticker-page .latest-metrics > div,
 body.ticker-page #snapshot { border-color: var(--line); }
@@ -3914,23 +3894,6 @@ body.ticker-page .latest-card.tone-avoid { border-left-color: var(--tone-avoid);
 .decision-callout strong { color: var(--ink); font-size: 15px; line-height: 1.25; }
 .decision-callout p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
-body.ticker-page .ticker-switcher { margin: -4px 0 16px; border-bottom: 1px solid var(--line); }
-body.ticker-page .ticker-switcher > summary {
-  display: flex;
-  min-height: 44px;
-  cursor: pointer;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  list-style: none;
-}
-body.ticker-page .ticker-switcher > summary::-webkit-details-marker { display: none; }
-body.ticker-page .ticker-switcher > summary::after { content: "+"; color: var(--ink); font-size: 18px; font-weight: 500; }
-body.ticker-page .ticker-switcher[open] > summary::after { content: "-"; }
-body.ticker-page .ticker-switcher #ticker-form { margin: 0 0 12px; }
-
 .behavior-summary { display: grid; border-top: 1px solid var(--line); }
 .behavior-summary > div {
   display: grid;
@@ -3974,25 +3937,23 @@ body.ticker-page .moment-body > .subtle { color: var(--muted); font-size: 13px; 
 body.ticker-page .decision-callout strong { font-size: 17px; }
 body.ticker-page .decision-callout p { font-size: 14px; line-height: 1.55; }
 body.ticker-page .score-factors strong { font-size: 13px; line-height: 1.5; }
-body.ticker-page .detail-diagnostics > summary { display: flex; min-height: 44px; align-items: center; font-size: 13px; }
-
-/* Expanded diagnostics are supporting evidence, not cards within a card. */
-body.ticker-page .detail-diagnostics[open] .score-explainer {
+/* Decision evidence is always visible and remains supporting content, not another card. */
+body.ticker-page .detail-diagnostics .score-explainer {
   gap: 0;
   padding-top: 0;
   border-top: 0;
 }
-body.ticker-page .detail-diagnostics[open] .score-factors {
+body.ticker-page .detail-diagnostics .score-factors {
   gap: 0;
   border-top: 1px solid var(--line);
 }
-body.ticker-page .detail-diagnostics[open] .score-factors > div {
+body.ticker-page .detail-diagnostics .score-factors > div {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
 }
-body.ticker-page .detail-diagnostics[open] .score-factors > div:last-child {
+body.ticker-page .detail-diagnostics .score-factors > div:last-child {
   border-bottom: 0;
 }
 
@@ -4014,8 +3975,7 @@ body.ticker-page :is(a, button, input, summary):focus-visible {
 
 .active-plan { display: grid; gap: 8px; }
 .reference-levels { border-top: 1px solid var(--line); padding-top: 9px; }
-.reference-levels > summary,
-.detail-diagnostics > summary {
+.reference-levels > summary {
   cursor: pointer;
   color: var(--ink);
   font-size: 11px;
