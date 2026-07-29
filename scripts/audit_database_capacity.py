@@ -147,7 +147,7 @@ def assert_capacity_contract() -> None:
         "readonly CALIBRATION_MAX_BYTES=8000000",
         "readonly SNAPSHOT_MAX_ROWS=750",
         "readonly SNAPSHOT_MAX_BYTES=12000000",
-        "readonly MAX_STAGED_PUBLICATION_BYTES=85000000",
+        "readonly MAX_STAGED_PUBLICATION_BYTES=95000000",
         "readonly OHLCV_MAX_BYTES=65000000",
         "readonly BEHAVIOR_MAX_BYTES=40000000",
         "readonly OUTCOME_MAX_BYTES=45000000",
@@ -181,6 +181,8 @@ def assert_capacity_contract() -> None:
     assert scanner_source.index("estimated_publication_bytes = estimate_supabase_publication_bytes") < scanner_source.index("supabase_upsert_refresh_run([publishing_metadata])")
     estimate = scanner.estimate_supabase_publication_bytes([{"payload": "x" * 1000}])
     assert 5_000_000 < estimate < scanner.SUPABASE_MAX_STAGED_PUBLICATION_BYTES
+    assert scanner.SUPABASE_STORAGE_OVERHEAD_FACTOR == 2.0
+    assert scanner.SUPABASE_MAX_STAGED_PUBLICATION_BYTES == 95_000_000
 
 
 if __name__ == "__main__":

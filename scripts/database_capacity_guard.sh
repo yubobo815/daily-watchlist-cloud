@@ -30,7 +30,7 @@ readonly LEARNING_STATE_MAX_BYTES=6000000
 readonly INDICATOR_STATE_MAX_BYTES=4000000
 readonly REFRESH_RUN_MAX_BYTES=4000000
 # Conservative upper bound for one complete non-OHLCV staged publication.
-readonly MAX_STAGED_PUBLICATION_BYTES=85000000
+readonly MAX_STAGED_PUBLICATION_BYTES=95000000
 readonly LOCK_KEY=741852963
 
 metadata_value() {
