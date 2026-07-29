@@ -482,88 +482,6 @@ function historyDisplayTitle() {
   return state.tickerName ? `${state.ticker} · ${state.tickerName}` : state.ticker;
 }
 
-function cleanSummaryText(text) {
-  const clean = String(text || "").replace(/\s+/g, " ").trim();
-  return clean;
-}
-
-function safeWebsite(value) {
-  const text = String(value || "").trim();
-  if (!/^https?:\/\//i.test(text)) return "";
-  try {
-    return new URL(text).href;
-  } catch {
-    return "";
-  }
-}
-
-function renderCompanyBrief(profile) {
-  const target = document.querySelector("#company-context");
-  if (!target) return;
-  if (!hasMeaningfulCompanyProfile(profile)) {
-    setCompanyContextAvailable(false);
-    target.innerHTML = "";
-    return;
-  }
-  const summary = cleanSummaryText(profile?.business_summary);
-  const highlights = String(profile?.latest_report_highlights || "").trim();
-  const nextReport = String(profile?.next_report_date || "").trim();
-  const website = safeWebsite(profile?.website);
-  const industry = [profile?.sector, profile?.industry].filter(Boolean).join(" · ");
-  const source = String(profile?.profile_source || "Company profile").trim();
-  const summaryPreview = summary.length > 260 ? `${summary.slice(0, 257).replace(/\s+\S*$/, "")}...` : summary;
-
-  setCompanyContextAvailable(true);
-  target.innerHTML = `
-    <h2>Company context</h2>
-    <details class="company-brief">
-      <summary>
-        ${industry ? `<div class="company-kicker">${escapeHtml(industry)}</div>` : ""}
-        ${summaryPreview ? `<p>${escapeHtml(summaryPreview)}</p>` : ""}
-        ${summary && summary.length > summaryPreview.length ? `<span class="company-toggle" data-open="Show less" data-closed="Show company details"></span>` : ""}
-      </summary>
-      <div class="company-facts">
-        ${summary && summary.length > summaryPreview.length ? `<div><span>Business overview</span><strong>${escapeHtml(summary)}</strong></div>` : ""}
-        ${highlights ? `<div><span>Latest report</span><strong>${escapeHtml(highlights)}</strong></div>` : ""}
-        ${nextReport ? `<div><span>Next report</span><strong>${escapeHtml(nextReport)}</strong></div>` : ""}
-        ${website ? `<div><span>Website</span><strong><a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(new URL(website).hostname.replace(/^www\./, ""))}</a></strong></div>` : ""}
-      </div>
-      <span class="company-source">Source: ${escapeHtml(source)}</span>
-    </details>
-  `;
-}
-
-function setCompanyContextAvailable(available) {
-  const section = document.querySelector("#company-context");
-  const tab = document.querySelector('.app-tabbar a[href="#company-context"]');
-  if (section) section.hidden = !available;
-  if (tab) tab.hidden = !available;
-}
-
-function isIncompleteCompanySummary(profile) {
-  const summary = cleanSummaryText(profile?.business_summary);
-  return !summary || summary.length < 100 || summary.split(/\s+/).filter(Boolean).length < 14;
-}
-
-function hasMeaningfulCompanyProfile(profile) {
-  return !isIncompleteCompanySummary(profile);
-}
-
-async function renderCompanyBriefWithFallback(ticker, profile) {
-  if (hasMeaningfulCompanyProfile(profile)) {
-    renderCompanyBrief(profile);
-    return;
-  }
-
-  renderCompanyBrief({});
-  try {
-    const fallbackProfile = await appApiFetch(`/api/company?ticker=${encodeURIComponent(ticker)}`, 6 * 60 * 60 * 1000);
-    if (hasMeaningfulCompanyProfile(fallbackProfile)) renderCompanyBrief(fallbackProfile);
-  } catch {
-    // Company context is useful, but ticker behavior should remain usable without it.
-  }
-}
-
 function fmtCompactDate(value) {
   if (!value) return "";
   const [, month, day] = String(value).split("-");
@@ -2814,8 +2732,6 @@ async function loadHistory(ticker) {
   document.querySelector("#ticker").value = state.ticker;
   document.querySelector("#history-title").textContent = state.ticker;
   document.querySelector("#ticker-name").innerHTML = "";
-  setCompanyContextAvailable(false);
-  document.querySelector("#company-context").innerHTML = "";
   document.title = state.ticker;
   window.history.replaceState(null, "", `./ticker.html?ticker=${encodeURIComponent(state.ticker)}`);
   setStatus("Loading ticker history...");
@@ -2830,7 +2746,6 @@ async function loadHistory(ticker) {
     state.tickerName = displaySecurityName(tickerPayload.snapshot?.name, state.ticker);
     document.querySelector("#history-title").textContent = historyDisplayTitle();
     document.title = historyDisplayTitle();
-    renderCompanyBriefWithFallback(state.ticker, tickerPayload.profile || {});
     state.historyRows = tickerPayload.historyRows || [];
     const marketData = historyDateSummary(state.historyRows);
     setRefreshSummary(latest, marketData, state.historyRows, tickerPayload.runInfo);
@@ -2845,7 +2760,6 @@ async function loadHistory(ticker) {
       state.historyRows = fallback.rows;
       const marketData = historyDateSummary(state.historyRows);
       setRefreshSummary(fallback.latest, `${marketData} · saved validated data`, state.historyRows, fallback.runInfo);
-      renderCompanyBriefWithFallback(state.ticker, fallback.profile || {});
       renderHistoryRows();
     } catch (fallbackError) {
       state.historyRows = [];

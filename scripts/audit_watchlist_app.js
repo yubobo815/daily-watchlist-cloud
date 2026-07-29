@@ -99,8 +99,9 @@ function auditSearchBehavior() {
   assert(muNeedle === "MU", "MU query must resolve to exact ticker search");
   assert(muMatches.length === 1 && muMatches[0] === "MU", `MU exact search must only match MU, got ${muMatches.join(",")}`);
   assert(micronMatches.includes("MU"), "company-name search for Micron must still find MU");
-  assert(!source.includes("Built-in fallback profile"), "company context must not present static fallback copy as live information");
-  assert(source.includes("function hasMeaningfulCompanyProfile"), "company context must require a substantive company summary");
+  const tickerSource = fs.readFileSync("ticker.html", "utf8");
+  assert(!tickerSource.includes("company-context"), "ticker detail must not render company context");
+  assert(!source.includes("renderCompanyBrief"), "ticker detail must not fetch or render company context");
 
   return {
     muNeedle,
