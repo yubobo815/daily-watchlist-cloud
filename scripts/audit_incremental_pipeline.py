@@ -270,11 +270,15 @@ def audit_rolling_window_and_modes() -> None:
     workflow = (root / ".github/workflows/daily-watchlist-pages.yml").read_text()
     scanner_source = (root / "daily_watchlist_overview.py").read_text()
     assert "allow_calibration_bootstrap" in workflow
+    assert "use_stored_ohlcv" in workflow
+    assert "force_bootstrap = bool(args.allow_calibration_bootstrap" in scanner_source
+    assert '"supabase", "STORED_REPLAY"' in scanner_source
     assert "if previous_incremental_metadata and not needs_bootstrap:" in scanner_source
     assert "position_value_1k_risk = required_position_value" in scanner_source
     assert "actual_risk_dollars = suggested_position_value" in scanner_source
     assert 'cron: "17 23 * * 1-4"' in workflow and 'cron: "17 23 * * 5"' in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
+    assert '${{ steps.time_gate.outputs.stored_ohlcv_arg }}' in workflow
     assert "parity must never be bypassed implicitly" in scanner_source
     assert workflow.index("Mark Supabase publication validated") < workflow.index("Deploy immutable Pages artifact")
     assert workflow.index("Verify deployed Pages publication") < workflow.index("Activate Supabase publication")

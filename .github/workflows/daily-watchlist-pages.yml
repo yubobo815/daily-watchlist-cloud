@@ -19,6 +19,11 @@ on:
         required: true
         default: false
         type: boolean
+      use_stored_ohlcv:
+        description: Replay canonical Supabase OHLCV without provider refetches
+        required: true
+        default: false
+        type: boolean
   schedule:
     # Monday-Thursday US sessions use the incremental path. Friday's session
     # performs the bounded 100-session rebuild and calibration parity gate.
@@ -58,6 +63,7 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           REQUESTED_REFRESH_MODE: ${{ inputs.refresh_mode }}
           ALLOW_CALIBRATION_BOOTSTRAP: ${{ inputs.allow_calibration_bootstrap }}
+          USE_STORED_OHLCV: ${{ inputs.use_stored_ohlcv }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
         shell: bash
         run: |
@@ -69,6 +75,7 @@ jobs:
             fi
             echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
             echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+            echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -80,6 +87,11 @@ jobs:
             else
               echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
             fi
+            if [ "$USE_STORED_OHLCV" = "true" ]; then
+              echo "stored_ohlcv_arg=--stored-ohlcv-only" >> "$GITHUB_OUTPUT"
+            else
+              echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -87,6 +99,7 @@ jobs:
           # Never gate them on the runner's wall-clock hour.
           echo "run=true" >> "$GITHUB_OUTPUT"
           echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+          echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
           if [ "$EVENT_SCHEDULE" = "17 23 * * 5" ]; then
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
           else
@@ -150,7 +163,7 @@ jobs:
         # Two years of source OHLCV leaves enough post-warmup bars for the
         # 100-session learning baseline. Supabase still retains only 30 display
         # days plus a capped compact outcome table.
-        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60 --learning-baseline-days 100 --refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}" ${{ steps.time_gate.outputs.bootstrap_arg }}
+        run: python daily_watchlist_overview.py --refresh --skip-profiles --years 2 --history-days 30 --learning-lookback-days 60 --learning-baseline-days 100 --refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}" ${{ steps.time_gate.outputs.bootstrap_arg }} ${{ steps.time_gate.outputs.stored_ohlcv_arg }}
 
       - name: Audit Supabase learning health
         if: steps.time_gate.outputs.run == 'true'

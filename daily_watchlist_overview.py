@@ -7691,7 +7691,12 @@ def main() -> None:
     parser.add_argument(
         "--allow-calibration-bootstrap",
         action="store_true",
-        help="Allow an explicit baseline rebuild when no compatible prior daily incremental state exists.",
+        help="Explicitly replace the prior calibration state from a bounded weekly rebuild.",
+    )
+    parser.add_argument(
+        "--stored-ohlcv-only",
+        action="store_true",
+        help="Replay canonical Supabase OHLCV without refetching unchanged provider data.",
     )
     parser.add_argument(
         "--refresh-mode",
@@ -7737,7 +7742,8 @@ def main() -> None:
         )
     )
     state_compatible = bool(previous_incremental_metadata)
-    needs_bootstrap = (refresh_mode == "daily" and not daily_state_ready) or (
+    force_bootstrap = bool(args.allow_calibration_bootstrap and refresh_mode == "weekly_rebuild")
+    needs_bootstrap = force_bootstrap or (refresh_mode == "daily" and not daily_state_ready) or (
         refresh_mode == "weekly_rebuild" and not state_compatible
     )
     if needs_bootstrap and not args.allow_calibration_bootstrap:
@@ -7751,7 +7757,14 @@ def main() -> None:
     benchmark_frames: dict[str, pd.DataFrame] = {}
     for benchmark in ("SPY", "QQQ", "SMH"):
         try:
-            if args.cache_only or (args.refresh and not live_access_ok):
+            if args.stored_ohlcv_only:
+                benchmark_frames[benchmark] = load_ohlcv_from_supabase(benchmark)
+                if benchmark_frames[benchmark].empty:
+                    raise RuntimeError(f"No stored OHLCV available for {benchmark}.")
+                benchmark_frames[benchmark] = attach_data_provider(
+                    benchmark_frames[benchmark], "supabase", "STORED_REPLAY"
+                )
+            elif args.cache_only or (args.refresh and not live_access_ok):
                 benchmark_frames[benchmark] = cached_chart(benchmark, years=args.years)
             else:
                 benchmark_frames[benchmark] = load_or_refresh_ohlcv(
@@ -7770,7 +7783,12 @@ def main() -> None:
     for ticker_index, ticker in enumerate(tickers, start=1):
         print(f"Refreshing {ticker_index}/{len(tickers)}: {display_ticker(ticker)}", flush=True)
         try:
-            if args.cache_only or (args.refresh and not live_access_ok):
+            if args.stored_ohlcv_only:
+                df = load_ohlcv_from_supabase(ticker)
+                if df.empty:
+                    raise RuntimeError(f"No stored OHLCV available for {display_ticker(ticker)}.")
+                df = attach_data_provider(df, "supabase", "STORED_REPLAY")
+            elif args.cache_only or (args.refresh and not live_access_ok):
                 df = cached_chart(ticker, years=args.years)
                 if args.refresh and not live_access_ok:
                     stale_cache_fallbacks.append(
