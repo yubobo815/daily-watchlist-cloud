@@ -67,8 +67,16 @@ function main() {
   metadata.run_date = metadata.run_date || "2026-01-01";
   const metadataPath = path.join(temp, "metadata.json");
   fs.writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
-  const first = path.join(temp, "first");
-  const second = path.join(temp, "second");
+  const prepareSite = (name) => {
+    const root = path.join(temp, name);
+    fs.mkdirSync(root, { recursive: true });
+    ["index.html", "ticker.html", "history.html", "manifest.webmanifest"].forEach((file) => {
+      fs.copyFileSync(file, path.join(root, file));
+    });
+    return path.join(root, "data");
+  };
+  const first = prepareSite("first");
+  const second = prepareSite("second");
   const build = (output, history = "watchlist_behavior_history_latest.csv") => execFileSync("python3", [
     "scripts/build_pages_data.py",
     "--latest", "daily_watchlist_overview_latest.csv",
@@ -83,9 +91,10 @@ function main() {
   const sourceHistory = fs.readFileSync("watchlist_behavior_history_latest.csv", "utf8").trimEnd().split(/\r?\n/);
   const overflowHistory = path.join(temp, "history-overflow.csv");
   fs.writeFileSync(overflowHistory, `${sourceHistory.join("\n")}\n${sourceHistory[1]}\n`);
-  build(path.join(temp, "overflow"), overflowHistory);
-  const overflowManifest = JSON.parse(fs.readFileSync(path.join(temp, "overflow", "manifest.json"), "utf8"));
-  filesBelow(path.join(temp, "overflow", overflowManifest.ticker_base_path)).forEach((file) => {
+  const overflow = prepareSite("overflow");
+  build(overflow, overflowHistory);
+  const overflowManifest = JSON.parse(fs.readFileSync(path.join(overflow, "manifest.json"), "utf8"));
+  filesBelow(path.join(overflow, overflowManifest.ticker_base_path)).forEach((file) => {
     const payload = JSON.parse(fs.readFileSync(file, "utf8"));
     assert((payload.historyRows || []).length <= 30, `${path.basename(file)} is not capped after a 31-row input`);
   });
@@ -97,6 +106,8 @@ function main() {
   assert(latest.publication_id === manifest.publication_id && latest.run_date === manifest.run_date, "latest payload must match manifest publication");
   const manifestPaths = new Set([manifest.latest_path, ...Object.values(manifest.ticker_paths)]);
   assert(manifest.files && Object.keys(manifest.files).length === manifestPaths.size, "manifest must inventory every immutable payload");
+  assert(manifest.site_files && Object.keys(manifest.site_files).length > 3, "manifest must inventory the complete deployable site");
+  assert(manifest.site_files["index.html"] && manifest.site_files["ticker.html"], "site inventory must include both application pages");
   manifestPaths.forEach((relativePath) => {
     const content = fs.readFileSync(path.join(first, relativePath));
     const integrity = manifest.files[relativePath];

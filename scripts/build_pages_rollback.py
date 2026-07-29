@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Download the complete current Pages site into a deployable rollback artifact."""
+"""Download one complete, integrity-checked Pages publication for rollback."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import re
 import shutil
 import urllib.parse
 import urllib.request
-import urllib.error
-from collections import deque
-from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 
 
@@ -20,42 +16,34 @@ MAX_FILES = 1000
 MAX_BYTES = 50_000_000
 
 
-class AssetParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.references: set[str] = set()
-
-    def handle_starttag(self, _tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        for name, value in attrs:
-            if name in {"href", "src"} and value:
-                self.references.add(value)
-
-
-def safe_path(current_path: str, reference: str) -> str | None:
-    parsed = urllib.parse.urlparse(reference)
-    if parsed.scheme or parsed.netloc or reference.startswith("#"):
-        return None
-    joined = urllib.parse.urljoin(current_path, parsed.path)
-    clean = PurePosixPath(joined.lstrip("/"))
-    if clean.is_absolute() or ".." in clean.parts or not clean.parts:
-        return None
+def safe_path(relative_path: str) -> str:
+    parsed = urllib.parse.urlparse(relative_path)
+    clean = PurePosixPath(parsed.path.lstrip("/"))
+    if parsed.scheme or parsed.netloc or clean.is_absolute() or ".." in clean.parts or not clean.parts:
+        raise ValueError(f"Unsafe published path: {relative_path}")
     return clean.as_posix()
 
 
 def fetch(base_url: str, relative_path: str) -> bytes:
-    clean = safe_path("index.html", relative_path)
-    if not clean:
-        raise ValueError(f"Unsafe published path: {relative_path}")
-    url = urllib.parse.urljoin(base_url.rstrip("/") + "/", clean)
+    url = urllib.parse.urljoin(base_url.rstrip("/") + "/", safe_path(relative_path))
     with urllib.request.urlopen(url, timeout=30) as response:
         return response.read()
 
 
 def integrity(content: bytes, ticker: str = "") -> dict[str, int | str]:
-    result: dict[str, int | str] = {"bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+    result: dict[str, int | str] = {
+        "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
     if ticker:
         result["ticker"] = ticker
     return result
+
+
+def write_file(root: Path, relative_path: str, content: bytes) -> None:
+    destination = root / PurePosixPath(safe_path(relative_path))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
 
 
 def main() -> None:
@@ -69,53 +57,32 @@ def main() -> None:
     publication_id = str(manifest.get("publication_id") or "").strip()
     latest_path = str(manifest.get("latest_path") or "").strip()
     ticker_paths = manifest.get("ticker_paths")
-    if not publication_id or not latest_path or not isinstance(ticker_paths, dict) or not ticker_paths:
+    site_files = manifest.get("site_files")
+    if (
+        not publication_id
+        or not latest_path
+        or not isinstance(ticker_paths, dict)
+        or not ticker_paths
+        or not isinstance(site_files, dict)
+        or not site_files
+    ):
         raise RuntimeError("Current Pages manifest is incomplete; rollback artifact cannot be built.")
 
     if args.output.exists():
         shutil.rmtree(args.output)
     args.output.mkdir(parents=True)
 
-    queue = deque([
-        ("index.html", True),
-        ("ticker.html", True),
-        ("history.html", False),
-        ("manifest.webmanifest", True),
-    ])
-    visited: set[str] = set()
     total_bytes = 0
-    while queue:
-        relative_path, required = queue.popleft()
-        if relative_path in visited:
-            continue
-        try:
-            content = fetch(args.base_url, relative_path)
-        except urllib.error.HTTPError as exc:
-            if not required and exc.code == 404:
-                continue
-            raise
-        visited.add(relative_path)
+    restored_files = 0
+    for relative_path, expected_integrity in sorted(site_files.items()):
+        content = fetch(args.base_url, relative_path)
+        if integrity(content) != expected_integrity:
+            raise RuntimeError(f"Published site file failed integrity validation: {relative_path}")
+        write_file(args.output, relative_path, content)
+        restored_files += 1
         total_bytes += len(content)
-        if len(visited) > MAX_FILES or total_bytes > MAX_BYTES:
+        if restored_files > MAX_FILES or total_bytes > MAX_BYTES:
             raise RuntimeError("Rollback site exceeds the bounded download budget.")
-        destination = args.output / PurePosixPath(relative_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(content)
-
-        references: set[str] = set()
-        if relative_path.endswith(".html"):
-            asset_parser = AssetParser()
-            asset_parser.feed(content.decode("utf-8"))
-            references = asset_parser.references
-        elif relative_path.endswith(".css"):
-            references = set(re.findall(r"url\(['\"]?([^)'\"]+)", content.decode("utf-8")))
-        elif relative_path.endswith(".webmanifest"):
-            parsed_manifest = json.loads(content)
-            references = {str(icon.get("src") or "") for icon in parsed_manifest.get("icons", [])}
-        for reference in references:
-            discovered = safe_path(relative_path, reference)
-            if discovered and (discovered.startswith("assets/") or discovered in {"index.html", "ticker.html", "history.html", "manifest.webmanifest"}):
-                queue.append((discovered, True))
 
     file_inventory: dict[str, dict[str, int | str]] = {}
     data_paths = {latest_path: "", **{str(path): ticker for ticker, path in ticker_paths.items()}}
@@ -124,18 +91,20 @@ def main() -> None:
         payload = json.loads(payload_bytes)
         if str(payload.get("publication_id") or "") != publication_id:
             raise RuntimeError(f"Rollback payload {relative_path} does not match its manifest.")
-        destination = args.output / "data" / PurePosixPath(relative_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(payload_bytes)
-        file_inventory[relative_path] = integrity(payload_bytes, ticker)
+        expected_integrity = manifest.get("files", {}).get(relative_path)
+        if integrity(payload_bytes, ticker) != expected_integrity:
+            raise RuntimeError(f"Rollback payload {relative_path} failed integrity validation.")
+        write_file(args.output, f"data/{relative_path}", payload_bytes)
+        file_inventory[relative_path] = expected_integrity
 
     manifest["files"] = file_inventory
-    (args.output / "data" / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
+    write_file(
+        args.output,
+        "data/manifest.json",
+        (json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode(),
     )
-    (args.output / "rollback_publication_id.txt").write_text(publication_id + "\n", encoding="utf-8")
-    print(f"Rollback artifact preserves complete publication {publication_id} ({len(visited)} site files).")
+    write_file(args.output, "rollback_publication_id.txt", (publication_id + "\n").encode())
+    print(f"Rollback artifact preserves complete publication {publication_id} ({restored_files} site files).")
 
 
 if __name__ == "__main__":

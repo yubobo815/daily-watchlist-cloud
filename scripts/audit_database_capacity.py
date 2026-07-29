@@ -149,7 +149,7 @@ def assert_capacity_contract() -> None:
         "readonly OHLCV_MAX_BYTES=65000000",
         "readonly BEHAVIOR_MAX_BYTES=40000000",
         "readonly OUTCOME_MAX_BYTES=45000000",
-        "bytes + MAX_STAGED_PUBLICATION_BYTES",
+        "ohlcv_growth_reserve + MAX_STAGED_PUBLICATION_BYTES",
         "record_storage_metrics",
         "evaluation_run_date not in",
         "delete from public.watchlist_learning_state",

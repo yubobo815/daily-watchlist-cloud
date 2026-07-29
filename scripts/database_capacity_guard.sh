@@ -29,8 +29,7 @@ readonly OUTCOME_MAX_BYTES=45000000
 readonly LEARNING_STATE_MAX_BYTES=6000000
 readonly INDICATOR_STATE_MAX_BYTES=4000000
 readonly REFRESH_RUN_MAX_BYTES=4000000
-# Conservative upper bound for 250 tickers: compact history/outcomes,
-# typed columns and indexes, snapshots, state rows, artifacts, and OHLCV delta.
+# Conservative upper bound for one complete non-OHLCV staged publication.
 readonly MAX_STAGED_PUBLICATION_BYTES=85000000
 readonly LOCK_KEY=741852963
 
@@ -145,10 +144,6 @@ assert_capacity() {
   tickers="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(distinct ticker) from public.watchlist_ohlcv")"
   ohlcv_rows="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_ohlcv")"
   echo "Database capacity [$phase]: bytes=$bytes ceiling=$ceiling tickers=$tickers ohlcv_rows=$ohlcv_rows"
-  if [ "$phase" = "preflight" ] && [ $((bytes + MAX_STAGED_PUBLICATION_BYTES)) -ge "$HARD_LIMIT_BYTES" ]; then
-    echo "Insufficient reserved headroom: $bytes + $MAX_STAGED_PUBLICATION_BYTES >= $HARD_LIMIT_BYTES"
-    return 1
-  fi
   if [ "$tickers" -gt "$MAX_TICKERS" ]; then
     echo "Ticker capacity exceeded: $tickers > $MAX_TICKERS"
     return 1
@@ -178,6 +173,14 @@ assert_capacity() {
   learning_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_learning_state')")"
   indicator_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_indicator_state')")"
   refresh_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_refresh_runs')")"
+  if [ "$phase" = "preflight" ]; then
+    local ohlcv_growth_reserve=$((OHLCV_MAX_BYTES - ohlcv_bytes))
+    [ "$ohlcv_growth_reserve" -ge 0 ] || ohlcv_growth_reserve=0
+    if [ $((bytes + ohlcv_growth_reserve + MAX_STAGED_PUBLICATION_BYTES)) -ge "$HARD_LIMIT_BYTES" ]; then
+      echo "Insufficient reserved headroom: database=$bytes ohlcv_growth=$ohlcv_growth_reserve staged=$MAX_STAGED_PUBLICATION_BYTES hard_limit=$HARD_LIMIT_BYTES"
+      return 1
+    fi
+  fi
   [ "$ohlcv_bytes" -le "$OHLCV_MAX_BYTES" ] || { echo "OHLCV byte capacity exceeded"; return 1; }
   [ "$snapshot_bytes" -le "$SNAPSHOT_MAX_BYTES" ] || { echo "Snapshot byte capacity exceeded"; return 1; }
   [ "$behavior_bytes" -le "$BEHAVIOR_MAX_BYTES" ] || { echo "Behavior byte capacity exceeded"; return 1; }

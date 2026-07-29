@@ -33,6 +33,7 @@ def main() -> None:
     schema_version = manifest.get("schema_version")
     ticker_paths = manifest.get("ticker_paths")
     files = manifest.get("files")
+    site_files = manifest.get("site_files")
     if publication_id != args.expected_publication or not run_date or not schema_version:
         raise RuntimeError("Deployed manifest identity does not match the expected publication.")
     if not isinstance(ticker_paths, dict) or not ticker_paths or len(ticker_paths) != manifest.get("ticker_count"):
@@ -42,6 +43,13 @@ def main() -> None:
     expected_paths = {str(manifest.get("latest_path") or ""), *map(str, ticker_paths.values())}
     if not isinstance(files, dict) or set(files) != expected_paths or "" in expected_paths:
         raise RuntimeError("Deployed manifest integrity inventory is incomplete.")
+    if not isinstance(site_files, dict) or not site_files:
+        raise RuntimeError("Deployed site-file integrity inventory is incomplete.")
+
+    for relative_path, integrity in sorted(site_files.items()):
+        content = fetch(args.base_url, relative_path, args.expected_publication)
+        if len(content) != integrity.get("bytes") or hashlib.sha256(content).hexdigest() != integrity.get("sha256"):
+            raise RuntimeError(f"Site integrity check failed for {relative_path}.")
 
     for relative_path in sorted(expected_paths):
         content = fetch(args.base_url, f"data/{relative_path}", args.expected_publication)
@@ -62,7 +70,10 @@ def main() -> None:
                 raise RuntimeError(f"Ticker mapping check failed for {relative_path}.")
             if not isinstance(payload.get("historyRows"), list) or "snapshot" not in payload:
                 raise RuntimeError(f"Ticker payload structure is incomplete for {relative_path}.")
-    print(f"Verified publication {publication_id}: {len(expected_paths)} payloads with SHA-256 integrity.")
+    print(
+        f"Verified publication {publication_id}: {len(expected_paths)} payloads and "
+        f"{len(site_files)} site files with SHA-256 integrity."
+    )
 
 
 if __name__ == "__main__":

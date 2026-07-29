@@ -1,4 +1,7 @@
 import sys
+import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +10,20 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import daily_watchlist_overview as dwo
+
+
+def audit_generated_history_javascript_is_valid():
+    with tempfile.TemporaryDirectory() as directory:
+        html_path = Path(directory) / "history.html"
+        dwo.write_history_html(html_path)
+        html = html_path.read_text(encoding="utf-8")
+        scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
+        assert_true(scripts, "generated history page must contain executable JavaScript")
+        assert_true("__ACTION_DISPLAY_LABELS__" not in html and "json.dumps(" not in html, "generated history page contains an unreplaced template expression")
+        for index, script in enumerate(scripts):
+            script_path = Path(directory) / f"inline-{index}.js"
+            script_path.write_text(script, encoding="utf-8")
+            subprocess.run(["node", "--check", str(script_path)], check=True, capture_output=True, text=True)
 
 
 def assert_true(condition, message):
@@ -1242,6 +1259,7 @@ def audit_fillability_fails_closed():
 
 
 def main():
+    audit_generated_history_javascript_is_valid()
     audit_profit_active_does_not_force_defense()
     audit_profit_protect_requires_giveback_or_supply()
     audit_profit_plan_adapts_to_volatility_regime()
@@ -1318,7 +1336,7 @@ def main():
     audit_fillability_fails_closed()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 74,
+        "cases": 75,
     })
 
 

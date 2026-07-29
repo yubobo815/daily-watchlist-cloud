@@ -171,6 +171,17 @@ def file_integrity(path: Path) -> dict[str, int | str]:
     return {"bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
 
+def site_file_inventory(site_root: Path, data_files: set[str]) -> dict[str, dict[str, int | str]]:
+    """Hash every deployable file outside the immutable payload inventory."""
+    inventory: dict[str, dict[str, int | str]] = {}
+    for path in sorted(item for item in site_root.rglob("*") if item.is_file()):
+        relative = path.relative_to(site_root).as_posix()
+        if relative == "data/manifest.json" or relative.removeprefix("data/") in data_files:
+            continue
+        inventory[relative] = file_integrity(path)
+    return inventory
+
+
 def build(args: argparse.Namespace) -> dict[str, Any]:
     latest_rows = read_csv(Path(args.latest))
     history_rows = read_csv(Path(args.history))
@@ -262,6 +273,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "ticker_count": len(tickers),
         "ticker_paths": ticker_paths,
         "files": files,
+        "site_files": site_file_inventory(output.parent, set(files)),
     }
     # The mutable pointer is written last so readers never see a partial publication.
     write_json(output / "manifest.json", manifest)
