@@ -82,6 +82,7 @@ def run_fixture(
     invalid_promotion: bool = False,
     learning_rows: int = 40,
     integrity_state: str = "legacy",
+    source_run_status: str = "ok",
 ) -> int:
     history, snapshots, outcomes = fixture_rows(
         invalid_promotion=invalid_promotion,
@@ -108,7 +109,7 @@ def run_fixture(
     }
     indicator_rows = []
     artifact = None
-    source_run = {"publication_id": "weekly-source", "status": "ok"}
+    source_run = {"publication_id": "weekly-source", "status": source_run_status}
     if integrity_state != "legacy":
         indicator_rows = [
             {
@@ -213,6 +214,9 @@ def main() -> None:
     assert run_fixture(finalize=True) == 1, "finalization must perform exactly one CAS promotion"
     assert run_fixture(finalize=False, learning_rows=10) == 0, "representative sparse learning coverage must publish"
     assert run_fixture(finalize=False, integrity_state="valid") == 0, "current integrity contract must publish"
+    assert run_fixture(finalize=False, integrity_state="valid", source_run_status="validated") == 0, (
+        "activation must accept an artifact after its source run enters the validated state"
+    )
     try:
         run_fixture(finalize=False, learning_rows=9)
     except SystemExit as exc:

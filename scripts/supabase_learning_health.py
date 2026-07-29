@@ -318,7 +318,7 @@ def main(*, finalize: bool = False, activate: bool = False) -> None:
             source_run_valid = (
                 len(source_runs) == 1
                 and str(source_runs[0].get("publication_id") or "") == source_publication_id
-                and str(source_runs[0].get("status") or "") in {"pending_audit", "ok", "degraded"}
+                and str(source_runs[0].get("status") or "") in {"pending_audit", "validated", "ok", "degraded"}
             )
             payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
             unhashed = {key: value for key, value in payload.items() if key not in {"content_hash", "artifact_id"}}
