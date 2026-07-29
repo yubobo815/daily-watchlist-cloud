@@ -6,14 +6,29 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import urllib.parse
 import urllib.request
+import urllib.error
+from collections import deque
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 
 
 MAX_FILES = 1000
 MAX_BYTES = 50_000_000
+
+
+class AssetParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.references: set[str] = set()
+
+    def handle_starttag(self, _tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if name in {"href", "src"} and value:
+                self.references.add(value)
 
 
 def safe_path(relative_path: str) -> str:
@@ -46,6 +61,60 @@ def write_file(root: Path, relative_path: str, content: bytes) -> None:
     destination.write_bytes(content)
 
 
+def resolve_path(current_path: str, reference: str) -> str | None:
+    parsed = urllib.parse.urlparse(reference)
+    if parsed.scheme or parsed.netloc or reference.startswith("#"):
+        return None
+    joined = urllib.parse.urljoin(current_path, parsed.path)
+    try:
+        return safe_path(joined)
+    except ValueError:
+        return None
+
+
+def legacy_site_files(base_url: str) -> dict[str, bytes]:
+    """Inventory the pre-integrity-manifest site during the one-time migration."""
+    queue = deque([
+        ("index.html", True),
+        ("ticker.html", True),
+        ("history.html", False),
+        ("manifest.webmanifest", True),
+        ("daily_watchlist_overview_latest.csv", False),
+        ("daily_watchlist_overview_failures.csv", False),
+        ("daily_watchlist_overview_stale_cache.csv", False),
+        ("data/run_metadata.json", False),
+    ])
+    content_by_path: dict[str, bytes] = {}
+    while queue:
+        relative_path, required = queue.popleft()
+        if relative_path in content_by_path or relative_path == "data/manifest.json":
+            continue
+        try:
+            content = fetch(base_url, relative_path)
+        except urllib.error.HTTPError as exc:
+            if not required and exc.code == 404:
+                continue
+            raise
+        content_by_path[relative_path] = content
+        if len(content_by_path) > MAX_FILES or sum(map(len, content_by_path.values())) > MAX_BYTES:
+            raise RuntimeError("Legacy rollback site exceeds the bounded download budget.")
+        references: set[str] = set()
+        if relative_path.endswith(".html"):
+            parser = AssetParser()
+            parser.feed(content.decode("utf-8"))
+            references = parser.references
+        elif relative_path.endswith(".css"):
+            references = set(re.findall(r"url\(['\"]?([^)\'\"]+)", content.decode("utf-8")))
+        elif relative_path.endswith(".webmanifest"):
+            value = json.loads(content)
+            references = {str(icon.get("src") or "") for icon in value.get("icons", [])}
+        for reference in references:
+            discovered = resolve_path(relative_path, reference)
+            if discovered and not discovered.startswith("data/runs/"):
+                queue.append((discovered, False))
+    return content_by_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
@@ -63,8 +132,6 @@ def main() -> None:
         or not latest_path
         or not isinstance(ticker_paths, dict)
         or not ticker_paths
-        or not isinstance(site_files, dict)
-        or not site_files
     ):
         raise RuntimeError("Current Pages manifest is incomplete; rollback artifact cannot be built.")
 
@@ -72,12 +139,21 @@ def main() -> None:
         shutil.rmtree(args.output)
     args.output.mkdir(parents=True)
 
+    if isinstance(site_files, dict) and site_files:
+        site_content = {}
+        for relative_path, expected_integrity in sorted(site_files.items()):
+            content = fetch(args.base_url, relative_path)
+            if integrity(content) != expected_integrity:
+                raise RuntimeError(f"Published site file failed integrity validation: {relative_path}")
+            site_content[relative_path] = content
+    else:
+        site_content = legacy_site_files(args.base_url)
+        site_files = {path: integrity(content) for path, content in site_content.items()}
+        manifest["site_files"] = site_files
+
     total_bytes = 0
     restored_files = 0
-    for relative_path, expected_integrity in sorted(site_files.items()):
-        content = fetch(args.base_url, relative_path)
-        if integrity(content) != expected_integrity:
-            raise RuntimeError(f"Published site file failed integrity validation: {relative_path}")
+    for relative_path, content in sorted(site_content.items()):
         write_file(args.output, relative_path, content)
         restored_files += 1
         total_bytes += len(content)
@@ -91,11 +167,12 @@ def main() -> None:
         payload = json.loads(payload_bytes)
         if str(payload.get("publication_id") or "") != publication_id:
             raise RuntimeError(f"Rollback payload {relative_path} does not match its manifest.")
+        calculated_integrity = integrity(payload_bytes, ticker)
         expected_integrity = manifest.get("files", {}).get(relative_path)
-        if integrity(payload_bytes, ticker) != expected_integrity:
+        if expected_integrity is not None and calculated_integrity != expected_integrity:
             raise RuntimeError(f"Rollback payload {relative_path} failed integrity validation.")
         write_file(args.output, f"data/{relative_path}", payload_bytes)
-        file_inventory[relative_path] = expected_integrity
+        file_inventory[relative_path] = calculated_integrity
 
     manifest["files"] = file_inventory
     write_file(
