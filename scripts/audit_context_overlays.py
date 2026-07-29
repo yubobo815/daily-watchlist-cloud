@@ -29,6 +29,7 @@ def audit_generated_history_javascript_is_valid():
 
 def audit_supabase_upsert_retries_transient_timeout():
     attempts = []
+    payloads = []
 
     class Response:
         status = 201
@@ -45,16 +46,25 @@ def audit_supabase_upsert_retries_transient_timeout():
     try:
         dwo.supabase_credentials = lambda: ("https://example.invalid", "test-key")
 
-        def urlopen(*_args, **_kwargs):
+        def urlopen(request, **_kwargs):
             attempts.append(1)
+            payloads.append(request.data.decode("utf-8"))
             if len(attempts) == 1:
                 raise TimeoutError("temporary read timeout")
             return Response()
 
         dwo.urllib.request.urlopen = urlopen
         dwo.time.sleep = lambda _seconds: None
-        dwo.supabase_upsert("watchlist_signal_outcomes", [{"ticker": "MU"}], ["ticker"])
+        dwo.supabase_upsert(
+            "watchlist_signal_outcomes",
+            [{"ticker": "MU", "nan": float("nan"), "positive_inf": float("inf"), "negative_inf": np.float64("-inf")}],
+            ["ticker"],
+        )
         assert_true(len(attempts) == 2, "transient Supabase timeout must retry the idempotent batch")
+        assert_true(
+            all('"nan": null' in payload and "Infinity" not in payload and "NaN" not in payload for payload in payloads),
+            "Supabase JSON must replace non-finite market values before transmission",
+        )
     finally:
         dwo.supabase_credentials = original_credentials
         dwo.urllib.request.urlopen = original_urlopen
@@ -1372,7 +1382,7 @@ def main():
     audit_fillability_fails_closed()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 76,
+        "cases": 77,
     })
 
 

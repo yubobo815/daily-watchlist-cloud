@@ -847,8 +847,9 @@ def fetch_company_profile(ticker: str, refresh: bool = False) -> dict:
 def clean_json_value(value):
     if value is None:
         return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else None
     if isinstance(value, dict):
         return {key: clean_json_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -857,8 +858,6 @@ def clean_json_value(value):
         return None
     if isinstance(value, (np.integer,)):
         return int(value)
-    if isinstance(value, (np.floating,)):
-        return float(value)
     if isinstance(value, (pd.Timestamp, datetime)):
         return value.isoformat()
     return value
@@ -934,7 +933,7 @@ def supabase_upsert(table: str, records: list[dict], conflict_columns: list[str]
         return
 
     endpoint = f"{url}/rest/v1/{table}?on_conflict={urllib.parse.quote(','.join(conflict_columns))}"
-    payload = json.dumps(records).encode("utf-8")
+    payload = json.dumps(clean_json_value(records), allow_nan=False).encode("utf-8")
     for attempt in range(1, max(1, SUPABASE_UPSERT_MAX_ATTEMPTS) + 1):
         req = urllib.request.Request(
             endpoint,
