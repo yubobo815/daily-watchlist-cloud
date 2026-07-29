@@ -14,14 +14,28 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=v3-3-concept-workspace">
-    <script defer src="./assets/market-session.js?v=v3-3-concept-workspace"></script>
-    <script defer src="./assets/presentation.js?v=v3-3-concept-workspace"></script>
-    <script defer src="./assets/app.js?v=v3-3-concept-workspace"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=v3-3-top-tools">
+    <script defer src="./assets/market-session.js?v=v3-3-top-tools"></script>
+    <script defer src="./assets/presentation.js?v=v3-3-top-tools"></script>
+    <script defer src="./assets/app.js?v=v3-3-top-tools"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
-      <section id="market-rail" class="market-rail" aria-label="Data freshness"></section>
+      <header class="top-utility-row">
+        <section id="market-rail" class="market-rail" aria-label="Data freshness"></section>
+        <section class="secondary-tools" aria-label="Watchlist tools">
+          <section id="profit-alerts" class="profit-alert-center" aria-live="polite"></section>
+          <details id="market-activity" class="secondary-insights">
+            <summary>Market activity <span>changes, movers, saved names</span></summary>
+            <div class="utility-drawer-body">
+              <section id="today-focus" class="today-focus"></section>
+              <section id="signal-changes" class="changed-today"></section>
+              <section id="price-movers" class="price-movers"></section>
+              <section id="focus-list" class="focus-list"></section>
+            </div>
+          </details>
+        </section>
+      </header>
       <section class="hero editorial-hero">
         <div>
           <a class="brand" href="./" aria-label="Daily Trade Copilot home">
@@ -96,16 +110,6 @@
       <aside id="ticker-detail-panel" class="ticker-detail-panel" aria-label="Selected ticker scanner review"></aside>
       </section>
 
-      <section class="secondary-tools" aria-label="Supporting watchlist tools">
-        <section id="profit-alerts" class="profit-alert-center" aria-live="polite"></section>
-        <details id="market-activity" class="secondary-insights">
-          <summary>Market activity <span>changes, movers, saved names</span></summary>
-          <section id="today-focus" class="today-focus"></section>
-          <section id="signal-changes" class="changed-today"></section>
-          <section id="price-movers" class="price-movers"></section>
-          <section id="focus-list" class="focus-list"></section>
-        </details>
-      </section>
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
       <a href="#cards" class="active"><span>Overview</span></a>

@@ -277,7 +277,8 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes('class="ticker-switcher"'), "change-stock search must not remain inside the decision card");
   assert(tickerSource.includes('class="ticker-hero-tools"'), "ticker search and scanner context must share one header tool region");
   assert(stylesSource.includes("v3.3 concept workspace"), "both app surfaces must use the approved concept workspace design layer");
-  assert(pageSource.indexOf('class="watchlist-workspace"') < pageSource.indexOf('class="secondary-tools"'), "supporting tools must follow the primary decision workspace");
+  assert(pageSource.indexOf('class="secondary-tools"') < pageSource.indexOf('class="hero editorial-hero"'), "supporting tools must be reachable from the top utility rail");
+  assert(stylesSource.includes(".secondary-tools .utility-drawer-body"), "market activity must open as a non-disruptive top drawer");
   assert(stylesSource.includes("body[data-page=\"watchlist\"] .execution-queue::after { display: none; }"), "watchlist summary strip must not retain decorative card ornaments");
   assert(stylesSource.includes("body.ticker-page .moment-card::before"), "ticker history must use timeline markers instead of nested cards");
   assert(stylesSource.includes("body.ticker-page .history-visual { gap: 0; border: 0; background: transparent; }"), "ticker summary must remain a flat editorial section");
@@ -285,7 +286,7 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
   assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
-  assert(tickerSource.includes("v3-3-concept-workspace") && pageSource.includes("v3-3-concept-workspace"), "both app surfaces must load the current shared application bundle");
+  assert(tickerSource.includes("v3-3-top-tools") && pageSource.includes("v3-3-top-tools"), "both app surfaces must load the current shared application bundle");
   assert(stylesSource.includes("@media (prefers-color-scheme: dark)") && stylesSource.includes("html { color-scheme: dark; }"), "shared app surfaces must follow the device dark-mode preference");
   assert(pageSource.includes('media="(prefers-color-scheme: light)"') && pageSource.includes('media="(prefers-color-scheme: dark)"'), "watchlist browser chrome must follow the device theme");
   assert(tickerSource.includes('media="(prefers-color-scheme: light)"') && tickerSource.includes('media="(prefers-color-scheme: dark)"'), "ticker browser chrome must follow the device theme");

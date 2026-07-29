@@ -2315,6 +2315,10 @@ function renderNotificationCenter() {
   mount.querySelectorAll("[data-notification-id]").forEach((link) => {
     link.addEventListener("click", () => markNotificationsRead([link.dataset.notificationId]));
   });
+  const notificationDrawer = mount.querySelector(".notification-center");
+  notificationDrawer?.addEventListener("toggle", () => {
+    if (notificationDrawer.open) document.querySelector("#market-activity")?.removeAttribute("open");
+  });
 }
 
 function renderWatchlist({ refreshOverview = true } = {}) {
@@ -2509,6 +2513,10 @@ async function initWatchlist() {
   });
   syncSearchClear();
   initTabNavigation();
+  const marketActivityDrawer = document.querySelector("#market-activity");
+  marketActivityDrawer?.addEventListener("toggle", () => {
+    if (marketActivityDrawer.open) document.querySelector(".notification-center")?.removeAttribute("open");
+  });
   try {
     const latestPayload = isGithubPagesHost()
       ? await loadStaticLatestRows()
