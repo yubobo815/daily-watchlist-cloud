@@ -254,7 +254,10 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
   assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
-  assert(tickerSource.includes("release-audit-20260728") && pageSource.includes("release-audit-20260728"), "both app surfaces must load the current shared application bundle");
+  assert(tickerSource.includes("v3-1-device-theme") && pageSource.includes("v3-1-device-theme"), "both app surfaces must load the current shared application bundle");
+  assert(stylesSource.includes("@media (prefers-color-scheme: dark)") && stylesSource.includes("html { color-scheme: dark; }"), "shared app surfaces must follow the device dark-mode preference");
+  assert(pageSource.includes('media="(prefers-color-scheme: light)"') && pageSource.includes('media="(prefers-color-scheme: dark)"'), "watchlist browser chrome must follow the device theme");
+  assert(tickerSource.includes('media="(prefers-color-scheme: light)"') && tickerSource.includes('media="(prefers-color-scheme: dark)"'), "ticker browser chrome must follow the device theme");
   assert(!appSource.includes("Optional chart"), "ticker detail must remove the optional scanner chart");
   assert(!appSource.includes("Daily scanner bars"), "ticker detail must remove scanner-chart jargon");
   assert(!stylesSource.includes(".chart-details") && !stylesSource.includes(".history-chart"), "removed chart styles must not remain as dead UI code");

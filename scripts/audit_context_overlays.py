@@ -17,6 +17,7 @@ def audit_generated_history_javascript_is_valid():
         html_path = Path(directory) / "history.html"
         dwo.write_history_html(html_path)
         html = html_path.read_text(encoding="utf-8")
+        assert_true("@media (prefers-color-scheme: dark)" in html, "generated history must follow the device dark-mode preference")
         scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
         assert_true(scripts, "generated history page must contain executable JavaScript")
         assert_true("__ACTION_DISPLAY_LABELS__" not in html and "json.dumps(" not in html, "generated history page contains an unreplaced template expression")
