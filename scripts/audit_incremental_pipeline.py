@@ -203,6 +203,8 @@ def audit_daily_history_inherits_full_publication() -> None:
     sessions = 30
 
     def select(path):
+        if path.startswith("watchlist_publication_control?"):
+            return [{"active_publication_id": "pub-complete"}]
         if path.startswith("watchlist_refresh_runs?"):
             return [{"run_date": "2026-07-22", "publication_id": "pub-complete", "payload": {}}]
         offset = int(path.rsplit("offset=", 1)[1])
@@ -262,17 +264,22 @@ def audit_rolling_window_and_modes() -> None:
         scanner.write_history_html(history_path)
         source = history_path.read_text()
         assert "{json.dumps(" not in source
-        assert "watchlist_refresh_runs?select=publication_id" in source
+        assert "watchlist_publication_control?select=active_publication_id" in source
         assert "publication_id=eq.${encodeURIComponent(publicationId)}" in source
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github/workflows/daily-watchlist-pages.yml").read_text()
     scanner_source = (root / "daily_watchlist_overview.py").read_text()
     assert "allow_calibration_bootstrap" in workflow
+    assert "if previous_incremental_metadata and not needs_bootstrap:" in scanner_source
+    assert "position_value_1k_risk = required_position_value" in scanner_source
+    assert "actual_risk_dollars = suggested_position_value" in scanner_source
     assert 'cron: "17 23 * * 1-4"' in workflow and 'cron: "17 23 * * 5"' in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
     assert "parity must never be bypassed implicitly" in scanner_source
-    assert workflow.index("Finalize Supabase publication") < workflow.index("Deploy to GitHub Pages")
-    assert "if: always() && steps.time_gate.outputs.run == 'true' && steps.finalize_publication.outcome == 'success'" in workflow
+    assert workflow.index("Mark Supabase publication validated") < workflow.index("Deploy to GitHub Pages")
+    assert workflow.index("Verify deployed Pages publication") < workflow.index("Activate Supabase publication")
+    assert "if: always() && steps.time_gate.outputs.run == 'true' && steps.activate_publication.outcome == 'success'" in workflow
+    assert 'if [ "${{ github.event.schedule }}" = "17 23 * * 5" ]' in workflow
 
 
 def audit_artifact_integrity() -> None:
@@ -310,7 +317,11 @@ def audit_artifact_integrity() -> None:
     original = scanner.supabase_select
 
     def select(path):
-        return [{"publication_id": "publication-ok", "status": "ok", "payload": {}}] if path.startswith("watchlist_refresh_runs") else [candidate]
+        if path.startswith("watchlist_publication_control"):
+            return [{"active_publication_id": "publication-ok"}]
+        if path.startswith("watchlist_refresh_runs"):
+            return [{"publication_id": "publication-ok", "status": "ok", "payload": {}}]
+        return [candidate]
 
     scanner.supabase_select = select
     try:

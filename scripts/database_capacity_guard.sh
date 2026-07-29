@@ -15,10 +15,23 @@ readonly BEHAVIOR_ROWS_PER_TICKER=30
 readonly RUN_RETENTION_DAYS=60
 readonly STAGE_TTL_HOURS=6
 readonly CALIBRATION_MAX_ARTIFACTS=8
-readonly CALIBRATION_MAX_BYTES=25165824
+readonly CALIBRATION_MAX_BYTES=8000000
+readonly SNAPSHOT_MAX_ROWS=500
+readonly BEHAVIOR_MAX_ROWS=15000
+readonly OUTCOME_MAX_ROWS=20000
+readonly LEARNING_STATE_MAX_ROWS=1000
+readonly INDICATOR_STATE_MAX_ROWS=500
+readonly REFRESH_RUN_MAX_ROWS=125
+readonly OHLCV_MAX_BYTES=65000000
+readonly SNAPSHOT_MAX_BYTES=6000000
+readonly BEHAVIOR_MAX_BYTES=40000000
+readonly OUTCOME_MAX_BYTES=45000000
+readonly LEARNING_STATE_MAX_BYTES=6000000
+readonly INDICATOR_STATE_MAX_BYTES=4000000
+readonly REFRESH_RUN_MAX_BYTES=4000000
 # Conservative upper bound for 250 tickers: compact history/outcomes,
 # typed columns and indexes, snapshots, state rows, artifacts, and OHLCV delta.
-readonly MAX_STAGED_PUBLICATION_BYTES=140000000
+readonly MAX_STAGED_PUBLICATION_BYTES=85000000
 readonly LOCK_KEY=741852963
 
 metadata_value() {
@@ -71,7 +84,7 @@ select pg_advisory_xact_lock(:lock_key);
 create temporary table expired_publications on commit drop as
 select publication_id
 from public.watchlist_refresh_runs
-where status in ('publishing', 'pending_audit', 'sync_failed')
+where status in ('publishing', 'pending_audit', 'validated', 'sync_failed')
   and created_at < now() - make_interval(hours => :ttl_hours);
 delete from public.watchlist_behavior_history using expired_publications
 where watchlist_behavior_history.publication_id = expired_publications.publication_id;
@@ -100,10 +113,12 @@ rollback_publication() {
 begin;
 select pg_advisory_xact_lock(:lock_key);
 create temporary table rollback_publication on commit drop as
-select publication_id
-from public.watchlist_refresh_runs
-where publication_id = :'publication_id'
-  and status not in ('ok', 'degraded');
+select :'publication_id'::text as publication_id
+where not exists (
+  select 1
+  from public.watchlist_publication_control
+  where control_key = 'active' and active_publication_id = :'publication_id'
+);
 delete from public.watchlist_behavior_history using rollback_publication
 where watchlist_behavior_history.publication_id = rollback_publication.publication_id;
 delete from public.watchlist_snapshots using rollback_publication
@@ -142,6 +157,34 @@ assert_capacity() {
     echo "OHLCV row capacity exceeded: $ohlcv_rows > $OHLCV_MAX_ROWS"
     return 1
   fi
+  local snapshots behavior outcomes learning_state indicator_state refresh_runs
+  snapshots="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_snapshots")"
+  behavior="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_behavior_history")"
+  outcomes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_signal_outcomes")"
+  learning_state="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_learning_state")"
+  indicator_state="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_indicator_state")"
+  refresh_runs="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_refresh_runs")"
+  [ "$snapshots" -le "$SNAPSHOT_MAX_ROWS" ] || { echo "Snapshot row capacity exceeded: $snapshots > $SNAPSHOT_MAX_ROWS"; return 1; }
+  [ "$behavior" -le "$BEHAVIOR_MAX_ROWS" ] || { echo "Behavior row capacity exceeded: $behavior > $BEHAVIOR_MAX_ROWS"; return 1; }
+  [ "$outcomes" -le "$OUTCOME_MAX_ROWS" ] || { echo "Outcome row capacity exceeded: $outcomes > $OUTCOME_MAX_ROWS"; return 1; }
+  [ "$learning_state" -le "$LEARNING_STATE_MAX_ROWS" ] || { echo "Learning-state row capacity exceeded: $learning_state > $LEARNING_STATE_MAX_ROWS"; return 1; }
+  [ "$indicator_state" -le "$INDICATOR_STATE_MAX_ROWS" ] || { echo "Indicator-state row capacity exceeded: $indicator_state > $INDICATOR_STATE_MAX_ROWS"; return 1; }
+  [ "$refresh_runs" -le "$REFRESH_RUN_MAX_ROWS" ] || { echo "Refresh-run row capacity exceeded: $refresh_runs > $REFRESH_RUN_MAX_ROWS"; return 1; }
+  local ohlcv_bytes snapshot_bytes behavior_bytes outcome_bytes learning_bytes indicator_bytes refresh_bytes
+  ohlcv_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_ohlcv')")"
+  snapshot_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_snapshots')")"
+  behavior_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_behavior_history')")"
+  outcome_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_signal_outcomes')")"
+  learning_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_learning_state')")"
+  indicator_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_indicator_state')")"
+  refresh_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_refresh_runs')")"
+  [ "$ohlcv_bytes" -le "$OHLCV_MAX_BYTES" ] || { echo "OHLCV byte capacity exceeded"; return 1; }
+  [ "$snapshot_bytes" -le "$SNAPSHOT_MAX_BYTES" ] || { echo "Snapshot byte capacity exceeded"; return 1; }
+  [ "$behavior_bytes" -le "$BEHAVIOR_MAX_BYTES" ] || { echo "Behavior byte capacity exceeded"; return 1; }
+  [ "$outcome_bytes" -le "$OUTCOME_MAX_BYTES" ] || { echo "Outcome byte capacity exceeded"; return 1; }
+  [ "$learning_bytes" -le "$LEARNING_STATE_MAX_BYTES" ] || { echo "Learning-state byte capacity exceeded"; return 1; }
+  [ "$indicator_bytes" -le "$INDICATOR_STATE_MAX_BYTES" ] || { echo "Indicator-state byte capacity exceeded"; return 1; }
+  [ "$refresh_bytes" -le "$REFRESH_RUN_MAX_BYTES" ] || { echo "Refresh-run byte capacity exceeded"; return 1; }
   calibration_bytes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_total_relation_size('public.watchlist_calibration_artifacts')")"
   if [ "$calibration_bytes" -ge "$CALIBRATION_MAX_BYTES" ]; then
     echo "Calibration artifact capacity exceeded: $calibration_bytes >= $CALIBRATION_MAX_BYTES"
@@ -174,7 +217,8 @@ with relation_metrics as (
     ('watchlist_learning_state'),
     ('watchlist_indicator_state'),
     ('watchlist_calibration_artifacts'),
-    ('watchlist_refresh_runs')
+    ('watchlist_refresh_runs'),
+    ('watchlist_publication_control')
   ) tables(relation_name)
 ), row_metrics as (
   select jsonb_build_object(
@@ -185,7 +229,8 @@ with relation_metrics as (
     'learning_state', (select count(*) from public.watchlist_learning_state),
     'indicator_state', (select count(*) from public.watchlist_indicator_state),
     'calibration_artifacts', (select count(*) from public.watchlist_calibration_artifacts),
-    'refresh_runs', (select count(*) from public.watchlist_refresh_runs)
+    'refresh_runs', (select count(*) from public.watchlist_refresh_runs),
+    'publication_control', (select count(*) from public.watchlist_publication_control)
   ) as rows
 )
 update public.watchlist_refresh_runs
@@ -219,6 +264,9 @@ final_retention() {
     -v run_days="$RUN_RETENTION_DAYS" <<'SQL'
 begin;
 select pg_advisory_xact_lock(:lock_key);
+select 1 / count(*)
+from public.watchlist_publication_control
+where control_key = 'active' and active_publication_id = :'publication_id';
 
 delete from public.watchlist_behavior_history
 where publication_id <> :'publication_id';
@@ -267,10 +315,9 @@ where target.artifact_id = expired.artifact_id;
 
 create temporary table retained_snapshots on commit drop as
 select publication_id
-from public.watchlist_refresh_runs
-where status in ('ok', 'degraded')
-order by run_date desc, created_at desc
-limit 2;
+from public.watchlist_publication_control control
+cross join lateral unnest(array[control.active_publication_id, control.previous_publication_id]) publication_id
+where control.control_key = 'active' and publication_id is not null;
 delete from public.watchlist_snapshots
 where publication_id not in (select publication_id from retained_snapshots);
 

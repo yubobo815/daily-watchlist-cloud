@@ -27,10 +27,11 @@ WATCHLIST_FIELDS = frozenset(
     entry_est entry_zone_high entry_zone_low entry_zone_plan execution_fill_probability
     execution_fill_state extension_state freshness_block freshness_status
     market_permission name next_day_bias next_day_plan notes operator_pressure
-    operator_state personality_setup_allowed position_value_1k_risk post_tp1_stop
+    operator_state personality_setup_allowed position_value_1k_risk suggested_position_value actual_risk_dollars post_tp1_stop
     prediction_confidence prediction_state risk_pct_to_stop risk_permission run_date
     score setup stop_est take_profit_1 take_profit_1_reduce_pct target_est ticker
     ticker_permission volume_state walk_forward_permission
+    execution_priority
     """.split()
 )
 
@@ -68,9 +69,9 @@ TICKER_SNAPSHOT_FIELDS = WATCHLIST_FIELDS | frozenset(
 # not need verbose plans, learning notes, or per-row model diagnostics.
 HISTORY_FIELDS = frozenset(
     """
-    action adjusted_score close data_date date day_change_pct high low name open
+    action adjusted_score buyer_score close data_date date day_change_pct high low name open
     operator_pressure operator_state reason_codes run_date score setup ticker
-    volume_state
+    seller_score volume_state
     """.split()
 )
 
@@ -165,6 +166,11 @@ def write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+def file_integrity(path: Path) -> dict[str, int | str]:
+    content = path.read_bytes()
+    return {"bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+
+
 def build(args: argparse.Namespace) -> dict[str, Any]:
     latest_rows = read_csv(Path(args.latest))
     history_rows = read_csv(Path(args.history))
@@ -243,14 +249,19 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             },
         )
 
+    latest_relative = (run_relative / "latest.json").as_posix()
+    files = {latest_relative: file_integrity(output / latest_relative)}
+    for ticker, relative_path in ticker_paths.items():
+        files[relative_path] = {**file_integrity(output / relative_path), "ticker": ticker}
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "publication_id": publication_id,
         "run_date": run_date,
-        "latest_path": (run_relative / "latest.json").as_posix(),
+        "latest_path": latest_relative,
         "ticker_base_path": (run_relative / "tickers").as_posix(),
         "ticker_count": len(tickers),
         "ticker_paths": ticker_paths,
+        "files": files,
     }
     # The mutable pointer is written last so readers never see a partial publication.
     write_json(output / "manifest.json", manifest)

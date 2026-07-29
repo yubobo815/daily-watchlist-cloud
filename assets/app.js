@@ -28,7 +28,7 @@ const UI_LABELS = {
     ticker: "Ticker",
     action: "Signal",
     score: "Signal readiness",
-    entry_est: "Entry plan",
+    entry_est: "Reference zone",
     stop_est: "Protection",
     risk_pct_to_stop: "Downside",
     trade_context: "What it means",
@@ -47,7 +47,7 @@ const UI_LABELS = {
     risk: "Risk",
     reviewTicker: "Review {ticker}",
     showBuy: "Show BUY",
-    todayFocus: "Today’s Focus",
+    todayFocus: "Latest Session Focus",
     buyFocus: "Buy",
     buildingFocus: "Building",
     exitFocus: "Exit",
@@ -56,7 +56,7 @@ const UI_LABELS = {
     priceMovers: "Price Movers",
     focusList: "Focus List",
     noScannerChanges: "No major scanner changes versus the previous run.",
-    noPriceMoves: "No large current-day price moves."
+    noPriceMoves: "No large price moves in the latest session."
   }
 };
 
@@ -168,7 +168,7 @@ function executionQueues(counts) {
     {
       key: "building",
       filter: "building",
-      label: "BUILDING",
+      label: "DEVELOPING",
       count: (counts.continue || 0) + (counts.setup || 0) + (counts.watch || 0),
       detail: `${counts.continue || 0} trending · ${counts.setup || 0} setup · ${counts.watch || 0} watch`,
     },
@@ -764,24 +764,7 @@ function scoreBand(value) {
 }
 
 function qualityConstraintLabel(row) {
-  if (!row || typeof row !== "object") return "";
-  const freshnessBlocked = String(payloadValue(row, "freshness_block") || "").toUpperCase() === "YES";
-  const quality = String(payloadValue(row, "signal_quality") || "").toUpperCase();
-  const antiSignal = String(payloadValue(row, "anti_signal_level") || "").toUpperCase();
-  const marketPermission = String(payloadValue(row, "market_permission") || "").toUpperCase();
-  const riskPermission = String(payloadValue(row, "risk_permission") || "").toUpperCase();
-  const tickerPermission = String(payloadValue(row, "ticker_permission") || "").toUpperCase();
-  const walkForwardPermission = String(payloadValue(row, "walk_forward_permission") || "").toUpperCase();
-  if (freshnessBlocked) return "DATA NEEDS REFRESH";
-  if (antiSignal === "BLOCK") return "DO NOT ENTER";
-  if (marketPermission === "BLOCK") return "MARKET BLOCKED";
-  if (riskPermission === "BLOCK") return "RISK BLOCKED";
-  if (tickerPermission === "BLOCK") return "TICKER BLOCKED";
-  if (walkForwardPermission === "BLOCK") return "SETUP FAILED";
-  if (walkForwardPermission === "INSUFFICIENT") return "SETUP UNPROVEN";
-  if (quality.includes("NEEDS EXECUTION PROOF") || quality.includes("STATIC FALLBACK")) return "NEEDS VERIFICATION";
-  if (antiSignal === "CAUTION") return "USE CAUTION";
-  return "";
+  return window.WatchlistPresentation?.qualityConstraintLabel(row) || "";
 }
 
 function strengthLabel(rowOrScore) {
@@ -925,10 +908,10 @@ function predictionNarrative(row) {
   }
   const certainty = confidence >= 0.65 ? "moderate" : confidence >= 0.40 ? "limited" : "low";
   if (modelVersion.startsWith("ohlcv-ridge")) {
-    return `Using price-and-volume history, the next ${horizon} sessions are estimated at ${fmtNumber(upside * 100, 0)}% for a meaningful rise, ${fmtNumber(downside * 100, 0)}% for a meaningful decline, and ${fmtNumber(noEdge * 100, 0)}% for no decisive move. Confidence is ${certainty}.`;
+    return `The price-and-volume model currently leans ${fmtNumber(upside * 100, 0)}% toward a meaningful rise, ${fmtNumber(downside * 100, 0)}% toward a meaningful decline, and ${fmtNumber(noEdge * 100, 0)}% toward no decisive move over the next ${horizon} sessions. These are relative model scores, not probabilities. Evidence strength is ${certainty}.`;
   }
   const message = `Among comparable filled ${horizon}-session trade plans, the model estimates ${fmtNumber(upside * 100, 0)}% target reached, ${fmtNumber(downside * 100, 0)}% stop reached, and ${fmtNumber(noEdge * 100, 0)}% unresolved. Confidence is ${certainty}.`;
-  return state === "CALIBRATED" ? message : `${message} Validation is incomplete, so this estimate does not change today's decision.`;
+  return state === "CALIBRATED" ? message : `${message} Validation is incomplete, so this estimate does not change the latest decision.`;
 }
 
 function recentBehaviorSummary(row, previous) {
@@ -1009,7 +992,7 @@ function learningReadout(row) {
   const modelVersion = payloadValue(row, "learning_model_version") || payloadValue(row, "entry_model_version") || payloadValue(row, "model_version");
 
   if (!Number.isFinite(samples) || samples <= 0) {
-    return "Not enough settled comparable signals yet. Learning is not changing today's decision.";
+    return "Not enough settled comparable signals yet. Learning is not changing the latest decision.";
   }
 
   const coverage = `${fmtNumber(samples, 0)} comparable settled signals${Number.isFinite(distinctTickers) ? ` from ${fmtNumber(distinctTickers, 0)} stocks` : ""}${Number.isFinite(evaluationDates) ? ` over ${fmtNumber(evaluationDates, 0)} market dates` : ""}`;
@@ -1024,7 +1007,7 @@ function learningReadout(row) {
   const stabilization = Number.isFinite(baselineWeight) && baselineWeight > 0
     ? ` It also used ${fmtNumber(baselineSamples, 0)} older comparable signals${Number.isFinite(baselineDates) ? ` across ${fmtNumber(baselineDates, 0)} earlier market dates` : ""} to keep a short-term run from overreacting.`
     : "";
-  if (!eligible) return `Reviewed ${coverage}. Validation is incomplete, so learning did not improve today's recommendation.${stabilization}`;
+  if (!eligible) return `Reviewed ${coverage}. Validation is incomplete, so learning did not improve the latest recommendation.${stabilization}`;
   const adjustmentText = Number.isFinite(adjustment) && Math.abs(adjustment) >= 0.05
     ? ` It adjusted confidence by ${fmtSignedNumber(adjustment, 1)} points.`
     : " It did not materially change confidence.";
@@ -1242,7 +1225,7 @@ function transitionRank(row) {
 function transitionLabel(row, previous = previousRowFor(row)) {
   const structured = payloadValue(row, "transition_label");
   if (structured) return structured;
-  if (!previous) return "New Today";
+  if (!previous) return "New in Latest Run";
   if (row.action === previous.action && row.setup === previous.setup) return "Repeated";
   if (transitionRank(row) > transitionRank(previous) || convictionScore(row) - convictionScore(previous) >= 8) return "Upgraded";
   if (transitionRank(row) < transitionRank(previous) || convictionScore(row) - convictionScore(previous) <= -8) return "Downgraded";
@@ -1255,7 +1238,7 @@ function displayTransitionLabel(label) {
 }
 
 function transitionTone(label) {
-  if (label === "Upgraded" || label === "New Today" || label === "Fresh Setup To Buy") return "up";
+  if (label === "Upgraded" || label === "New in Latest Run" || label === "Fresh Setup To Buy") return "up";
   if (label === "Downgraded" || label === "Stale Buy" || label === "Needs Gate Proof" || label === "Needs Execution Proof") return "down";
   if (label === "Extended" || label === "Changed") return "setup";
   return "quiet";
@@ -1416,7 +1399,7 @@ function similarCasesNarrative(row) {
     sentences.push(`Comparable five-session paths most often pointed to ${likely}.`);
   }
   if (learningEligible && Number.isFinite(adjustment) && Math.abs(adjustment) >= 0.5) {
-    sentences.push(`Past outcomes ${adjustment > 0 ? "raised" : "lowered"} confidence in today's view.`);
+    sentences.push(`Past outcomes ${adjustment > 0 ? "raised" : "lowered"} confidence in the latest view.`);
   }
   return sentences.slice(0, 3).join(" ");
 }
@@ -1467,14 +1450,7 @@ function setStatus(message, ok = true) {
 }
 
 function runHealthSummary(runInfo) {
-  if (!runInfo) return "";
-  const parts = [];
-  const failed = Number(runInfo.symbols_failed || 0);
-  const stale = Number(runInfo.symbols_stale_cache || 0);
-  if (runInfo.live_access_ok === false) parts.push("live source unavailable");
-  if (stale) parts.push(`${stale} stocks use recent cached data`);
-  if (failed) parts.push(`${failed} stocks unavailable`);
-  return parts.length ? ` · ${parts.join(" · ")}` : "";
+  return window.WatchlistPresentation?.runHealthSummary(runInfo) || "";
 }
 
 function renderRunHealthPanel(runInfo, rows = []) {
@@ -1510,44 +1486,11 @@ function renderMarketRail(runInfo, rows = []) {
 }
 
 function runHealthStatus(runInfo, rows = []) {
-  const failed = Number(runInfo?.symbols_failed || 0);
-  const stale = Number(runInfo?.symbols_stale_cache || 0);
-  const latestRows = new Map();
-  rows.forEach((row) => {
-    const ticker = String(row.ticker || "_");
-    const date = String(row.history_date || row.data_date || row.date || "");
-    const previous = latestRows.get(ticker);
-    if (!previous || date > previous.date) latestRows.set(ticker, { date, row });
-  });
-  const rowStaleBlocks = [...latestRows.values()]
-    .filter(({ row }) => payloadValue(row, "freshness_block") === "YES").length;
-  const staleBlocks = Number(runInfo?.payload?.stale_execution_blocks ?? rowStaleBlocks);
-  const analyzed = Number(runInfo?.symbols_analyzed || rows.length || 0);
-  const total = Number(runInfo?.symbols_total || rows.length || 0);
-  const liveOk = runInfo?.live_access_ok;
-  const latestData = runInfo?.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") || "unknown";
-  const hasRows = rows.length > 0 || analyzed > 0;
-  const hasIssue = liveOk === false || failed > 0 || stale > 0 || staleBlocks > 0;
-  const tone = !hasRows || staleBlocks > 0 ? "bad" : hasIssue ? "warn" : "ok";
-  const label = tone === "bad"
-    ? "Data not safe to use"
-    : failed > 0
-      ? "Partial coverage"
-      : stale > 0 || liveOk === false
-        ? "Some data may lag"
-        : "Data current";
-  const caveats = [
-    staleBlocks ? `${staleBlocks} stale-data blocks` : "",
-    stale ? `${stale} stocks use recent cached data` : "",
-    failed ? `${failed} stocks unavailable` : "",
-    liveOk === false ? "live data source unavailable" : "",
-  ].filter(Boolean);
-  const detail = [
-    `${analyzed || total || rows.length} analyzed`,
-    latestData && latestData !== "unknown" ? `market data ${latestData}` : "",
-    caveats.length ? caveats.join(", ") : "",
-  ].filter(Boolean).join(" · ");
-  return { tone, label, detail };
+  const normalizedRunInfo = runInfo
+    ? { ...runInfo, latest_data_date: runInfo.latest_data_date || dataDateSummary(rows).replace(/^Market data:\s*/, "") }
+    : runInfo;
+  return window.WatchlistPresentation?.runHealthStatus(normalizedRunInfo, rows)
+    || { tone: "bad", label: "Data unavailable", detail: "No current data summary available." };
 }
 
 function renderTrafficHealth(runInfo, rows = []) {
@@ -1569,8 +1512,8 @@ function setRefreshSummary(latest, marketData, rows, runInfo = null) {
   const disclaimer = document.querySelector("#app-disclaimer");
   const runStatus = document.querySelector("#run-status");
   if (runStatus) {
-    const stalePrefix = runHealthStatus(runInfo, rows).tone === "ok" ? "" : "Some data may lag · ";
-    runStatus.textContent = `${stalePrefix}Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
+    const health = runHealthStatus(runInfo, rows);
+    runStatus.textContent = `${health.label} · Updated ${latest} · ${marketData}${runHealthSummary(runInfo)}`;
     runStatus.classList.toggle("warn", Boolean(
       runInfo && (
         runInfo.live_access_ok === false
@@ -1792,6 +1735,11 @@ function renderTradeContext(row) {
 
 function riskSummaryLabel(row) {
   const kind = actionKind(row.action);
+  const readiness = qualityConstraintLabel(row);
+  if (readiness) {
+    const tone = ["USE CAUTION", "NO CLEAR EDGE", "SETUP UNPROVEN"].includes(readiness) ? "watch" : "risk";
+    return [tone, readiness];
+  }
   const antiLevel = String(payloadValue(row, "anti_signal_level") || "NONE").toUpperCase();
   const operator = String(payloadValue(row, "operator_state") || payloadValue(row, "operator_pressure") || "NEUTRAL").toUpperCase();
   const riskPermission = String(payloadValue(row, "risk_permission") || "").toUpperCase();
@@ -1835,42 +1783,8 @@ function renderReasonSummary(row) {
 function searchableRowText(row) {
   return [
     ...companySearchTerms(row),
-    ...WATCHLIST_COLUMN_KEYS.map((key) => row[key]),
     ACTION_LABELS[row.action] || row.action,
     setupLabel(row.setup),
-    strengthLabel(row),
-    entryQualityLabel(row),
-    payloadValue(row, "buy_tier"),
-    payloadValue(row, "contextual_overlay"),
-    payloadValue(row, "contextual_plan"),
-    payloadValue(row, "anti_signal_level"),
-    payloadValue(row, "anti_signal_plan"),
-    payloadValue(row, "last_outcome_label"),
-    payloadValue(row, "last_outcome_reason"),
-    payloadValue(row, "learning_plan"),
-    payloadValue(row, "learning_adjustment"),
-    payloadValue(row, "execution_plan"),
-    payloadValue(row, "data_provider"),
-    payloadValue(row, "data_provider_status"),
-    payloadValue(row, "data_provider_error"),
-    payloadValue(row, "freshness_status"),
-    payloadValue(row, "freshness_plan"),
-    payloadValue(row, "feedback_quality"),
-    payloadValue(row, "feedback_plan"),
-    payloadValue(row, "next_day_bias"),
-    payloadValue(row, "next_day_plan"),
-    payloadValue(row, "operator_state"),
-    payloadValue(row, "operator_state_plan"),
-    payloadValue(row, "operator_pressure"),
-    payloadValue(row, "operator_plan"),
-    payloadValue(row, "signal_quality"),
-    payloadValue(row, "market_context"),
-    payloadValue(row, "market_permission"),
-    payloadValue(row, "ticker_permission"),
-    payloadValue(row, "walk_forward_permission"),
-    payloadValue(row, "risk_permission"),
-    reasonCodes(row).map((code) => REASON_LABELS[code] || code.replaceAll("_", " ")).join(" "),
-    whyThisMatters(row).join(" "),
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -1987,7 +1901,7 @@ function renderTickerDetailPanel() {
     <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
     ${activePlan
       ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(row, { active: true })}</section>`
-      : `<div class="inactive-plan">No entry is recommended today.</div>`}
+      : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}
     <details class="detail-diagnostics"><summary>Why we see it this way</summary>${renderScoreBreakdown(row)}</details>
   `;
 }
@@ -2003,7 +1917,7 @@ function selectTicker(ticker) {
 function renderCards(counts) {
   const cards = document.querySelector("#cards");
   cards.innerHTML = executionQueues(counts).map((queue) => `
-    <button class="card execution-queue tone-${queue.key} ${state.filter === queue.filter ? "active" : ""}" type="button" data-filter="${queue.filter}">
+    <button class="card execution-queue tone-${queue.key} ${!state.query.trim() && state.filter === queue.filter ? "active" : ""}" type="button" data-filter="${queue.filter}">
       <span>${escapeHtml(queue.label)}</span>
       <strong>${queue.count}</strong>
       <small>${escapeHtml(queue.detail)}</small>
@@ -2039,7 +1953,7 @@ function renderDailyBrief(counts) {
   const panel = document.querySelector("#daily-brief");
   if (!panel) return;
   const allChanges = dailyChangeItems(state.rows, state.previousRows, state.rows.length);
-  const fresh = allChanges.filter((item) => item.transition === "New Today");
+  const fresh = allChanges.filter((item) => item.transition === "New in Latest Run");
   const upgrades = allChanges.filter((item) => ["Fresh Setup To Buy", "Upgraded"].includes(item.transition));
   const exits = state.rows
     .filter((row) => actionKind(row.action) === "exit")
@@ -2191,7 +2105,7 @@ function renderSignalChanges() {
   const duplicateCards = rolling ? changes.map((change) => changedTodayCard(change, true)).join("") : "";
   panel.innerHTML = `
     ${moversSectionHeading(copyText("signalChanges"), runDate)}
-    <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Today’s movers">
+    <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Latest-session movers">
       <div class="change-track">
         ${cards}
         ${duplicateCards}
@@ -2471,6 +2385,7 @@ function renderWatchlist({ refreshOverview = true } = {}) {
   const multiplier = direction === "asc" ? 1 : -1;
   state.visibleRows = state.rows
     .filter((row) => {
+      if (searchActive) return true;
       const kind = actionKind(row.action);
       if (state.filter === "building") return ["continue", "setup", "watch"].includes(kind);
       if (state.filter === "risk") return ["exit", "avoid"].includes(kind);
@@ -2502,7 +2417,9 @@ function renderWatchlist({ refreshOverview = true } = {}) {
     </tr>
   `).join("");
   if (refreshOverview) attachFocusControls();
-  document.querySelector("#count").textContent = `${renderedRows.length} / ${state.visibleRows.length} filtered · ${state.rows.length} total`;
+  document.querySelector("#count").textContent = searchActive
+    ? `${renderedRows.length} / ${state.visibleRows.length} matches across all categories · ${state.rows.length} total`
+    : `${renderedRows.length} / ${state.visibleRows.length} filtered · ${state.rows.length} total`;
   const showMore = document.querySelector("#show-more");
   if (showMore) {
     showMore.classList.toggle("hidden", renderedRows.length >= state.visibleRows.length);
@@ -2515,7 +2432,10 @@ function renderWatchlist({ refreshOverview = true } = {}) {
       : `${state.visibleRows.length} ${copyText("shown")}`;
   }
   document.querySelectorAll("[data-mobile-filter]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.mobileFilter === state.filter);
+    button.classList.toggle("active", !searchActive && button.dataset.mobileFilter === state.filter);
+  });
+  document.querySelectorAll("#cards [data-filter]").forEach((card) => {
+    card.classList.toggle("active", !searchActive && card.dataset.filter === state.filter);
   });
   const watchlistTitle = document.querySelector(".watchlist-heading span:not(.section-date)");
   if (watchlistTitle) watchlistTitle.textContent = searchActive ? copyText("searchResults") : copyText("watchlist");
@@ -2688,14 +2608,14 @@ function renderLatestHistoryPanel(latest) {
   panel.innerHTML = `
     <div class="latest-card tone-${actionKind(latest.action)}">
       <div class="latest-head">
-        <span class="latest-label">Today's signal</span>
+        <span class="latest-label">Latest signal</span>
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
       </div>
       <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
       ${activePlan
         ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
-        : `<div class="inactive-plan">No entry is recommended today.</div>`}
+        : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}
       <details class="detail-diagnostics"><summary>Why we see it this way</summary>${renderScoreBreakdown(latest)}</details>
     </div>
   `;
@@ -2718,16 +2638,16 @@ function pressureSummary(rows, summaryApi) {
     return "A 5-versus-25 session comparison needs 30 valid observations and is not available yet.";
   }
   if (!comparison.available) {
-    return "Price-and-volume pressure could not be compared because the source scores are incomplete.";
+    return "There are not enough consistent price-and-volume observations to compare buying and selling pressure.";
   }
   const recentRows = rows.slice(-5);
   const direction = comparison.shift;
   const currentKind = actionKind(rows.at(-1).action);
   const staleReminder = qualityConstraintLabel(rows.at(-1)) === "DATA NEEDS REFRESH"
-    ? " Today's data is stale, so this historical pressure is descriptive only."
+    ? " The latest data is stale, so this historical pressure is descriptive only."
     : "";
   const defensiveReminder = ["exit", "avoid"].includes(currentKind)
-    ? ` This price-and-volume proxy does not override today's ${ACTION_LABELS[rows.at(-1).action] || rows.at(-1).action} signal.`
+    ? ` This price-and-volume proxy does not override the latest ${ACTION_LABELS[rows.at(-1).action] || rows.at(-1).action} signal.`
     : "";
   const contextReminder = `${staleReminder}${defensiveReminder}`;
   if (direction === "balanced") {
@@ -2746,7 +2666,9 @@ function pressureSummary(rows, summaryApi) {
     : comparison.control === "selling"
       ? " Sellers still have the advantage."
       : " Neither side now has a clear advantage.";
-  const pressureLead = `The price-and-volume proxy shifted toward ${direction} over the latest five sessions.`;
+  const pressureLead = direction === "buying"
+    ? "Buying pressure improved over the latest five sessions."
+    : "Selling pressure increased over the latest five sessions.";
   const volumeSentence = confirmingDays >= 2 && confirmingDays > opposingDays
     ? ` Directionally supportive volume appeared on ${confirmingDays} of those sessions.`
     : opposingDays >= 2
@@ -2761,17 +2683,17 @@ function historyInterpretation(latest, priceMovePct, summaryApi) {
     stale: qualityConstraintLabel(latest) === "DATA NEEDS REFRESH",
     checksClear: executionChecksClear(latest),
   });
-  if (state === "stale-exit") return "Today's data is stale. Keep the defensive Exit posture until fresh data confirms otherwise.";
-  if (state === "stale-avoid") return "Today's data is stale. Continue to Avoid new entries until fresh data is available.";
-  if (state === "stale") return "Today's data is stale, so the recent record cannot support an entry.";
+  if (state === "stale-exit") return "The latest data is stale. Keep the defensive Exit posture until fresh data confirms otherwise.";
+  if (state === "stale-avoid") return "The latest data is stale. Continue to Avoid new entries until fresh data is available.";
+  if (state === "stale") return "The latest data is stale, so the recent record cannot support an entry.";
   if (state === "exit") return "The current Exit signal takes priority over any positive move in the recent price record.";
   if (state === "avoid") return "The recent record does not establish a usable setup; the current view remains Avoid.";
-  if (state === "blocked") return "Today's data and risk checks do not support an entry.";
+  if (state === "blocked") return "The latest data and risk checks do not support an entry.";
   if (state === "setup") return "The technical picture is developing, but it has not reached an entry signal.";
   if (state === "watch") return "The recent record remains mixed; there is no confirmed entry.";
   if (state === "continue") return "The recent trend remains constructive, but this is not a fresh entry signal by itself.";
-  if (state === "buy") return "The recent record is constructive and today's Buy has passed the current execution checks.";
-  return `Price ${priceMovePct >= 0 ? "improved" : "weakened"} over the measured period, but there is no executable entry today.`;
+  if (state === "buy") return "The recent record is constructive and the latest Buy has passed the current execution checks.";
+  return `Price ${priceMovePct >= 0 ? "improved" : "weakened"} over the measured period, but the latest session does not provide an executable entry.`;
 }
 
 function renderHistoryVisual(rows) {
@@ -2796,7 +2718,7 @@ function renderHistoryVisual(rows) {
   const { priceMovePct = 0, maxDrawdownPct, distanceFromHighPct } = metrics;
   const periodLabel = `${chronological.length}-session summary`;
   const priceSentence = metrics.priceAvailable
-    ? `Price ${priceMovePct >= 0 ? "rose" : "fell"} ${fmtNumber(Math.abs(priceMovePct), 1)}%. The maximum drawdown based on closing prices was ${fmtNumber(maxDrawdownPct, 1)}%. ${distanceFromHighPct == null ? "The distance from the period high is unavailable because one or more daily highs are missing or invalid." : `The latest close is ${fmtNumber(Math.abs(distanceFromHighPct), 1)}% below the period's highest daily high.`}`
+    ? `Price ${priceMovePct >= 0 ? "rose" : "fell"} ${fmtNumber(Math.abs(priceMovePct), 1)}%. The maximum closing-price drawdown was ${fmtNumber(Math.abs(maxDrawdownPct), 1)}%. ${distanceFromHighPct == null ? "The distance from the period high is unavailable because one or more daily highs are missing or invalid." : `The latest close is ${fmtNumber(Math.abs(distanceFromHighPct), 1)}% below the period's highest daily high.`}`
     : "Price statistics are unavailable because one or more closing prices are missing or invalid.";
 
   visual.innerHTML = `
@@ -2805,7 +2727,7 @@ function renderHistoryVisual(rows) {
       <div><span>Price</span><strong>${escapeHtml(priceSentence)}</strong></div>
       <div><span>Signal</span><strong>${escapeHtml(historySignalSentence(chronological, summaryApi))}</strong></div>
       <div><span>Buying pressure</span><strong>${escapeHtml(pressureSummary(chronological, summaryApi))}</strong></div>
-      <p class="behavior-action"><span>Today</span><strong>${escapeHtml(decisionHeadline(latest))}.</strong></p>
+      <p class="behavior-action"><span>Latest session</span><strong>${escapeHtml(decisionHeadline(latest))}.</strong></p>
     </div>
   `;
 }

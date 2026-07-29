@@ -243,6 +243,8 @@ const PAYLOAD_FIELDS = [
   "wf_test_trades",
   "wf_test_win_rate",
   "position_value_1k_risk",
+  "suggested_position_value",
+  "actual_risk_dollars",
 ];
 
 const AUDIT_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
@@ -700,7 +702,7 @@ function rowDto(row, options = {}) {
   output.payload = cleanPayload(row);
   if (options.historical) {
     return promotePayloadFields(
-      applyBuyTierFallback(antiSignalFallback(applyVolatilityGate(applyOperatorStateFallback(output), row)))
+      applyBuyTierFallback(antiSignalFallback(applyAuditGateFallback(applyVolatilityGate(applyPersonalitySetupGate(applyOperatorStateFallback(output), row), row), row)))
     );
   }
   return promotePayloadFields(
@@ -756,39 +758,37 @@ function committedPublicationMatches(run, rows) {
   return rows.every((row) => String(row?.publication_id || row?.payload?.publication_id || "") === publicationId);
 }
 
-async function recentRunDates(limit = 2) {
-  const dates = [];
-  const addDate = (row) => {
-    if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
-  };
-
+async function activePublicationRuns(limit = 2) {
   try {
-    // A run is publishable only after scanner, snapshot, history, and outcome
-    // writes have all completed. Rows left in publishing/sync_failed state are
-    // intentionally invisible to the production API.
-    const runRows = await supabaseSelect(`watchlist_refresh_runs?select=run_date,status&status=in.(ok,degraded)&order=run_date.desc,created_at.desc&limit=${Math.max(limit * 6, 12)}`);
-    runRows.forEach(addDate);
-    return dates.slice(0, limit);
+    const controlRows = await supabaseSelect("watchlist_publication_control?select=active_publication_id,previous_publication_id,generation&control_key=eq.active&limit=1");
+    const control = controlRows[0] || {};
+    const publicationIds = [control.active_publication_id, control.previous_publication_id]
+      .filter(Boolean)
+      .slice(0, Math.max(1, limit));
+    if (!publicationIds.length) return [];
+    const publicationFilter = publicationIds.map(encodeFilterValue).join(",");
+    const runRows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList([...RUN_FIELDS, ...RUN_OPTIONAL_FIELDS])}&publication_id=in.(${publicationFilter})&status=in.(ok,degraded)&limit=${publicationIds.length}`);
+    const byPublication = new Map(runRows.map((row) => [String(row.publication_id || row.payload?.publication_id || ""), row]));
+    return publicationIds.map((id) => byPublication.get(String(id))).filter(Boolean);
   } catch {
-    // Fail closed. Published Pages data is the only safe fallback when the
-    // commit-marker table cannot be read.
+    // Fail closed. Published Pages data is the safe fallback when the active
+    // pointer or its exact publication cannot be read.
     return [];
   }
 }
 
+async function recentRunDates(limit = 2) {
+  const dates = [];
+  for (const row of await activePublicationRuns(limit)) {
+    if (row.run_date && !dates.includes(row.run_date)) dates.push(row.run_date);
+  }
+  return dates.slice(0, limit);
+}
+
 async function runInfo(runDate) {
   if (!runDate) return null;
-  try {
-    const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList([...RUN_FIELDS, ...RUN_OPTIONAL_FIELDS])}&run_date=eq.${encodeFilterValue(runDate)}&status=in.(ok,degraded)&order=created_at.desc&limit=1`);
-    return runDto(rows[0]);
-  } catch {
-    try {
-      const rows = await supabaseSelect(`watchlist_refresh_runs?select=${selectList(RUN_FIELDS)}&run_date=eq.${encodeFilterValue(runDate)}&status=in.(ok,degraded)&order=created_at.desc&limit=1`);
-      return runDto(rows[0]);
-    } catch {
-      return null;
-    }
-  }
+  const rows = await activePublicationRuns(2);
+  return runDto(rows.find((row) => String(row.run_date || "") === String(runDate)));
 }
 
 module.exports = {
@@ -798,6 +798,7 @@ module.exports = {
   isValidTicker,
   normalizeTicker,
   recentRunDates,
+  activePublicationRuns,
   rowDto,
   RUN_FIELDS,
   RUN_OPTIONAL_FIELDS,

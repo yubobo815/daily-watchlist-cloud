@@ -2515,6 +2515,10 @@ body[data-page="history"] .raw-history summary {
   display: none;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .app-tabbar {
   display: none;
 }
@@ -2524,7 +2528,7 @@ body[data-page="history"] .raw-history summary {
 }
 
 @media (max-width: 960px) {
-  .market-rail { min-height: 54px; gap: 10px; overflow-x: auto; white-space: nowrap; font-size: 9px; }
+  .market-rail { min-height: 54px; gap: 10px; overflow-x: auto; white-space: nowrap; font-size: 11px; }
   .market-rail .rail-brand { position: sticky; left: 0; padding-right: 10px; background: #070a0f; }
   .editorial-hero { display: block; min-height: 0; padding: 18px 4px 12px !important; background: transparent; }
   .editorial-hero .brand-name { font-size: 40px; }.hero-brief { display: none; }
@@ -3508,20 +3512,39 @@ body.ticker-page .latest-card {
   letter-spacing: 0.035em;
 }
 
+.watchlist-workspace .badge.entry-pill.entry-risk {
+  border-color: #d59a8e;
+  background: #f3d8d2;
+  color: #7f3028;
+}
+
+.watchlist-workspace .badge.entry-pill.entry-watch,
+.watchlist-workspace .badge.entry-pill.entry-constructive {
+  border-color: #a9b99e;
+  background: #e4eadc;
+  color: #3f5b39;
+}
+
+.watchlist-workspace .badge.entry-pill.entry-strong {
+  border-color: #83ad8b;
+  background: #d9eadb;
+  color: #275a35;
+}
+
 @media (min-width: 961px) {
   .watchlist-workspace { grid-template-columns: minmax(0, 1fr) 306px; }
   .watchlist-workspace .watchlist-heading { padding-right: 10px; padding-left: 10px; }
   .watchlist-workspace .controls { margin-right: 10px; margin-left: 10px; }
-  .watchlist-workspace table { min-width: 870px; table-layout: fixed; }
+  .watchlist-workspace table { min-width: 878px; table-layout: fixed; }
   .watchlist-workspace th,
   .watchlist-workspace td { padding: 12px 10px; border-bottom-color: var(--line-soft); vertical-align: middle; }
-  .watchlist-workspace th:first-child { position: sticky; left: 0; z-index: 5; min-width: 0; width: 154px; background: var(--panel-strong); color: var(--ink); }
-  .watchlist-workspace td:first-child { position: sticky; left: 0; z-index: 3; min-width: 0; width: 154px; text-align: left; background: var(--panel); color: var(--ink); }
-  .watchlist-workspace th:nth-child(2), .watchlist-workspace td:nth-child(2) { min-width: 0; width: 116px; }
-  .watchlist-workspace th:nth-child(3), .watchlist-workspace td:nth-child(3) { min-width: 0; width: 74px; text-align: center; }
-  .watchlist-workspace th:nth-child(4), .watchlist-workspace td:nth-child(4) { min-width: 0; width: 132px; text-align: right; }
-  .watchlist-workspace th:nth-child(5), .watchlist-workspace td:nth-child(5) { min-width: 0; width: 96px; text-align: right; }
-  .watchlist-workspace th:nth-child(6), .watchlist-workspace td:nth-child(6) { min-width: 0; width: 78px; text-align: right; }
+  .watchlist-workspace th:first-child { position: sticky; left: 0; z-index: 5; min-width: 0; width: 145px; background: var(--panel-strong); color: var(--ink); }
+  .watchlist-workspace td:first-child { position: sticky; left: 0; z-index: 3; min-width: 0; width: 145px; text-align: left; background: var(--panel); color: var(--ink); }
+  .watchlist-workspace th:nth-child(2), .watchlist-workspace td:nth-child(2) { min-width: 0; width: 105px; }
+  .watchlist-workspace th:nth-child(3), .watchlist-workspace td:nth-child(3) { min-width: 0; width: 132px; text-align: center; }
+  .watchlist-workspace th:nth-child(4), .watchlist-workspace td:nth-child(4) { min-width: 0; width: 126px; text-align: right; }
+  .watchlist-workspace th:nth-child(5), .watchlist-workspace td:nth-child(5) { min-width: 0; width: 80px; text-align: right; }
+  .watchlist-workspace th:nth-child(6), .watchlist-workspace td:nth-child(6) { min-width: 0; width: 70px; text-align: right; }
   .watchlist-workspace th:nth-child(7), .watchlist-workspace td:nth-child(7) { min-width: 220px; max-width: none; white-space: normal; }
   .watchlist-workspace #watchlist-body tr,
   .watchlist-workspace #watchlist-body tr:hover { color: var(--ink); background: var(--panel); }

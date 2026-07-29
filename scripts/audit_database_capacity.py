@@ -144,8 +144,11 @@ def assert_capacity_contract() -> None:
         "readonly OHLCV_MAX_ROWS=100000",
         "readonly LEARNING_SESSIONS=100",
         "readonly CALIBRATION_MAX_ARTIFACTS=8",
-        "readonly CALIBRATION_MAX_BYTES=25165824",
-        "readonly MAX_STAGED_PUBLICATION_BYTES=140000000",
+        "readonly CALIBRATION_MAX_BYTES=8000000",
+        "readonly MAX_STAGED_PUBLICATION_BYTES=85000000",
+        "readonly OHLCV_MAX_BYTES=65000000",
+        "readonly BEHAVIOR_MAX_BYTES=40000000",
+        "readonly OUTCOME_MAX_BYTES=45000000",
         "bytes + MAX_STAGED_PUBLICATION_BYTES",
         "record_storage_metrics",
         "evaluation_run_date not in",
@@ -153,6 +156,8 @@ def assert_capacity_contract() -> None:
         "delete from public.watchlist_indicator_state",
         "delete from public.watchlist_calibration_artifacts",
         "select source_publication_id from public.watchlist_calibration_artifacts",
+        "active_publication_id = :'publication_id'",
+        "control.previous_publication_id",
     ):
         assert contract in guard, contract
     assert "scripts/database_capacity_guard.sh prepare" in workflow
@@ -167,6 +172,13 @@ def assert_capacity_contract() -> None:
     assert "create table if not exists public.watchlist_indicator_state" in schema
     assert "create table if not exists public.watchlist_calibration_artifacts" in schema
     assert "payload_bytes > 0 and payload_bytes <= 2097152" in schema
+    assert "watchlist_snapshots_payload_bytes" in schema
+    assert "watchlist_outcomes_payload_bytes" in schema
+    scanner_source = (root / "daily_watchlist_overview.py").read_text()
+    assert "estimate_supabase_publication_bytes" in scanner_source
+    assert scanner_source.index("estimated_publication_bytes = estimate_supabase_publication_bytes") < scanner_source.index("supabase_upsert_refresh_run([publishing_metadata])")
+    estimate = scanner.estimate_supabase_publication_bytes([{"payload": "x" * 1000}])
+    assert 5_000_000 < estimate < scanner.SUPABASE_MAX_STAGED_PUBLICATION_BYTES
 
 
 if __name__ == "__main__":

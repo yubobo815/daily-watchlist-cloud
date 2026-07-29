@@ -1017,6 +1017,9 @@ OHLCV_INCREMENTAL_YEARS = float(os.getenv("OHLCV_INCREMENTAL_YEARS", "0.1"))
 SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES", "8192"))
 SUPABASE_HISTORY_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_HISTORY_PAYLOAD_MAX_BYTES", "8192"))
 SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES", "2048"))
+SUPABASE_MAX_STAGED_PUBLICATION_BYTES = int(os.getenv("SUPABASE_MAX_STAGED_PUBLICATION_BYTES", "85000000"))
+SUPABASE_STORAGE_OVERHEAD_FACTOR = 3.0
+SUPABASE_STORAGE_FIXED_BYTES = 5_000_000
 SUPABASE_HISTORY_PAYLOAD_ALIASES = (
     "date",
     "raw_window_hash",
@@ -1271,6 +1274,15 @@ def compact_payload(row: dict, typed_record: dict, *, aliases: tuple[str, ...] =
     return payload
 
 
+def estimate_supabase_publication_bytes(*record_groups: list[dict]) -> int:
+    serialized_bytes = sum(
+        len(json.dumps(clean_record(record), ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        for records in record_groups
+        for record in records
+    )
+    return int(serialized_bytes * SUPABASE_STORAGE_OVERHEAD_FACTOR) + SUPABASE_STORAGE_FIXED_BYTES
+
+
 def sync_supabase(
     report: pd.DataFrame,
     history: pd.DataFrame,
@@ -1431,15 +1443,36 @@ def sync_supabase(
             )
             outcome_records.append(outcome_record)
 
+    auxiliary_records = []
+    if calibration_artifact:
+        auxiliary_records.append(clean_record(calibration_artifact))
+    if learning_stats is not None:
+        auxiliary_records.extend(clean_record(stats) for stats in learning_stats.values())
+    estimated_publication_bytes = estimate_supabase_publication_bytes(
+        report_records,
+        indicator_records,
+        history_records,
+        outcome_records,
+        auxiliary_records,
+    )
+    if estimated_publication_bytes > SUPABASE_MAX_STAGED_PUBLICATION_BYTES:
+        raise ValueError(
+            f"Publication is estimated at {estimated_publication_bytes} bytes; "
+            f"staging budget is {SUPABASE_MAX_STAGED_PUBLICATION_BYTES} bytes."
+        )
+
     if run_metadata:
-        try:
-            publishing_metadata = clean_record(run_metadata)
-            publishing_metadata["status"] = "publishing"
-            publishing_payload = publishing_metadata.get("payload") if isinstance(publishing_metadata.get("payload"), dict) else {}
-            publishing_metadata["payload"] = {**publishing_payload, "sync_state": "publishing"}
-            supabase_upsert_refresh_run([publishing_metadata])
-        except Exception as exc:
-            print(f"Supabase run-health sync skipped: {exc}")
+        publishing_metadata = clean_record(run_metadata)
+        publishing_metadata["status"] = "publishing"
+        publishing_payload = publishing_metadata.get("payload") if isinstance(publishing_metadata.get("payload"), dict) else {}
+        publishing_metadata["payload"] = {
+            **publishing_payload,
+            "sync_state": "publishing",
+            "prewrite_estimated_bytes": estimated_publication_bytes,
+        }
+        # Child rows are publication-scoped and foreign-keyed to this marker.
+        # Failing here must abort rather than create an untraceable partial run.
+        supabase_upsert_refresh_run([publishing_metadata])
 
     snapshot_synced = 0
     indicator_state_synced = 0
@@ -1533,25 +1566,23 @@ def sync_supabase(
         and learning_state_synced
     )
     if run_metadata:
-        try:
-            final_metadata = clean_record(run_metadata)
-            final_payload = final_metadata.get("payload") if isinstance(final_metadata.get("payload"), dict) else {}
-            scanner_status = str(run_metadata.get("status") or "ok")
-            final_metadata["status"] = "pending_audit" if sync_complete else "sync_failed"
-            final_metadata["payload"] = {
-                **final_payload,
-                "scanner_status": scanner_status,
-                "sync_state": "complete" if sync_complete else "failed",
-                "synced_snapshot_rows": snapshot_synced,
-                "synced_indicator_state_rows": indicator_state_synced,
-                "synced_history_rows": history_synced,
-                "synced_outcome_rows": outcome_synced,
-                "calibration_artifact_id": (calibration_artifact or {}).get("artifact_id") or final_payload.get("calibration_artifact_id", ""),
-                "synced_learning_state_rows": len(learning_stats or {}),
-            }
-            supabase_upsert_refresh_run([final_metadata])
-        except Exception as exc:
-            print(f"Supabase final run-health sync skipped: {exc}")
+        final_metadata = clean_record(run_metadata)
+        final_payload = final_metadata.get("payload") if isinstance(final_metadata.get("payload"), dict) else {}
+        scanner_status = str(run_metadata.get("status") or "ok")
+        final_metadata["status"] = "pending_audit" if sync_complete else "sync_failed"
+        final_metadata["payload"] = {
+            **final_payload,
+            "scanner_status": scanner_status,
+            "sync_state": "complete" if sync_complete else "failed",
+            "synced_snapshot_rows": snapshot_synced,
+            "synced_indicator_state_rows": indicator_state_synced,
+            "synced_history_rows": history_synced,
+            "synced_outcome_rows": outcome_synced,
+            "calibration_artifact_id": (calibration_artifact or {}).get("artifact_id") or final_payload.get("calibration_artifact_id", ""),
+            "synced_learning_state_rows": len(learning_stats or {}),
+            "prewrite_estimated_bytes": estimated_publication_bytes,
+        }
+        supabase_upsert_refresh_run([final_metadata])
     print(
         f"Synced {snapshot_synced}/{len(report_records)} snapshot rows, "
         f"{history_synced}/{len(history_records)} history rows, and "
@@ -2221,23 +2252,55 @@ def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[
         buy_row = history_rows[buy_index]
         if buy_row.get("action") not in {"BUY CANDIDATE", "STRONG CONTINUATION"}:
             continue
-        trade_entry = (
-            row_float(buy_row, "entry_zone_high")
-            or row_float(buy_row, "entry_est")
-            or row_float(buy_row, "close")
-        )
-        if trade_entry <= 0:
-            continue
-        # The BUY bar cannot establish whether entry or target happened first.
-        # Profit management starts from the next complete daily bar.
-        post_entry_rows = history_rows[buy_index + 1 : index + 1]
-        highs = [row_float(item, "high") or row_float(item, "close") for item in post_entry_rows]
-        peak_price = max([value for value in highs if value > 0], default=0.0)
-        if peak_price <= 0:
-            continue
+        zone_low = row_float(buy_row, "entry_zone_low") or row_float(buy_row, "entry_est")
+        zone_high = row_float(buy_row, "entry_zone_high") or zone_low
         stop = row_float(buy_row, "stop_est")
-        risk = trade_entry - stop if 0 < stop < trade_entry else 0.0
+        if zone_low <= 0 or zone_high < zone_low or stop <= 0 or stop >= zone_low:
+            continue
+        post_entry_rows = history_rows[buy_index + 1 : index + 1]
         take_profit_1 = row_float(buy_row, "take_profit_1")
+        trade_entry = 0.0
+        peak_price = 0.0
+        take_profit_1_hit = False
+        active_stop = stop
+        lifecycle_valid = True
+        position_open = False
+        for bar in post_entry_rows:
+            open_ = row_float(bar, "open")
+            high = row_float(bar, "high") or row_float(bar, "close")
+            low = row_float(bar, "low") or row_float(bar, "close")
+            if min(open_, high, low) <= 0:
+                lifecycle_valid = False
+                break
+            if not position_open:
+                if open_ <= stop:
+                    lifecycle_valid = False
+                    break
+                if low > zone_high or high < zone_low:
+                    continue
+                open_in_zone = zone_low <= open_ <= zone_high
+                if low <= stop and not open_in_zone:
+                    lifecycle_valid = False
+                    break
+                trade_entry = open_ if open_in_zone else zone_high
+                position_open = True
+            peak_price = max(peak_price, high)
+            hit_stop = low <= active_stop
+            hit_tp1 = take_profit_1 > trade_entry and high >= take_profit_1
+            if hit_stop and hit_tp1 and not take_profit_1_hit:
+                lifecycle_valid = False
+                break
+            if hit_stop:
+                position_open = False
+                break
+            take_profit_1_hit = take_profit_1_hit or hit_tp1
+            if take_profit_1_hit:
+                raised_stop = row_float(buy_row, "post_tp1_stop")
+                if raised_stop > active_stop:
+                    active_stop = raised_stop
+        if not lifecycle_valid or not position_open or trade_entry <= 0 or peak_price <= 0:
+            continue
+        risk = trade_entry - stop if 0 < stop < trade_entry else 0.0
         peak_gain_pct = (peak_price / trade_entry - 1) * 100
         giveback_pct = (current_close / peak_price - 1) * 100
         context = {
@@ -2251,7 +2314,7 @@ def recent_buy_profit_context(history_rows: list[dict], index: int) -> Optional[
             "peak_gain_r": (peak_price - trade_entry) / risk if risk > 0 else 0.0,
             "giveback_r": (current_close - peak_price) / risk if risk > 0 else 0.0,
             "take_profit_1": take_profit_1,
-            "take_profit_1_hit": take_profit_1 > trade_entry and peak_price >= take_profit_1,
+            "take_profit_1_hit": take_profit_1_hit,
             "take_profit_1_reduce_pct": row_float(buy_row, "take_profit_1_reduce_pct"),
             "post_tp1_stop": row_float(buy_row, "post_tp1_stop"),
             "volatility_regime": str(buy_row.get("volatility_regime") or "NORMAL").upper(),
@@ -2534,16 +2597,27 @@ def merge_payload_row(row: dict) -> dict:
     return merged
 
 
+def fetch_active_publication_run() -> dict:
+    controls = supabase_select(
+        "watchlist_publication_control?select=active_publication_id&control_key=eq.active&limit=1"
+    )
+    publication_id = str((controls[0] if controls else {}).get("active_publication_id") or "")
+    if not publication_id:
+        return {}
+    runs = supabase_select(
+        "watchlist_refresh_runs?select=publication_id,run_date,status,payload&"
+        f"publication_id=eq.{urllib.parse.quote(publication_id)}&status=in.(ok,degraded)&limit=1"
+    )
+    return runs[0] if runs else {}
+
+
 def fetch_previous_snapshot_rows(run_date: str) -> list[dict]:
     try:
-        run_rows = supabase_select(
-            "watchlist_refresh_runs?select=run_date,publication_id,payload&status=in.(ok,degraded)&"
-            f"run_date=lte.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
-        )
-        if not run_rows:
+        active_run = fetch_active_publication_run()
+        if not active_run:
             return []
-        previous_run_date = run_rows[0].get("run_date")
-        previous_publication_id = run_rows[0].get("publication_id") or (run_rows[0].get("payload") or {}).get("publication_id")
+        previous_run_date = active_run.get("run_date")
+        previous_publication_id = active_run.get("publication_id")
         if not previous_publication_id:
             return []
         rows = supabase_select(
@@ -2560,13 +2634,10 @@ def fetch_previous_snapshot_rows(run_date: str) -> list[dict]:
 def fetch_previous_behavior_history(run_date: str) -> list[dict]:
     """Load the latest committed history as the canonical daily state."""
     try:
-        run_rows = supabase_select(
-            "watchlist_refresh_runs?select=run_date,publication_id,payload&status=in.(ok,degraded)&"
-            f"run_date=lte.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
-        )
-        if not run_rows:
+        active_run = fetch_active_publication_run()
+        if not active_run:
             return []
-        publication_id = run_rows[0].get("publication_id") or (run_rows[0].get("payload") or {}).get("publication_id")
+        publication_id = active_run.get("publication_id")
         if not publication_id:
             return []
         rows = supabase_select_all(
@@ -2587,14 +2658,11 @@ def fetch_previous_behavior_history(run_date: str) -> list[dict]:
 
 def fetch_previous_run_metadata(run_date: str) -> dict:
     try:
-        rows = supabase_select(
-            "watchlist_refresh_runs?select=publication_id,run_date,status,payload&status=in.(ok,degraded)&"
-            f"run_date=lte.{urllib.parse.quote(run_date)}&order=run_date.desc,created_at.desc&limit=1"
-        )
-        if not rows:
+        active_run = fetch_active_publication_run()
+        if not active_run:
             return {}
-        payload = rows[0].get("payload") if isinstance(rows[0].get("payload"), dict) else {}
-        return {**payload, "publication_id": rows[0].get("publication_id"), "run_date": rows[0].get("run_date")}
+        payload = active_run.get("payload") if isinstance(active_run.get("payload"), dict) else {}
+        return {**payload, "publication_id": active_run.get("publication_id"), "run_date": active_run.get("run_date")}
     except RuntimeError as exc:
         print(f"Previous run metadata fetch skipped: {exc}")
     return {}
@@ -3084,11 +3152,12 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
             touches_zone = float(low) <= float(zone_high) and float(high) >= float(zone_low)
             if not touches_zone:
                 continue
-            if float(low) <= float(stop):
+            open_in_zone = float(zone_low) <= float(open_) <= float(zone_high)
+            if float(low) <= float(stop) and not open_in_zone:
                 base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both the entry area and stop; intraday order is unknown."})
                 return base
             entry_opened_above_zone = float(open_) > float(zone_high)
-            entry = float(open_) if float(zone_low) <= float(open_) <= float(zone_high) else float(zone_high)
+            entry = float(open_) if open_in_zone else float(zone_high)
             target = numeric_or_none(prior.get("target_est")) or entry + (entry - float(stop))
             base.update({"entry_eligible": gates_allow, "entry_filled": True, "entry_fill_est": round(entry, 2)})
         highs.append(float(high))
@@ -3348,13 +3417,19 @@ def calibration_parity_report(
     missing_from_rebuild = sorted(
         key
         for key in set(incremental_map) - set(rebuilt_map)
-        if (not replay_starts.get(key[0]) or key[1] >= replay_starts[key[0]])
+        if (
+            not replay_starts.get(key[0])
+            or key[1] >= replay_starts[key[0]]
+            or incremental_map[key][1] >= replay_starts[key[0]]
+        )
         and (not rebuilt_cutoff or incremental_map[key][1] <= rebuilt_cutoff)
     )
     older_outside_rebuild = sorted(
         key
         for key in set(incremental_map) - set(rebuilt_map)
-        if replay_starts.get(key[0]) and key[1] < replay_starts[key[0]]
+        if replay_starts.get(key[0])
+        and key[1] < replay_starts[key[0]]
+        and incremental_map[key][1] < replay_starts[key[0]]
     )
     # Incremental state may retain older identities outside the bounded replay,
     # but every identity inside the rebuilt signal/evaluation window must match.
@@ -3485,26 +3560,17 @@ def fetch_signal_outcome_history(run_date: str, lookback_days: int = LEARNING_LO
     try:
         run_timestamp = pd.Timestamp(run_date)
         cutoff = (run_timestamp - pd.Timedelta(days=max(150, int(lookback_days) * 3))).date().isoformat()
-        validated_runs = supabase_select(
-            "watchlist_refresh_runs?select=payload&status=in.(ok,degraded)&"
-            f"run_date=lte.{urllib.parse.quote(run_date)}&run_date=gte.{urllib.parse.quote(cutoff)}&limit=200"
-        )
-        publication_ids = sorted({
-            str((record.get("payload") or {}).get("publication_id") or "")
-            for record in validated_runs
-            if isinstance(record.get("payload"), dict)
-            and (record.get("payload") or {}).get("sync_state") == "complete"
-            and (record.get("payload") or {}).get("publication_id")
-        })
-        if not publication_ids:
+        active_run = fetch_active_publication_run()
+        publication_id = str(active_run.get("publication_id") or "")
+        active_payload = active_run.get("payload") if isinstance(active_run.get("payload"), dict) else {}
+        if not publication_id or active_payload.get("sync_state") != "complete":
             return load_local_signal_outcomes(run_date, lookback_days)
-        publication_filter = ",".join(urllib.parse.quote(value, safe="") for value in publication_ids)
         rows = supabase_select_all(
             "watchlist_signal_outcomes?"
             "select=*&"
             f"evaluation_run_date=lt.{urllib.parse.quote(run_date)}&"
             f"evaluation_run_date=gte.{urllib.parse.quote(cutoff)}&"
-            f"publication_id=in.({publication_filter})&"
+            f"publication_id=eq.{urllib.parse.quote(publication_id, safe='')}&"
             "outcome_label=neq.PENDING&"
             "order=evaluation_run_date.desc,signal_run_date.desc,ticker.asc",
             max_pages=25,
@@ -4198,19 +4264,17 @@ def apply_directional_ohlcv_model(rows: list[dict], history_rows: list[dict], so
 
 def fetch_active_calibration_artifact() -> Optional[dict]:
     try:
+        active_run = fetch_active_publication_run()
+        active_publication_id = str(active_run.get("publication_id") or "")
+        if not active_publication_id:
+            return None
         candidates = supabase_select(
             "watchlist_calibration_artifacts?select=artifact_id,source_publication_id,cutoff_date,artifact_version,scanner_version,learning_model_version,directional_model_version,content_hash,payload_bytes,payload,created_at&"
-            "state=eq.validated&order=cutoff_date.desc,created_at.desc&limit=5"
+            f"state=eq.validated&source_publication_id=eq.{urllib.parse.quote(active_publication_id)}&order=cutoff_date.desc,created_at.desc&limit=1"
         )
         for candidate in candidates:
             publication_id = str(candidate.get("source_publication_id") or "")
-            if not publication_id:
-                continue
-            runs = supabase_select(
-                "watchlist_refresh_runs?select=publication_id,status,payload&"
-                f"publication_id=eq.{urllib.parse.quote(publication_id)}&status=in.(ok,degraded)&limit=1"
-            )
-            if not runs:
+            if publication_id != active_publication_id:
                 continue
             payload = candidate.get("payload")
             if not isinstance(payload, dict):
@@ -5625,7 +5689,10 @@ def classify_and_score(
     )
     reward_risk = (target - trade_entry) / (trade_entry - stop) if trade_entry > stop else np.nan
     risk_pct_to_stop = (trade_entry - stop) / trade_entry * 100 if trade_entry > stop else np.nan
-    position_value_1k_risk = SCANNER_RISK_DOLLARS / (risk_pct_to_stop / 100) if not math.isnan(risk_pct_to_stop) and risk_pct_to_stop > 0 else np.nan
+    required_position_value = SCANNER_RISK_DOLLARS / (risk_pct_to_stop / 100) if not math.isnan(risk_pct_to_stop) and risk_pct_to_stop > 0 else np.nan
+    position_value_1k_risk = required_position_value
+    suggested_position_value = min(required_position_value, MAX_SCANNER_POSITION_VALUE) if not math.isnan(required_position_value) else np.nan
+    actual_risk_dollars = suggested_position_value * (risk_pct_to_stop / 100) if not math.isnan(suggested_position_value) else np.nan
     market_permission_value = (market_permission or {}).get("market_permission", "UNKNOWN")
     ticker_permission = ticker_profile["ticker_permission"]
     walk_forward_permission = walk_forward_stats["walk_forward_permission"]
@@ -5637,7 +5704,6 @@ def classify_and_score(
                 not math.isnan(risk_pct_to_stop)
                 and risk_pct_to_stop <= MAX_SIGNAL_RISK_PCT + NUMERIC_TOLERANCE
                 and not math.isnan(position_value_1k_risk)
-                and position_value_1k_risk <= MAX_SCANNER_POSITION_VALUE + NUMERIC_TOLERANCE
             )
         )
         else "BLOCK"
@@ -5991,7 +6057,12 @@ def classify_and_score(
         operator_pressure_score = operator_state_score
         operator_plan = operator_state_plan
 
-    execution_safety_ok = market_permission_value != "BLOCK" and risk_permission == "ALLOW"
+    execution_safety_ok = (
+        market_permission_value == "ALLOW"
+        and ticker_permission == "ALLOW"
+        and walk_forward_permission == "ALLOW"
+        and risk_permission == "ALLOW"
+    )
     next_day_constructive = next_day_bias_score >= 62.0 and not exit_pressure and not avoid
     next_day_buyable = (
         next_day_bias_score >= 70.0
@@ -6336,6 +6407,8 @@ def classify_and_score(
         "reward_risk": round(float(reward_risk), 2) if setup_forming and not math.isnan(reward_risk) else "",
         "risk_pct_to_stop": round(float(risk_pct_to_stop), 2) if setup_forming and not math.isnan(risk_pct_to_stop) else "",
         "position_value_1k_risk": round(float(position_value_1k_risk), 0) if setup_forming and not math.isnan(position_value_1k_risk) else "",
+        "suggested_position_value": round(float(suggested_position_value), 0) if setup_forming and not math.isnan(suggested_position_value) else "",
+        "actual_risk_dollars": round(float(actual_risk_dollars), 0) if setup_forming and not math.isnan(actual_risk_dollars) else "",
         "market_permission": market_permission_value,
         "ticker_permission": ticker_permission,
         "walk_forward_permission": walk_forward_permission,
@@ -6942,7 +7015,13 @@ def write_history_html(path: Path) -> None:
       if (!config || !config.url || !config.anonKey) return null;
 
       const baseUrl = config.url.replace(/\\/$/, "");
-      const latestUrl = `${baseUrl}/rest/v1/watchlist_refresh_runs?select=publication_id,run_date,status&status=in.(ok,degraded)&order=run_date.desc,created_at.desc&limit=1`;
+      const controlUrl = `${baseUrl}/rest/v1/watchlist_publication_control?select=active_publication_id&control_key=eq.active&limit=1`;
+      const controlResponse = await fetch(controlUrl, { headers: supabaseHeaders(config) });
+      if (!controlResponse.ok) return null;
+      const controlRows = await controlResponse.json();
+      const activePublication = controlRows[0]?.active_publication_id;
+      if (!activePublication) return null;
+      const latestUrl = `${baseUrl}/rest/v1/watchlist_refresh_runs?select=publication_id,run_date,status&publication_id=eq.${encodeURIComponent(activePublication)}&status=in.(ok,degraded)&limit=1`;
       const latestResponse = await fetch(latestUrl, { headers: supabaseHeaders(config) });
       if (!latestResponse.ok) throw new Error("Could not read latest Supabase run.");
       const latestRuns = await latestResponse.json();
@@ -7068,7 +7147,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "volatility_regime", "volatility_permission", "position_size_factor",
         "data_provider", "data_provider_status",
         "setup", "adaptive_mode", "psychology", "reward_risk",
-        "risk_pct_to_stop", "position_value_1k_risk",
+        "risk_pct_to_stop", "position_value_1k_risk", "suggested_position_value", "actual_risk_dollars",
         "market_permission", "risk_permission",
         "volume_state", "entry_zone_low", "entry_zone_high", "entry_zone_width_pct",
         "entry_est", "stop_est", "target_est", "notes",
@@ -7113,6 +7192,8 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
         "reward_risk": "R/R",
         "risk_pct_to_stop": "Risk%",
         "position_value_1k_risk": "Pos@1k",
+        "suggested_position_value": "Suggested Position",
+        "actual_risk_dollars": "Actual Risk $",
         "market_permission": "Mkt",
         "risk_permission": "Risk",
         "volume_state": "Vol",
@@ -7197,7 +7278,7 @@ def write_html(df: pd.DataFrame, path: Path, status_text: Optional[str] = None, 
                 return escaped
         return escaped
 
-    numeric_columns = {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "close", "entry_est", "entry_zone_low", "entry_zone_high", "entry_zone_width_pct", "stop_est", "target_est"}
+    numeric_columns = {"score", "next_day_bias_score", "operator_state_score", "reward_risk", "day_change_pct", "risk_pct_to_stop", "position_value_1k_risk", "suggested_position_value", "actual_risk_dollars", "close", "entry_est", "entry_zone_low", "entry_zone_high", "entry_zone_width_pct", "stop_est", "target_est"}
 
     rows = []
     for _, row in visible_df.iterrows():
@@ -7788,7 +7869,7 @@ def main() -> None:
         "state": "EXPLICIT_BOOTSTRAP" if needs_bootstrap else "NOT_REQUIRED",
     }
     if effective_mode == "weekly_rebuild":
-        if previous_incremental_metadata:
+        if previous_incremental_metadata and not needs_bootstrap:
             newly_settled_outcomes = build_incremental_signal_outcomes(
                 previous_history_rows,
                 raw_frames,
@@ -7812,14 +7893,6 @@ def main() -> None:
                 build_backfilled_signal_outcomes(learning_history_rows)
             )
             newly_settled_outcomes = backfilled_outcomes
-            # Rebuild older evidence from the canonical OHLCV store. Verified
-            # frozen production outcomes win for overlapping dates.
-            replayed_outcomes = attach_walk_forward_predictions(
-                build_backfilled_signal_outcomes(learning_history_rows)
-            )
-            backfilled_outcomes = combine_signal_outcomes(
-                replayed_outcomes, verified_incremental_outcomes
-            )
         outcome_candidates = combine_signal_outcomes(prior_outcomes, backfilled_outcomes)
     else:
         newly_settled_outcomes = build_incremental_signal_outcomes(

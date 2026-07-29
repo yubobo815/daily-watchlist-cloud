@@ -20,6 +20,9 @@ def row(date, action, close, **overrides):
         "action": action,
         "setup": overrides.pop("setup", "NONE"),
         "close": close,
+        "open": overrides.pop("open", close),
+        "high": overrides.pop("high", close),
+        "low": overrides.pop("low", close),
         "score": overrides.pop("score", 60),
         "reason_codes": [],
         "next_day_bias": overrides.pop("next_day_bias", "WATCH TREND"),
@@ -49,8 +52,8 @@ def latest(rows):
 
 def audit_profit_active_does_not_force_defense():
     result = latest([
-        row("D1", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", score=100, next_day_bias="BULLISH CONFIRM"),
-        row("D2", "WATCH TREND", 108, score=65, next_day_bias="WATCH TREND"),
+        row("D1", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=100, stop_est=94, score=100, next_day_bias="BULLISH CONFIRM"),
+        row("D2", "WATCH TREND", 108, open=100, low=99, high=108, score=65, next_day_bias="WATCH TREND"),
     ])
     assert_true(result["contextual_overlay"] == "PROFIT ACTIVE", "open profit should be marked active")
     assert_true(result["next_day_bias"] == "WATCH TREND", "profit active must not force defensive bias")
@@ -59,8 +62,8 @@ def audit_profit_active_does_not_force_defense():
 
 def audit_profit_protect_requires_giveback_or_supply():
     result = latest([
-        row("D1", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", score=100, next_day_bias="BULLISH CONFIRM"),
-        row("D2", "WATCH TREND", 108, score=65, next_day_bias="WATCH TREND"),
+        row("D1", "BUY CANDIDATE", 100, setup="MOMENTUM BUY", entry_zone_low=99, entry_zone_high=100, stop_est=94, score=100, next_day_bias="BULLISH CONFIRM"),
+        row("D2", "WATCH TREND", 108, open=100, low=99, high=108, score=65, next_day_bias="WATCH TREND"),
         row("D3", "EXIT PRESSURE", 100, score=20, next_day_bias="DEFENSIVE / EXIT RISK", distribution_score=48),
     ])
     assert_true(result["contextual_overlay"] == "PROFIT PROTECT", "real giveback plus supply must trigger hard protection")
@@ -80,10 +83,10 @@ def audit_tp1_hit_trims_without_forcing_full_exit():
     result = latest([
         row(
             "D1", "BUY CANDIDATE", 100, high=101, setup="MOMENTUM BUY",
-            entry_zone_high=100, stop_est=94, take_profit_1=109,
+            entry_zone_low=99, entry_zone_high=100, stop_est=94, take_profit_1=109,
             take_profit_1_reduce_pct=30, post_tp1_stop=100,
         ),
-        row("D2", "WATCH TREND", 108, high=110),
+        row("D2", "WATCH TREND", 108, open=100, low=99, high=110),
     ])
     assert_true(result["contextual_overlay"] == "TAKE PROFIT 1", "first target touch must create a distinct profit stage")
     assert_true(result["profit_stage"] == "TP1 REACHED", "TP1 stage must be exposed to the UI")
@@ -94,25 +97,39 @@ def audit_tp1_giveback_protects_remainder():
     result = latest([
         row(
             "D1", "BUY CANDIDATE", 100, high=101, setup="MOMENTUM BUY",
-            entry_zone_high=100, stop_est=94, take_profit_1=109,
+            entry_zone_low=99, entry_zone_high=100, stop_est=94, take_profit_1=109,
             take_profit_1_reduce_pct=30, post_tp1_stop=100,
             volatility_regime="TREND VOLATILITY",
         ),
-        row("D2", "WATCH TREND", 109, high=111),
+        row("D2", "WATCH TREND", 109, open=100, low=99, high=111),
         row("D3", "WATCH TREND", 105, high=108),
     ])
     assert_true(result["contextual_overlay"] == "PROFIT PROTECT", "material R giveback after TP1 must protect the remainder")
     assert_true(result["profit_stage"] == "PROTECT REMAINDER", "giveback must expose the remainder-protection stage")
 
 
+def audit_tp1_raised_stop_closes_remainder_intraday():
+    rows = [
+        row(
+            "D1", "BUY CANDIDATE", 100, high=101, setup="MOMENTUM BUY",
+            entry_zone_low=99, entry_zone_high=100, stop_est=94, take_profit_1=109,
+            take_profit_1_reduce_pct=30, post_tp1_stop=100,
+        ),
+        row("D2", "WATCH TREND", 109, open=100, low=99, high=110),
+        row("D3", "WATCH TREND", 102, open=103, low=99, high=104),
+    ]
+    context = dwo.recent_buy_profit_context(rows, 2)
+    assert_true(context is None, "an intraday breach of the raised TP1 stop must close the remainder")
+
+
 def audit_buy_bar_high_cannot_fake_tp1_hit():
     result = latest([
         row(
             "D1", "BUY CANDIDATE", 100, high=120, setup="MOMENTUM BUY",
-            entry_zone_high=100, stop_est=94, take_profit_1=109,
+            entry_zone_low=99, entry_zone_high=100, stop_est=94, take_profit_1=109,
             take_profit_1_reduce_pct=30, post_tp1_stop=100,
         ),
-        row("D2", "WATCH TREND", 100, high=101),
+        row("D2", "WATCH TREND", 100, open=100, low=99, high=101),
     ])
     assert_true(not result.get("contextual_overlay"), "BUY-bar high must not count as a later TP1 hit when intraday order is unknown")
 
@@ -257,12 +274,32 @@ def audit_unfilled_buy_is_excluded_from_learning():
     assert_true(not dwo.build_learning_stats(outcomes), "unfilled BUY must not change learning weights")
 
 
-def audit_ambiguous_daily_path_is_excluded_from_learning():
+def audit_known_open_fill_then_stop_is_learned_as_failure():
     prior = executable_prior()
-    bars = [executable_current(open=100, high=104, low=96, close=101) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
+    bars = [executable_current(open=100, high=102, low=96, close=98) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
     outcome = dwo.score_signal_horizon(prior, bars)
-    assert_true(outcome["path_status"] == "AMBIGUOUS", "same-bar entry and stop must not invent an intraday sequence")
-    assert_true(outcome["outcome_learnable"] is False, "ambiguous daily path must be excluded from learning")
+    assert_true(outcome["path_status"] == "SETTLED", "an open inside the entry zone proves entry occurred before the later stop touch")
+    assert_true(outcome["outcome_label"] == "FAILED", "a known fill followed by a stop must remain in learning evidence")
+
+
+def audit_unknown_entry_stop_order_is_excluded_from_learning():
+    prior = executable_prior()
+    bars = [executable_current(open=105, high=106, low=96, close=101) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
+    outcome = dwo.score_signal_horizon(prior, bars)
+    assert_true(outcome["path_status"] == "AMBIGUOUS", "entry and stop order remains unknown when price opens above the zone")
+    assert_true(outcome["outcome_learnable"] is False, "genuine intraday-order ambiguity must be excluded")
+
+
+def audit_unfilled_buy_cannot_trigger_profit_management():
+    result = latest([
+        row(
+            "D1", "BUY CANDIDATE", 100, setup="PULLBACK BUY",
+            entry_zone_low=98, entry_zone_high=100, stop_est=94, take_profit_1=109,
+        ),
+        row("D2", "WATCH TREND", 112, open=110, low=108, high=114),
+        row("D3", "WATCH TREND", 111, open=112, low=110, high=113),
+    ])
+    assert_true(not result.get("contextual_overlay"), "a zone that never filled cannot create TP1 or profit-protection guidance")
 
 
 def audit_non_executable_signal_is_excluded_from_risk_path_learning():
@@ -655,8 +692,10 @@ def audit_signal_outcome_history_is_paginated():
 
     def fake_select(path):
         calls.append(path)
+        if path.startswith("watchlist_publication_control?"):
+            return [{"active_publication_id": "pub-validated"}]
         if path.startswith("watchlist_refresh_runs?"):
-            return [{"payload": {"publication_id": "pub-validated", "sync_state": "complete"}}]
+            return [{"publication_id": "pub-validated", "payload": {"publication_id": "pub-validated", "sync_state": "complete"}}]
         offset = int(path.rsplit("offset=", 1)[1])
         count = max(0, min(1000, 1500 - offset))
         return [
@@ -1208,6 +1247,7 @@ def main():
     audit_profit_plan_adapts_to_volatility_regime()
     audit_tp1_hit_trims_without_forcing_full_exit()
     audit_tp1_giveback_protects_remainder()
+    audit_tp1_raised_stop_closes_remainder_intraday()
     audit_buy_bar_high_cannot_fake_tp1_hit()
     audit_post_exit_cooldown_sees_short_pressure()
     audit_post_exit_risk_persistence_keeps_exit_pressure()
@@ -1216,7 +1256,9 @@ def main():
     audit_volatile_hold_has_consistent_score()
     audit_behavior_history_seeds_learning()
     audit_unfilled_buy_is_excluded_from_learning()
-    audit_ambiguous_daily_path_is_excluded_from_learning()
+    audit_known_open_fill_then_stop_is_learned_as_failure()
+    audit_unknown_entry_stop_order_is_excluded_from_learning()
+    audit_unfilled_buy_cannot_trigger_profit_management()
     audit_non_executable_signal_is_excluded_from_risk_path_learning()
     audit_defensive_learning_shows_samples_without_promotion()
     audit_learning_windows_keep_recent_and_baseline_roles_separate()
@@ -1276,7 +1318,7 @@ def main():
     audit_fillability_fails_closed()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 71,
+        "cases": 74,
     })
 
 

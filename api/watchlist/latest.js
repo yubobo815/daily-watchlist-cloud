@@ -17,24 +17,9 @@ module.exports = async function handler(request, response) {
       recentRunDates(2),
       publishedLatestPayload(),
     ]);
-    if (
-      published.runInfo?.status === "published_fallback"
-      && published.latest
-      && (!latest || String(published.latest) > String(latest))
-    ) {
-      response.setHeader("Cache-Control", "public, max-age=0, s-maxage=15, stale-while-revalidate=30");
-      response.status(200).json(published);
-      return;
-    }
     if (!latest) {
       response.setHeader("Cache-Control", "no-store");
-      response.status(200).json({
-        latest: "",
-        previous: "",
-        rows: [],
-        previousRows: [],
-        runInfo: null,
-      });
+      response.status(200).json(published);
       return;
     }
 

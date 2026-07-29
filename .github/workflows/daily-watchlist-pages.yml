@@ -43,6 +43,7 @@ concurrency:
 jobs:
   refresh-and-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -78,7 +79,7 @@ jobs:
           # Never gate them on the runner's wall-clock hour.
           echo "run=true" >> "$GITHUB_OUTPUT"
           echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event.schedule }}" = "0 23 * * 5" ]; then
+          if [ "${{ github.event.schedule }}" = "17 23 * * 5" ]; then
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
           else
             echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
@@ -117,7 +118,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y postgresql-client
           fi
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase_schema.sql
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -1 -f supabase_schema.sql
 
       - name: Reserve Supabase publishing headroom
         if: steps.time_gate.outputs.run == 'true'
@@ -188,6 +189,15 @@ jobs:
         if: steps.time_gate.outputs.run == 'true'
         run: node scripts/audit_frontend_architecture.js
 
+      - name: Preserve current Pages publication for rollback
+        if: steps.time_gate.outputs.run == 'true'
+        env:
+          PAGE_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          python scripts/build_pages_rollback.py \
+            --base-url "$PAGE_BASE_URL" \
+            --output public-rollback
+
       - name: Configure Pages
         id: configure_pages
         if: steps.time_gate.outputs.run == 'true'
@@ -202,9 +212,17 @@ jobs:
         if: steps.time_gate.outputs.run == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
+          name: github-pages
           path: public
 
-      - name: Finalize Supabase publication
+      - name: Upload Pages rollback artifact
+        if: steps.time_gate.outputs.run == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          name: github-pages-rollback
+          path: public-rollback
+
+      - name: Mark Supabase publication validated
         if: steps.time_gate.outputs.run == 'true'
         id: finalize_publication
         env:
@@ -217,9 +235,9 @@ jobs:
           export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
           python scripts/supabase_learning_health.py --finalize
 
-      # Publish static files only after the database CAS promotion succeeds.
-      # A Pages failure can then leave the previous static page in place, but
-      # can never expose a staged publication that the database rolls back.
+      # Deploy the immutable artifact while the database publication remains
+      # inactive. The active pointer moves only after the deployed manifest is
+      # fetched back and verified against the expected publication id.
       - name: Deploy to GitHub Pages
         if: steps.time_gate.outputs.run == 'true'
         id: deployment
@@ -228,16 +246,87 @@ jobs:
 
       - name: Retry GitHub Pages deployment
         if: steps.time_gate.outputs.run == 'true' && steps.deployment.outcome == 'failure'
+        id: deployment_retry
         uses: actions/deploy-pages@v5
 
+      - name: Verify deployed Pages publication
+        if: steps.time_gate.outputs.run == 'true' && (steps.deployment.outcome == 'success' || steps.deployment_retry.outcome == 'success')
+        id: pages_verify
+        env:
+          PRIMARY_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          RETRY_PAGE_URL: ${{ steps.deployment_retry.outputs.page_url }}
+        shell: bash
+        run: |
+          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          export PAGE_URL="${RETRY_PAGE_URL:-${PRIMARY_PAGE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}}}"
+          for attempt in $(seq 1 12); do
+            if python scripts/verify_pages_publication.py \
+              --base-url "$PAGE_URL" \
+              --expected-publication "$EXPECTED_PUBLICATION_ID"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Pages publication verification failed after 12 attempts."
+          exit 1
+
+      - name: Activate Supabase publication
+        if: steps.time_gate.outputs.run == 'true' && steps.pages_verify.outcome == 'success'
+        id: activate_publication
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          export EXPECTED_RUN_DATE="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["run_date"])')"
+          export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
+          python scripts/supabase_learning_health.py --activate
+
+      - name: Restore previous Pages publication after failed commit
+        if: always() && steps.time_gate.outputs.run == 'true' && (steps.deployment.outcome == 'success' || steps.deployment_retry.outcome == 'success') && (steps.pages_verify.outcome != 'success' || steps.activate_publication.outcome != 'success')
+        id: rollback_deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-rollback
+
+      - name: Retry previous Pages publication restore
+        if: always() && steps.rollback_deployment.outcome == 'failure'
+        id: rollback_deployment_retry
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-rollback
+
+      - name: Verify restored Pages publication
+        if: always() && (steps.rollback_deployment.outcome == 'success' || steps.rollback_deployment_retry.outcome == 'success')
+        id: rollback_verify
+        env:
+          PRIMARY_PAGE_URL: ${{ steps.rollback_deployment.outputs.page_url }}
+          RETRY_PAGE_URL: ${{ steps.rollback_deployment_retry.outputs.page_url }}
+        run: |
+          export PAGE_URL="${RETRY_PAGE_URL:-$PRIMARY_PAGE_URL}"
+          export ROLLBACK_PUBLICATION_ID="$(cat public-rollback/rollback_publication_id.txt)"
+          for attempt in $(seq 1 12); do
+            if python scripts/verify_pages_publication.py \
+              --base-url "$PAGE_URL" \
+              --expected-publication "$ROLLBACK_PUBLICATION_ID"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Restored Pages publication could not be verified."
+          exit 1
+
       - name: Reclaim Supabase replay storage
-        if: always() && steps.time_gate.outputs.run == 'true' && steps.finalize_publication.outcome == 'success'
+        if: always() && steps.time_gate.outputs.run == 'true' && steps.activate_publication.outcome == 'success'
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: scripts/database_capacity_guard.sh finalize
 
       - name: Roll back incomplete Supabase publication
-        if: always() && steps.time_gate.outputs.run == 'true'
+        if: always() && steps.time_gate.outputs.run == 'true' && (steps.activate_publication.outcome == 'success' || (steps.deployment.outcome != 'success' && steps.deployment_retry.outcome != 'success') || steps.rollback_verify.outcome == 'success')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: scripts/database_capacity_guard.sh rollback

@@ -90,6 +90,43 @@ def mark_run_validated(run_date: str, status: str, publication_id: str) -> None:
             raise RuntimeError("Validated publication changed during compare-and-set.")
 
 
+def publication_generation() -> int:
+    url, key = credentials()
+    endpoint = f"{url}/rest/v1/watchlist_publication_control?select=generation&control_key=eq.active&limit=1"
+    req = urllib.request.Request(endpoint, headers=headers(key), method="GET")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        rows = json.loads(resp.read().decode("utf-8") or "[]")
+    if len(rows) > 1:
+        raise RuntimeError("Publication control has more than one active row.")
+    return int(rows[0].get("generation") or 0) if rows else 0
+
+
+def activate_publication(publication_id: str) -> None:
+    """Promote one validated publication after the deployed Pages manifest is verified."""
+    url, key = credentials()
+    control_endpoint = f"{url}/rest/v1/rpc/activate_watchlist_publication"
+    control_headers = headers(key)
+    control_headers.update({"Content-Type": "application/json"})
+    expected_generation = publication_generation()
+    req = urllib.request.Request(
+        control_endpoint,
+        data=json.dumps({
+            "p_publication_id": publication_id,
+            "p_expected_generation": expected_generation,
+        }).encode("utf-8"),
+        headers=control_headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        activated = json.loads(resp.read().decode("utf-8") or "[]")
+        if resp.status != 200 or len(activated) != 1:
+            raise RuntimeError("Could not switch the active publication pointer.")
+        if str(activated[0].get("active_publication_id") or "") != publication_id:
+            raise RuntimeError("Active publication pointer changed during activation.")
+        if int(activated[0].get("generation") or -1) != expected_generation + 1:
+            raise RuntimeError("Active publication generation changed during activation.")
+
+
 def add_query_param(path: str, key: str, value: str | int) -> str:
     separator = "&" if "?" in path else "?"
     return f"{path}{separator}{urllib.parse.quote(str(key))}={urllib.parse.quote(str(value))}"
@@ -160,7 +197,7 @@ def required_learning_snapshot_rows(snapshot_count: int) -> int:
     return max(10, math.ceil(max(0, snapshot_count) * 0.10))
 
 
-def main(*, finalize: bool = False) -> None:
+def main(*, finalize: bool = False, activate: bool = False) -> None:
     expected_run_date = os.getenv("EXPECTED_RUN_DATE", "").strip()
     expected_publication_id = os.getenv("EXPECTED_PUBLICATION_ID", "").strip()
     synced_run_date = latest_synced_run_date()
@@ -461,7 +498,7 @@ def main(*, finalize: bool = False) -> None:
     if len(history_rows) < 1000:
         emit_metrics(metrics)
         fail("Behavior history row count is too low for watchlist lookback learning.")
-    if str(latest.get("status") or "") not in {"pending_audit", "ok", "degraded"} or latest_payload.get("sync_state") != "complete":
+    if str(latest.get("status") or "") not in {"pending_audit", "validated", "ok", "degraded"} or latest_payload.get("sync_state") != "complete":
         emit_metrics(metrics)
         fail("Expected run is not marked as a complete Supabase publication.")
     if int(latest_payload.get("synced_snapshot_rows") or 0) != len(snapshot_rows):
@@ -544,8 +581,13 @@ def main(*, finalize: bool = False) -> None:
         emit_metrics(metrics)
         fail("Scanner status is not publishable after database validation.")
     if finalize and str(latest.get("status") or "") == "pending_audit":
-        mark_run_validated(run_date, scanner_status, publication_id)
-    print(f"SUPABASE_LEARNING_HEALTH={'FINALIZED' if finalize else 'VALIDATED'}")
+        mark_run_validated(run_date, "validated", publication_id)
+    if activate:
+        if str(latest.get("status") or "") != "validated":
+            fail("Only a validated, inactive publication can be activated.")
+        activate_publication(publication_id)
+    state = "ACTIVATED" if activate else "STAGED" if finalize else "VALIDATED"
+    print(f"SUPABASE_LEARNING_HEALTH={state}")
     emit_metrics(metrics)
 
 
@@ -555,9 +597,17 @@ if __name__ == "__main__":
         parser.add_argument(
             "--finalize",
             action="store_true",
-            help="Atomically expose the pending publication after all deployment checks pass.",
+            help="Mark the audited publication validated but keep it inactive.",
         )
-        main(finalize=parser.parse_args().finalize)
+        parser.add_argument(
+            "--activate",
+            action="store_true",
+            help="Activate a validated publication after the deployed Pages manifest passes verification.",
+        )
+        options = parser.parse_args()
+        if options.finalize and options.activate:
+            parser.error("--finalize and --activate are mutually exclusive")
+        main(finalize=options.finalize, activate=options.activate)
     except Exception as exc:
         print(f"SUPABASE_LEARNING_HEALTH=FAIL {exc}")
         sys.exit(1)

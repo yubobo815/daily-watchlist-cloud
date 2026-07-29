@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const { pressureComparison } = require("../assets/history_summary");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -94,6 +95,15 @@ function main() {
   const latest = JSON.parse(fs.readFileSync(latestPath, "utf8"));
   const latestBytes = fs.statSync(latestPath).size;
   assert(latest.publication_id === manifest.publication_id && latest.run_date === manifest.run_date, "latest payload must match manifest publication");
+  const manifestPaths = new Set([manifest.latest_path, ...Object.values(manifest.ticker_paths)]);
+  assert(manifest.files && Object.keys(manifest.files).length === manifestPaths.size, "manifest must inventory every immutable payload");
+  manifestPaths.forEach((relativePath) => {
+    const content = fs.readFileSync(path.join(first, relativePath));
+    const integrity = manifest.files[relativePath];
+    assert(integrity?.bytes === content.length, `${relativePath} byte size is not covered by the manifest`);
+    assert(integrity?.sha256 === crypto.createHash("sha256").update(content).digest("hex"), `${relativePath} hash is not covered by the manifest`);
+  });
+  assert(latest.rows.every((row) => row.execution_priority !== undefined && row.execution_priority !== ""), "static watchlist must retain scanner execution priority");
   assert(latestBytes <= 600 * 1024, "latest payload exceeds the 600 KB raw budget");
 
   const tickerFiles = filesBelow(path.join(first, manifest.ticker_base_path)).filter((file) => file.endsWith(".json"));
@@ -108,6 +118,10 @@ function main() {
     assert((payload.historyRows || []).every((row) => row.ticker === payload.ticker), `${path.basename(file)} contains another ticker's history`);
     assert((payload.historyRows || []).length <= 30, `${path.basename(file)} exceeds the 30-session frontend history budget`);
     assert((payload.historyRows || []).every((row) => !Object.prototype.hasOwnProperty.call(row, "payload")), `${path.basename(file)} duplicates row payload data`);
+    if ((payload.historyRows || []).length === 30) {
+      assert((payload.historyRows || []).every((row) => row.buyer_score !== undefined && row.seller_score !== undefined), `${path.basename(file)} omits pressure scores required by the 30-session summary`);
+      assert(pressureComparison(payload.historyRows).available, `${path.basename(file)} cannot calculate the published pressure summary`);
+    }
   });
 
   fs.rmSync(temp, { recursive: true, force: true });

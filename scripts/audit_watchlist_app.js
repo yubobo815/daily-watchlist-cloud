@@ -4,6 +4,7 @@ const { committedPublicationMatches, rowDto, runDto } = require("../api/_supabas
 const { mergeSnapshotIntoLatestHistory } = require("../api/ticker/[ticker]");
 const { latestCompletedMarketSession, marketSessionAge, previousMarketSession } = require("../api/_market_session");
 const { historyMetrics, pressureComparison, signalTransition, interpretationState } = require("../assets/history_summary");
+const { qualityConstraintLabel, runHealthStatus, runHealthSummary } = require("../assets/presentation");
 const fs = require("fs");
 
 const REQUIRED_GATES = [
@@ -169,6 +170,33 @@ function auditHistorySummary() {
   return { metricCases: 6, pressureCases: 6, transitionCases: 4, priorityCases: 2 };
 }
 
+function auditPresentationSemantics() {
+  const currentSession = latestCompletedMarketSession().toISOString().slice(0, 10);
+  const blocked = { action: "SETUP FORMING", market_permission: "BLOCK" };
+  const avoid = { action: "WAIT / AVOID", market_permission: "BLOCK" };
+  const exit = { action: "EXIT PRESSURE", market_permission: "BLOCK" };
+  assert(qualityConstraintLabel(blocked) === "MARKET BLOCKED", "entry setups must expose their hard market block");
+  assert(qualityConstraintLabel(avoid) === "NO ENTRY", "avoid rows must lead with the action rather than an irrelevant entry gate");
+  assert(qualityConstraintLabel(exit) === "PROTECT CAPITAL", "exit rows must lead with capital protection");
+  const partial = runHealthStatus({
+    symbols_analyzed: 186,
+    symbols_total: 192,
+    symbols_failed: 6,
+    symbols_stale_cache: 1,
+    latest_data_date: currentSession,
+    payload: { stale_execution_blocks: 1 },
+  }, Array.from({ length: 186 }, (_, index) => ({ ticker: `T${index}`, date: currentSession })));
+  assert(partial.tone === "warn" && partial.label === "Partial coverage", "one stale ticker must not mark a 97% complete publication globally unsafe");
+  assert(partial.detail.includes("1 stale-data block") && !partial.detail.includes("1 stale-data blocks"), "health copy must use natural singular grammar");
+  assert(runHealthSummary({ symbols_stale_cache: 1 }).includes("1 stock using"), "cached-data copy must use natural singular grammar");
+  const unsafe = runHealthStatus({ symbols_analyzed: 20, symbols_total: 100 }, []);
+  assert(unsafe.tone === "bad", "materially incomplete publications must still fail closed");
+  const expired = runHealthStatus({ symbols_analyzed: 1, symbols_total: 1, latest_data_date: "2026-01-02" }, [{ ticker: "OLD", date: "2026-01-02" }]);
+  assert(expired.tone === "bad", "an expired static publication must fail closed even if stored stale flags say fresh");
+  assert(qualityConstraintLabel({ action: "BUY CANDIDATE", data_date: "2026-01-02" }) === "DATA NEEDS REFRESH", "expired rows must block entry in the browser");
+  return { readinessCases: 4, healthCases: 4 };
+}
+
 function auditDecisionFunnelUi() {
   const appSource = fs.readFileSync("assets/app.js", "utf8");
   const pageSource = fs.readFileSync("index.html", "utf8");
@@ -182,6 +210,7 @@ function auditDecisionFunnelUi() {
   assert(!/\sopen(?:\s|=|>)/i.test(activityTag), "market activity must be collapsed by default");
   assert(appSource.includes("target.open = true"), "Activity navigation must open the details drawer before scrolling");
   const stylesSource = fs.readFileSync("assets/styles.css", "utf8");
+  const presentationSource = fs.readFileSync("assets/presentation.js", "utf8");
   assert(stylesSource.includes("#market-activity[open] > summary"), "open market activity must have a scoped surface treatment");
   assert(stylesSource.includes("#market-activity .focus-item"), "market activity cards must use scoped palette overrides");
   assert(stylesSource.includes("#market-activity .focus-unlock input"), "saved-name controls must use the shared light palette");
@@ -199,10 +228,10 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("skip the trade if price opens or runs above the maximum entry"), "BUY guidance must state the no-chase rule");
   assert(appSource.includes("function fillabilityReadout(row)"), "entry fillability must be explained in natural language");
   assert(appSource.includes("Price plan"), "active levels must use a concise reader-facing label");
-  assert(appSource.includes('return "NEEDS VERIFICATION"'), "missing execution evidence must use a reader-facing readiness status");
-  assert(appSource.includes('return "MARKET BLOCKED"'), "market blocks must be presented as a concrete decision reason");
-  assert(appSource.includes('return "SETUP UNPROVEN"'), "insufficient walk-forward evidence must be distinguished from a market block");
-  assert(appSource.includes('if (antiSignal === "BLOCK") return "DO NOT ENTER"'), "anti-signal blocks must suppress the numeric readiness display with an actionable label");
+  assert(presentationSource.includes('return "NEEDS VERIFICATION"'), "missing execution evidence must use a reader-facing readiness status");
+  assert(presentationSource.includes('return "MARKET BLOCKED"'), "market blocks must be presented as a concrete decision reason");
+  assert(presentationSource.includes('return "SETUP UNPROVEN"'), "insufficient walk-forward evidence must be distinguished from a market block");
+  assert(presentationSource.includes('if (antiSignal === "BLOCK") return "DO NOT ENTER"'), "anti-signal blocks must suppress the numeric readiness display with an actionable label");
   assert(!appSource.includes('"GATE BLOCK"'), "reader-facing UI must not expose the internal gate-block label");
   assert(!appSource.includes("Trend quality ${fmtConviction(latest)} / 100"), "ticker diagnostics must not present adjusted rank as synthetic trend quality");
   assert(appSource.includes("Why we see it this way"), "ticker panel must use a reader-facing evidence label");
@@ -225,7 +254,7 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
   assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
-  assert(tickerSource.includes("frontend-data-20260724") && pageSource.includes("frontend-data-20260724"), "both app surfaces must load the current shared application bundle");
+  assert(tickerSource.includes("release-audit-20260728") && pageSource.includes("release-audit-20260728"), "both app surfaces must load the current shared application bundle");
   assert(!appSource.includes("Optional chart"), "ticker detail must remove the optional scanner chart");
   assert(!appSource.includes("Daily scanner bars"), "ticker detail must remove scanner-chart jargon");
   assert(!stylesSource.includes(".chart-details") && !stylesSource.includes(".history-chart"), "removed chart styles must not remain as dead UI code");
@@ -234,27 +263,28 @@ function auditDecisionFunnelUi() {
   assert(!pageSource.includes("assets/history_summary.js"), "the main watchlist must not load ticker-only summary code");
   assert(appSource.includes("Recent behavior summary is temporarily unavailable."), "ticker detail must fail clearly when its summary dependency is unavailable");
   assert(appSource.includes("session dates are incomplete"), "ticker detail must explain mixed-date history failures");
-  assert(appSource.includes("maximum drawdown based on closing prices"), "behavior summary must disclose its drawdown basis");
+  assert(appSource.includes("maximum closing-price drawdown"), "behavior summary must disclose its drawdown basis");
   assert(appSource.includes("highest daily high"), "behavior summary must compare the latest close with the period's intraday high");
   assert(appSource.includes("function historySignalSentence(rows, summaryApi)"), "behavior summary must report the latest actual signal transition");
   assert(appSource.includes("function pressureSummary(rows, summaryApi)"), "behavior summary must provide a bounded price-and-volume pressure inference");
   assert(appSource.includes("comparison.shift") && appSource.includes("comparison.control"), "pressure copy must distinguish directional shift from current control");
   assert(appSource.includes("Directionally supportive volume"), "volume confirmation must agree with pressure direction");
-  assert(appSource.includes("This price-and-volume proxy does not override today's"), "pressure inference must not soften a defensive signal");
-  assert(appSource.includes("Today's data is stale, so this historical pressure is descriptive only."), "stale pressure must be explicitly qualified");
+  assert(appSource.includes("This price-and-volume proxy does not override the latest"), "pressure inference must not soften a defensive signal");
+  assert(appSource.includes("The latest data is stale, so this historical pressure is descriptive only."), "stale pressure must be explicitly qualified");
   assert(appSource.includes("A 5-versus-25 session comparison needs 30 valid observations"), "partial history must not be presented as a full pressure window");
   assert(!appSource.includes("The most common view was"), "behavior summary must not substitute a dominant historical label for the actual transition");
   assert(appSource.includes("The current Exit signal takes priority"), "positive history must never soften today's Exit signal");
-  assert(appSource.includes("Today's data is stale, so the recent record cannot support an entry."), "stale history must be explained without execution jargon");
+  assert(appSource.includes("The latest data is stale, so the recent record cannot support an entry."), "stale history must be explained without execution jargon");
   assert(appSource.includes("The technical picture is developing, but it has not reached an entry signal."), "Building must remain explicitly non-executable");
   assert(appSource.includes("function similarCasesNarrative(row)"), "plain-language evidence must retain comparable historical context");
-  assert(appSource.includes("No entry is recommended today."), "inactive signals must not expose misleading planning levels");
-  assert(tickerSource.includes("Today's decision") && tickerSource.includes("Recent behavior"), "ticker detail must follow the user decision order");
+  assert(appSource.includes("No entry is recommended from the latest session."), "inactive signals must not expose misleading planning levels");
+  assert(tickerSource.includes("Latest decision") && tickerSource.includes("Recent behavior"), "ticker detail must follow the user decision order without implying stale data is current");
   assert(stylesSource.includes("body.ticker-page :is(a, button, input, summary):focus-visible"), "ticker controls must expose keyboard focus");
   assert(appSource.includes('if (!hash?.startsWith("#")) return;'), "ordinary navigation links must not be parsed as CSS hash targets");
   assert(pageSource.includes('data-mobile-filter="building"'), "mobile Building filter must use the aggregate queue");
   assert(pageSource.includes('data-mobile-filter="risk"'), "mobile Risk filter must use the aggregate queue");
-  assert(!appSource.includes('if (state.query.trim()) state.filter = "all"'), "search must preserve the selected decision queue");
+  assert(appSource.includes("if (searchActive) return true;"), "search must cover the full watchlist instead of being hidden by a selected queue");
+  assert(appSource.includes('card.classList.toggle("active", !searchActive'), "global search must clear the visual category selection");
   return { executionQueues: 3, activityTarget: "market-activity", naturalDecisionCopy: true };
 }
 
@@ -285,11 +315,11 @@ function auditMarketSessionFreshness() {
       adjusted_score: 96,
       data_age_days: 0,
       freshness_block: "NO",
+      personality_setup_allowed: "YES",
       market_permission: "ALLOW",
       ticker_permission: "ALLOW",
       walk_forward_permission: "ALLOW",
       risk_permission: "ALLOW",
-      personality_setup_allowed: "YES",
       execution_fill_state: "VALIDATED",
       execution_fill_probability: 0.68,
     },
@@ -377,29 +407,37 @@ function auditAtomicPublicationContract() {
   const latestApi = fs.readFileSync("api/watchlist/latest.js", "utf8");
   const healthAudit = fs.readFileSync("scripts/supabase_learning_health.py", "utf8");
   const schema = fs.readFileSync("supabase_schema.sql", "utf8");
+  const pageVerifier = fs.readFileSync("scripts/verify_pages_publication.py", "utf8");
+  const rollbackBuilder = fs.readFileSync("scripts/build_pages_rollback.py", "utf8");
   assert(scanner.includes('final_metadata["status"] = "pending_audit"'), "scanner must keep a synced run hidden until database audit passes");
   assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Enforce staged database ceiling"), "database health audit must precede staged capacity enforcement");
   assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy to GitHub Pages"), "an oversized staged publication must roll back before deployment");
-  assert(workflow.indexOf("Finalize Supabase publication") < workflow.indexOf("Reclaim Supabase replay storage"), "retention must never mutate a pending publication");
-  assert(workflow.indexOf("Upload Pages artifact") < workflow.indexOf("Finalize Supabase publication"), "the immutable Pages artifact must be staged before database promotion");
-  assert(workflow.indexOf("Finalize Supabase publication") < workflow.indexOf("Deploy to GitHub Pages"), "Pages must never expose a staged publication that database rollback can remove");
-  assert(workflow.includes("supabase_learning_health.py --finalize"), "workflow must explicitly finalize the audited publication");
-  assert(supabaseApi.includes("status=in.(ok,degraded)"), "API must select only validated run states");
+  assert(workflow.indexOf("Activate Supabase publication") < workflow.indexOf("Reclaim Supabase replay storage"), "retention must never run before pointer activation");
+  assert(workflow.indexOf("Upload Pages artifact") < workflow.indexOf("Mark Supabase publication validated"), "the immutable Pages artifact must be staged before database validation");
+  assert(workflow.indexOf("Verify deployed Pages publication") < workflow.indexOf("Activate Supabase publication"), "the active database pointer must move only after deployed manifest verification");
+  assert(workflow.includes("supabase_learning_health.py --finalize") && workflow.includes("supabase_learning_health.py --activate"), "workflow must separate validation from activation");
+  assert(supabaseApi.includes("watchlist_publication_control"), "API must resolve the explicit active publication pointer");
   assert(supabaseApi.includes("committedPublicationMatches"), "API must verify immutable publication ids after fetching rows");
   assert(supabaseApi.includes("return [];"), "status-query failures must fail closed instead of selecting raw snapshots");
   assert(tickerApi.includes("recentRunDates(1)"), "ticker detail must share the validated run selector with the main list");
   assert(tickerApi.includes("committedPublicationMatches") && latestApi.includes("committedPublicationMatches"), "list and detail APIs must reject mixed same-day reruns");
   assert(healthAudit.includes('payload->>publication_id=eq.') && healthAudit.includes('status=eq.pending_audit'), "audit promotion must compare-and-set the exact pending publication");
   assert(scanner.includes('outcomes["publication_id"] = publication_id'), "outcomes must be attributable to one immutable publication");
-  assert(scanner.includes('publication_id=in.({publication_filter})'), "learning must exclude outcomes from unvalidated publications");
+  assert(scanner.includes("fetch_active_publication_run()"), "learning must resolve outcomes through the active publication pointer");
   assert(scanner.includes('["publication_id", "signal_run_date", "evaluation_run_date", "ticker"]'), "outcome upserts must preserve publication versions");
-  assert(schema.includes("add primary key (publication_id, ticker)") && schema.includes("add primary key (publication_id, ticker, history_date)"), "snapshot and history staging rows must be versioned by publication");
+  assert(schema.includes("('watchlist_snapshots', array['publication_id', 'ticker'])") && schema.includes("('watchlist_behavior_history', array['publication_id', 'ticker', 'history_date'])"), "snapshot and history staging rows must be versioned by publication");
+  assert(workflow.includes("github-pages-rollback") && workflow.includes("Restore previous Pages publication after failed commit"), "a failed Pages/database commit must redeploy the prior publication");
+  assert(workflow.includes("verify_pages_publication.py") && pageVerifier.includes("hashlib.sha256") && pageVerifier.includes("ticker_count"), "Pages verification must validate payload integrity and ticker mappings");
+  assert(rollbackBuilder.includes("AssetParser") && !rollbackBuilder.includes("--template"), "Pages rollback must preserve the complete previous site rather than mix old data with new code");
+  assert(workflow.includes("Retry previous Pages publication restore") && workflow.includes("Verify restored Pages publication"), "Pages rollback must retry and verify compensation");
+  assert(workflow.includes('psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -1'), "schema migration must run in one database transaction");
+  assert(schema.includes("watchlist_publication_control") && schema.includes("('watchlist_snapshots', 'publication_id', 'watchlist_snapshots_publication_fk', 'c', 'cascade')"), "database staging must have an active pointer and cascading publication ownership");
   assert(latestApi.includes("publication_id=eq.") && tickerApi.includes("publication_id=eq."), "list and detail APIs must select the active validated publication only");
   assert(scanner.includes('"learning_model_version": LEARNING_MODEL_VERSION'), "publication metadata must declare the active learning model");
   assert(scanner.includes('"learning_horizon_sessions": LEARNING_HORIZON_SESSIONS'), "publication metadata must declare the active learning horizon");
   assert(!healthAudit.includes('entry_model_version") or "") == "zone-v2"'), "health audit must not hard-code a stale learning model");
   assert(healthAudit.includes('synced_outcome_rows') && healthAudit.includes('len(outcome_rows)'), "health audit must reconcile the current publication outcome count");
-  assert(healthAudit.includes("if finalize and") && healthAudit.includes("--finalize"), "health validation must not expose a publication before explicit finalization");
+  assert(healthAudit.includes("if finalize and") && healthAudit.includes("--activate"), "health validation and production activation must be separate operations");
   assert(healthAudit.includes("invalid_promotions") && healthAudit.includes("directional_validation_safe"), "health audit must reject under-evidenced model activation");
   const committedRun = { status: "ok", payload: { publication_id: "pub-1", sync_state: "complete" } };
   assert(committedPublicationMatches(committedRun, [{ payload: { publication_id: "pub-1" } }]), "matching publication ids must be readable");
@@ -723,6 +761,11 @@ function auditSupabaseFallback() {
       bull_trap_score: 0,
       bear_trap_score: 32,
       distribution_score: 6,
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      walk_forward_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      personality_setup_allowed: "YES",
       absorption_score: 72,
       short_pressure_proxy: 0,
       squeeze_watch: "NO",
@@ -1020,6 +1063,11 @@ function auditHistoricalReplayDto() {
       operator_pressure: "ACCUMULATION / ABSORPTION",
       bull_trap_score: 0,
       distribution_score: 6,
+      market_permission: "ALLOW",
+      ticker_permission: "ALLOW",
+      walk_forward_permission: "ALLOW",
+      risk_permission: "ALLOW",
+      personality_setup_allowed: "YES",
     },
   };
 
@@ -1037,7 +1085,7 @@ function auditHistoricalReplayDto() {
   assert(current.payload.signal_quality === "STALE DATA", "current DTO must still mark old current rows stale");
   assert(current.payload.next_day_bias === "EXECUTION BLOCKED", "current DTO must still block stale execution");
   assert(current.payload.reason_codes.includes("data_stale_block"), "current DTO must still add stale-data reason");
-  assert(current.payload.reason_codes.includes("missing_execution_proof"), "current DTO must still add execution-proof reason");
+  assert(!current.payload.reason_codes.includes("missing_execution_proof"), "complete frozen gates must not be mislabeled as missing execution proof");
 
   return {
     historicalAction: historical.action,
@@ -1135,6 +1183,7 @@ async function main() {
     historicalReplayDto: auditHistoricalReplayDto(),
     searchBehavior: auditSearchBehavior(),
     historySummary: auditHistorySummary(),
+    presentationSemantics: auditPresentationSemantics(),
     decisionFunnelUi: auditDecisionFunnelUi(),
     marketSessionFreshness: auditMarketSessionFreshness(),
     learningReadoutUi: auditLearningReadoutUi(),
