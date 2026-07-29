@@ -259,7 +259,10 @@ jobs:
         run: |
           export EXPECTED_PUBLICATION_ID="$(python -c 'import json; print(json.load(open("daily_watchlist_run_metadata_latest.json"))["publication_id"])')"
           export PAGE_URL="${RETRY_PAGE_URL:-${PRIMARY_PAGE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}}}"
-          for attempt in $(seq 1 12); do
+          # deploy-pages can report success before the Pages CDN exposes the
+          # new artifact. Allow six minutes, but never activate Supabase until
+          # the complete publication passes its integrity manifest.
+          for attempt in $(seq 1 36); do
             if python scripts/verify_pages_publication.py \
               --base-url "$PAGE_URL" \
               --expected-publication "$EXPECTED_PUBLICATION_ID"; then
@@ -267,7 +270,7 @@ jobs:
             fi
             sleep 10
           done
-          echo "Pages publication verification failed after 12 attempts."
+          echo "Pages publication verification failed after 36 attempts."
           exit 1
 
       - name: Activate Supabase publication
@@ -308,7 +311,7 @@ jobs:
         run: |
           export PAGE_URL="${RETRY_PAGE_URL:-$PRIMARY_PAGE_URL}"
           export ROLLBACK_PUBLICATION_ID="$(cat public-rollback/rollback_publication_id.txt)"
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 36); do
             if python scripts/verify_pages_publication.py \
               --base-url "$PAGE_URL" \
               --expected-publication "$ROLLBACK_PUBLICATION_ID"; then
