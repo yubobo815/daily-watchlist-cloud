@@ -200,7 +200,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     for row in history_rows:
         history_by_ticker[row_ticker(row, "history CSV")].append(row)
 
-    tickers = sorted(set(latest_by_ticker) | set(history_by_ticker))
+    # The publication contract is the current watchlist. Historical rows for a
+    # ticker that is no longer present must not create a phantom manifest entry.
+    tickers = sorted(latest_by_ticker)
     ticker_segments: dict[str, str] = {}
     used_segments: dict[str, str] = {}
     for ticker in tickers:

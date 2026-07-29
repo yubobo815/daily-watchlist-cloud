@@ -99,6 +99,14 @@ function main() {
     assert((payload.historyRows || []).length <= 30, `${path.basename(file)} is not capped after a 31-row input`);
   });
 
+  const historyOnly = path.join(temp, "history-only.csv");
+  const ghostRow = sourceHistory[1].replace(/^[^,]+/, "GHOST");
+  fs.writeFileSync(historyOnly, `${sourceHistory.join("\n")}\n${ghostRow}\n`);
+  const historyOnlyOutput = prepareSite("history-only");
+  build(historyOnlyOutput, historyOnly);
+  const historyOnlyManifest = JSON.parse(fs.readFileSync(path.join(historyOnlyOutput, "manifest.json"), "utf8"));
+  assert(!historyOnlyManifest.ticker_paths.GHOST, "history-only tickers must not become phantom current-watchlist entries");
+
   const manifest = JSON.parse(fs.readFileSync(path.join(first, "manifest.json"), "utf8"));
   const latestPath = path.join(first, manifest.latest_path);
   const latest = JSON.parse(fs.readFileSync(latestPath, "utf8"));
