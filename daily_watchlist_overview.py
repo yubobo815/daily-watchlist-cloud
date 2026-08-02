@@ -41,7 +41,7 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.08.03-balanced-v1"
+SCANNER_VERSION = "2026.08.03-balanced-v1.1"
 LEARNING_MODEL_VERSION = "five-session-execution-v6"
 INCREMENTAL_STATE_VERSION = "incremental-state-v1"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
@@ -7041,7 +7041,13 @@ def build_behavior_history(
         }
         snapshot["history_day"] = len(d) - end
         history_rows.append(snapshot)
-    return [apply_anti_signal_penalty(row) for row in enrich_signal_transitions(history_rows)]
+    # Historical rows must freeze the same decision policy shown for the live
+    # row. Keeping balanced-v1 only in shadow fields made replay timelines show
+    # the legacy BUILDING action even when the new policy had issued a BUY.
+    return [
+        activate_balanced_policy(finalize_shadow_execution(row))
+        for row in enrich_signal_transitions(history_rows)
+    ]
 
 
 LATEST_SIGNAL_FIELDS = [

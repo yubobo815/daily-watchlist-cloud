@@ -107,9 +107,10 @@ def summarize(observations: list[dict]) -> dict:
         and row.get("five_day_return_pct") is not None
         and float(row["five_day_return_pct"]) >= 5.0
     ]
-    current_buys = [row for row in observations if str(row.get("action")) in BUY_ACTIONS]
+    legacy_action = lambda row: str(row.get("legacy_action") or row.get("action"))
+    current_buys = [row for row in observations if legacy_action(row) in BUY_ACTIONS]
     shadow_buys = [row for row in observations if str(row.get("shadow_action")) in BUY_ACTIONS]
-    current_captured = sum(1 for row in opportunities if str(row.get("action")) in BUY_ACTIONS)
+    current_captured = sum(1 for row in opportunities if legacy_action(row) in BUY_ACTIONS)
     shadow_captured = sum(1 for row in opportunities if str(row.get("shadow_action")) in BUY_ACTIONS)
     current_recall = rate(current_captured, len(opportunities))
     shadow_recall = rate(shadow_captured, len(opportunities))
@@ -136,7 +137,7 @@ def summarize(observations: list[dict]) -> dict:
         or dwo.row_float(row, "distribution_score") >= 55.0
     ]
     current_risk_avoidance = rate(
-        sum(1 for row in risk_rows if str(row.get("action")) not in BUY_ACTIONS),
+        sum(1 for row in risk_rows if legacy_action(row) not in BUY_ACTIONS),
         len(risk_rows),
     )
     shadow_risk_avoidance = rate(
@@ -213,11 +214,35 @@ def audit_counterfactual_contract() -> None:
     assert_true(outcome["counterfactual_return_10d_pct"] != "", "ten-session counterfactual return must be retained")
 
 
+def audit_replay_freezes_balanced_action() -> None:
+    row = {
+        "action": "SETUP FORMING",
+        "signal_stage": "SETUP",
+        "adjusted_score": 55,
+        "score": 70,
+        "shadow_action": "BUY CANDIDATE",
+        "shadow_buy_type": "STARTER",
+        "shadow_policy_allowed": "YES",
+        "shadow_hard_blockers": [],
+        "shadow_cautions": ["Historical validation is still limited"],
+        "shadow_position_size_factor": 0.5,
+        "shadow_readiness_score": 74,
+        "position_value_1k_risk": 20_000,
+        "risk_pct_to_stop": 5,
+        "reason_codes": [],
+    }
+    activated = dwo.activate_balanced_policy(row)
+    assert_true(activated["action"] == "BUY CANDIDATE", "replay must publish the balanced action, not legacy BUILDING")
+    assert_true(activated["legacy_action"] == "SETUP FORMING", "replay must retain the legacy action for comparison")
+    assert_true(activated["buy_type"] == "STARTER", "replay must retain Starter BUY sizing")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ohlcv-jsonl", type=Path)
     args = parser.parse_args()
     audit_counterfactual_contract()
+    audit_replay_freezes_balanced_action()
     frames = load_exported_frames(args.ohlcv_jsonl) if args.ohlcv_jsonl else load_local_frames()
     assert_true(all(ticker in frames for ticker in ("SPY", "QQQ", "SMH")), "benchmark cache is incomplete")
     observations = replay(frames)
