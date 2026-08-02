@@ -1,4 +1,5 @@
 import argparse
+import ast
 import base64
 import http.cookiejar
 import html
@@ -40,7 +41,7 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.07.22-execution-fillability"
+SCANNER_VERSION = "2026.08.03-balanced-v1"
 LEARNING_MODEL_VERSION = "five-session-execution-v6"
 INCREMENTAL_STATE_VERSION = "incremental-state-v1"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
@@ -1954,6 +1955,105 @@ def apply_data_freshness_gate(row: dict, run_date: str, cached_tickers: set[str]
     return row
 
 
+def finalize_shadow_execution(row: dict) -> dict:
+    row.update(shadow_execution_decision(row))
+    hard_blockers = shadow_list(row.get("shadow_hard_blockers"))
+    if hard_blockers:
+        row["anti_signal_score"] = 100.0
+        row["anti_signal_level"] = "BLOCK"
+        row["anti_signal_plan"] = hard_blockers[0]
+    else:
+        row["anti_signal_score"] = 0.0
+        row["anti_signal_level"] = "NONE"
+        row["anti_signal_plan"] = "No hard execution blocker is active; softer cautions are already included once in readiness."
+    return row
+
+
+def shadow_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        parsed = ast.literal_eval(value)
+    except (SyntaxError, ValueError):
+        parsed = [item.strip() for item in value.split(",")]
+    if isinstance(parsed, (list, tuple, set)):
+        return [str(item) for item in parsed if str(item).strip()]
+    return [str(parsed)] if str(parsed).strip() else []
+
+
+def activate_balanced_policy(row: dict) -> dict:
+    """Promote the validated shadow decision while retaining legacy evidence."""
+    row["policy_version"] = "balanced-v1"
+    row["legacy_action"] = row.get("action", "")
+    row["legacy_signal_stage"] = row.get("signal_stage", "")
+    row["legacy_adjusted_score"] = row.get("adjusted_score", row.get("score", ""))
+    row["legacy_position_size_factor"] = row.get("position_size_factor", "")
+    row["legacy_suggested_position_value"] = row.get("suggested_position_value", "")
+    row["legacy_actual_risk_dollars"] = row.get("actual_risk_dollars", "")
+
+    action = str(row.get("shadow_action") or row.get("action") or "WAIT")
+    buy_type = str(row.get("shadow_buy_type") or "NONE").upper()
+    hard_blockers = shadow_list(row.get("shadow_hard_blockers"))
+    cautions = shadow_list(row.get("shadow_cautions"))
+    row["action"] = action
+    row["buy_type"] = buy_type
+    row["signal_stage"] = {
+        "BUY CANDIDATE": "BUY",
+        "SETUP FORMING": "SETUP",
+        "WATCH TREND": "WATCH",
+        "EXIT PRESSURE": "EXIT",
+    }.get(action, "WAIT")
+    readiness = float(numeric_or_none(row.get("shadow_readiness_score")) or 0)
+    row["adjusted_score"] = round(readiness * 1.28, 1)
+
+    if action == "BUY CANDIDATE" and not hard_blockers:
+        size_factor = float(numeric_or_none(row.get("shadow_position_size_factor")) or (0.5 if buy_type == "STARTER" else 1.0))
+        row["position_size_factor"] = round(size_factor, 2)
+        base_position = numeric_or_none(row.get("position_value_1k_risk"))
+        if base_position is not None:
+            planned_position = min(float(base_position), MAX_SCANNER_POSITION_VALUE) * size_factor
+            risk_pct = float(numeric_or_none(row.get("risk_pct_to_stop")) or 0)
+            row["suggested_position_value"] = round(planned_position, 0)
+            row["actual_risk_dollars"] = round(planned_position * risk_pct / 100, 0)
+        row["next_day_bias"] = "BULLISH CONFIRM"
+        if buy_type == "STARTER":
+            plan = "Start with 50% of the normal position inside the entry zone; add only after price and demand confirm, and respect the planned stop."
+            append_unique_reason(row, "balanced_policy_starter")
+        else:
+            plan = "Evidence supports the normal planned position inside the entry zone; do not chase above it and respect the planned stop."
+            append_unique_reason(row, "balanced_policy_full")
+        row["next_day_plan"] = plan
+        row["execution_plan"] = plan
+        row["anti_signal_score"] = 0.0
+        row["anti_signal_level"] = "NONE"
+        row["anti_signal_plan"] = "No hard execution blocker is active; softer cautions are already included once in readiness."
+        stale_codes = {
+            "anti_execution_blocked", "anti_signal_block", "anti_signal_caution",
+            "market_regime_block",
+            "missing_execution_proof", "personality_setup_gate",
+            "personality_setup_not_allowed", "setup_only_tier",
+        }
+        row["reason_codes"] = [code for code in list(row.get("reason_codes") or []) if code not in stale_codes]
+    elif hard_blockers:
+        row["adjusted_score"] = min(float(row.get("adjusted_score") or 0), 49.0)
+        row["buy_type"] = "NONE"
+        row["position_size_factor"] = 0.0
+        row["next_day_bias"] = "EXECUTION BLOCKED"
+        row["next_day_plan"] = hard_blockers[0]
+        row["execution_plan"] = hard_blockers[0]
+        row["anti_signal_level"] = "BLOCK"
+        row["anti_signal_score"] = 100.0
+        row["anti_signal_plan"] = hard_blockers[0]
+        append_unique_reason(row, "balanced_policy_hard_block")
+    else:
+        row["buy_type"] = "NONE"
+        row["position_size_factor"] = 0.0
+
+    return row
+
+
 def compute_anti_signal(row: dict) -> tuple[float, str, str, list[str]]:
     operator_state = str(row.get("operator_state") or "").upper()
     operator_pressure = str(row.get("operator_pressure") or "").upper()
@@ -2059,6 +2159,26 @@ def buy_tier_for(row: dict, rank_index: int) -> tuple[str, int, str]:
         operator_state in {"", "NEUTRAL", "ACCUMULATION", "MARKUP / DEMAND CONTROL", "BEAR_TRAP / SQUEEZE WATCH"}
         or operator_pressure in {"NEUTRAL", "ACCUMULATION / ABSORPTION", "SQUEEZE WATCH"}
     )
+
+    if str(row.get("policy_version") or "") == "balanced-v1":
+        hard_blockers = shadow_list(row.get("shadow_hard_blockers"))
+        if hard_blockers:
+            if action == "EXIT PRESSURE":
+                return "EXIT RISK", 8, hard_blockers[0]
+            if action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
+                return "SETUP ONLY", 4, hard_blockers[0]
+            return "NO TRADE", 9, hard_blockers[0]
+        if action == "BUY CANDIDATE" and not hard_blockers:
+            if str(row.get("buy_type") or "").upper() == "STARTER":
+                return "STARTER BUY", 2, "Begin with half the normal position and add only after confirmation."
+            return "A+ BUY" if float(numeric_or_none(row.get("shadow_readiness_score")) or 0) >= 90 else "BUY WATCH", 1, "Use the normal planned position inside the entry zone."
+        if action == "SETUP FORMING":
+            return "SETUP ONLY", 3, "The setup is developing, but readiness is not high enough for an entry."
+        if action == "WATCH TREND":
+            return "WATCH", 5, "Trend is worth monitoring, not an entry signal."
+        if action == "EXIT PRESSURE":
+            return "EXIT RISK", 8, "Risk pressure is elevated."
+        return "NO TRADE", 9 if score >= 25 else 10, "No actionable edge."
 
     if anti_level == "BLOCK" and action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}:
         return "SETUP ONLY", 4, anti_plan or "Anti-signal block; do not execute directly."
@@ -2815,18 +2935,33 @@ def load_previous_local_report(run_date: str) -> list[dict]:
 
 
 def prior_signal_hard_gate_status(prior: dict, prior_action: str) -> tuple[bool, list[str]]:
-    """Require the stored signal to satisfy the same execution boundary as live rows."""
-    gates = {
-        "market": prior.get("market_permission"),
-        "ticker": prior.get("ticker_permission"),
-        "risk": prior.get("risk_permission"),
-        "walk-forward": prior.get("walk_forward_permission"),
-    }
-    blocked = [name for name, value in gates.items() if str(value or "UNKNOWN").upper() != "ALLOW"]
-    if prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"} and not is_affirmative(
-        prior.get("personality_setup_allowed")
-    ):
-        blocked.append("personality setup")
+    """Return only true safety blockers; uncertainty is not evidence of failure."""
+    blocked: list[str] = []
+    stored_shadow_blockers = prior.get("shadow_hard_blockers")
+    if isinstance(stored_shadow_blockers, str):
+        try:
+            stored_shadow_blockers = ast.literal_eval(stored_shadow_blockers)
+        except (ValueError, SyntaxError):
+            stored_shadow_blockers = [stored_shadow_blockers] if stored_shadow_blockers else []
+    if isinstance(stored_shadow_blockers, list):
+        blocked.extend(str(item) for item in stored_shadow_blockers if str(item).strip())
+    else:
+        if str(prior.get("freshness_block") or "NO").upper() == "YES":
+            blocked.append("stale data")
+        if str(prior.get("market_permission") or "BLOCK").upper() not in {"ALLOW", "MIXED"}:
+            blocked.append("all market benchmarks risk-off")
+        if str(prior.get("risk_permission") or "BLOCK").upper() == "BLOCK":
+            blocked.append("invalid risk plan")
+        if str(prior.get("operator_state") or "").upper() in {"BULL_TRAP", "DISTRIBUTION"}:
+            blocked.append("confirmed trap or distribution")
+        if is_affirmative(prior.get("hard_exit_pressure")) or is_affirmative(prior.get("confirmed_break")):
+            blocked.append("structural exit")
+        if str(prior.get("volatility_regime") or "").upper() == "CHAOTIC VOLATILITY":
+            blocked.append("chaotic volatility")
+        distance_atr = numeric_or_none(prior.get("distance_from_ref_zone_atr"))
+        if distance_atr is not None and distance_atr > 1.5:
+            blocked.append("severe extension")
+    blocked = list(dict.fromkeys(blocked))
     return not blocked, blocked
 
 
@@ -3071,6 +3206,55 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
     prior_action = str(prior.get("action") or "")
     final_row = future_rows[min(len(future_rows), horizon) - 1] if future_rows else {}
     evaluation_date = canonical_date(final_row.get("date") or final_row.get("history_date"))
+    prior_close = numeric_or_none(prior.get("close"))
+    counterfactual_returns: dict[str, object] = {}
+    for counterfactual_horizon in (1, 3, 5, 10):
+        horizon_close = (
+            numeric_or_none(future_rows[counterfactual_horizon - 1].get("close"))
+            if len(future_rows) >= counterfactual_horizon
+            else None
+        )
+        counterfactual_returns[f"counterfactual_return_{counterfactual_horizon}d_pct"] = (
+            round((float(horizon_close) / float(prior_close) - 1) * 100, 2)
+            if horizon_close is not None and prior_close is not None and prior_close > 0
+            else ""
+        )
+    first_five = future_rows[:5]
+    five_highs = [numeric_or_none(item.get("high")) for item in first_five]
+    five_lows = [numeric_or_none(item.get("low")) for item in first_five]
+    valid_highs = [float(value) for value in five_highs if value is not None]
+    valid_lows = [float(value) for value in five_lows if value is not None]
+    counterfactual_mfe = (
+        round((max(valid_highs) / float(prior_close) - 1) * 100, 2)
+        if prior_close is not None and prior_close > 0 and valid_highs
+        else ""
+    )
+    counterfactual_mae = (
+        round((min(valid_lows) / float(prior_close) - 1) * 100, 2)
+        if prior_close is not None and prior_close > 0 and valid_lows
+        else ""
+    )
+    policy_allowed = is_affirmative(prior.get("shadow_policy_allowed"))
+    hard_gates_allow, hard_gate_blockers = prior_signal_hard_gate_status(prior, prior_action)
+    if len(future_rows) < 5:
+        counterfactual_outcome = "PENDING"
+        gate_evaluation = "PENDING"
+    elif not policy_allowed and (
+        (numeric_or_none(counterfactual_returns.get("counterfactual_return_5d_pct")) or -999.0) >= 5.0
+        or (numeric_or_none(counterfactual_mfe) or -999.0) >= 5.0
+    ):
+        counterfactual_outcome = "MISSED_OPPORTUNITY"
+        gate_evaluation = "GATE_FALSE_REJECTION"
+    elif not policy_allowed and (
+        (numeric_or_none(counterfactual_returns.get("counterfactual_return_5d_pct")) or 999.0) <= -3.0
+        or (numeric_or_none(counterfactual_mae) or 999.0) <= -3.0
+    ):
+        counterfactual_outcome = "RISK_AVOIDED"
+        gate_evaluation = "GATE_CORRECTLY_BLOCKED"
+    else:
+        counterfactual_outcome = "NEUTRAL"
+        gate_evaluation = "POLICY_ALLOWED" if policy_allowed else "NO_MATERIAL_EDGE"
+
     base = {
         "signal_run_date": canonical_date(prior.get("run_date") or prior.get("date") or prior.get("data_date")),
         "evaluation_run_date": evaluation_date,
@@ -3099,7 +3283,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_prediction_state": prior.get("prediction_state"),
         "prior_prediction_key": prior.get("learning_key_used"),
         "prior_prediction_scope": prior.get("learning_scope"),
-        "prior_close": numeric_or_none(prior.get("close")) or "",
+        "prior_close": prior_close or "",
         "entry_model_version": LEARNING_MODEL_VERSION,
         "label_horizon_sessions": horizon,
         "path_status": "PENDING",
@@ -3120,6 +3304,13 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "outcome_reason": "Awaiting a complete five-session evaluation window.",
         "outcome_learnable": False,
         "forecast_learnable": False,
+        "policy_allowed": policy_allowed,
+        "gate_blockers": hard_gate_blockers,
+        "counterfactual_outcome": counterfactual_outcome,
+        "gate_evaluation": gate_evaluation,
+        "counterfactual_mfe_5d_pct": counterfactual_mfe,
+        "counterfactual_mae_5d_pct": counterfactual_mae,
+        **counterfactual_returns,
     }
     base["learning_key"] = "|".join([
         prior_action or "UNKNOWN", str(prior.get("setup") or "NONE"),
@@ -3129,7 +3320,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
     if len(future_rows) < horizon:
         return base
 
-    gates_allow, gate_blockers = prior_signal_hard_gate_status(prior, prior_action)
+    gates_allow, gate_blockers = hard_gates_allow, hard_gate_blockers
     executable = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
     if not executable:
         base.update({
@@ -3243,7 +3434,7 @@ def build_backfilled_signal_outcomes(history_rows: list[dict]) -> pd.DataFrame:
             prior_action = prior.get("action", "")
             if prior_action not in SELF_SCORE_ACTIONS:
                 continue
-            outcomes.append(score_signal_horizon(prior, ordered[index + 1 : index + 1 + LEARNING_HORIZON_SESSIONS]))
+            outcomes.append(score_signal_horizon(prior, ordered[index + 1 : index + 11]))
 
     if not outcomes:
         return pd.DataFrame()
@@ -3318,7 +3509,7 @@ def build_incremental_signal_outcomes(
             signal_date = pd.to_datetime(prior.get("date"), errors="coerce")
             if pd.isna(signal_date):
                 continue
-            future = bars.loc[bars["date"] > signal_date].head(LEARNING_HORIZON_SESSIONS)
+            future = bars.loc[bars["date"] > signal_date].head(max(10, LEARNING_HORIZON_SESSIONS))
             if len(future) < LEARNING_HORIZON_SESSIONS:
                 continue
             outcome = score_signal_horizon(prior, future.to_dict(orient="records"))
@@ -3346,7 +3537,7 @@ def rebuild_canonical_signal_outcomes(
             continue
         future = bars.copy()
         future["date"] = pd.to_datetime(future["date"], errors="coerce")
-        future = future.loc[future["date"] > signal_date].dropna(subset=["date"]).sort_values("date").head(LEARNING_HORIZON_SESSIONS)
+        future = future.loc[future["date"] > signal_date].dropna(subset=["date"]).sort_values("date").head(max(10, LEARNING_HORIZON_SESSIONS))
         if len(future) < LEARNING_HORIZON_SESSIONS:
             continue
         prior = {
@@ -4436,14 +4627,11 @@ def apply_learning_adjustments(
 
         anti_level = str(row.get("anti_signal_level") or "NONE").upper()
         stale = str(row.get("freshness_block") or "").upper() == "YES"
-        # Learning may warn from imperfect contexts, but it must never promote a
-        # setup that the live execution governor would reject.
-        execution_gates_allow = (
-            is_affirmative(row.get("personality_setup_allowed"))
-            and str(row.get("market_permission") or "").upper() == "ALLOW"
-            and str(row.get("ticker_permission") or "").upper() == "ALLOW"
-            and str(row.get("walk_forward_permission") or "").upper() == "ALLOW"
-            and str(row.get("risk_permission") or "").upper() == "ALLOW"
+        # Positive learning may challenge uncertain soft evidence, but it may
+        # never override a true safety blocker.
+        execution_gates_allow, execution_gate_blockers = prior_signal_hard_gate_status(
+            row,
+            str(row.get("action") or ""),
         )
         if execution_samples < LEARNING_MIN_SAMPLES:
             effective_adjustment = 0.0
@@ -4454,9 +4642,9 @@ def apply_learning_adjustments(
         elif stale:
             effective_adjustment = 0.0
             plan = f"Learning observed from {selected_scope}, but data is stale; no score adjustment applied."
-        elif anti_level == "BLOCK":
+        elif anti_level == "BLOCK" and not execution_gates_allow:
             effective_adjustment = min(0.0, adjustment)
-            plan = f"Learning observed from {selected_scope}, but anti-signal BLOCK prevents positive promotion."
+            plan = f"Learning observed from {selected_scope}, but a hard safety condition prevents positive promotion."
         elif anti_level == "CAUTION":
             effective_adjustment = min(4.0, adjustment)
             plan = f"Learning adjustment from {selected_scope} capped by anti-signal caution."
@@ -4502,7 +4690,7 @@ def apply_learning_adjustments(
 
         if effective_adjustment > 0 and not execution_gates_allow:
             effective_adjustment = 0.0
-            plan = "Learning evidence is reporting-only until every execution and personality gate is ALLOW."
+            plan = f"Learning cannot override hard safety conditions: {', '.join(execution_gate_blockers)}."
 
         action = str(row.get("action") or "")
         if action in {"EXIT PRESSURE", "WAIT", "WAIT / AVOID"} and effective_adjustment > 0:
@@ -5250,20 +5438,46 @@ def walk_forward_setup_stats(d: pd.DataFrame, setup: str, holding_days: int = 10
 
 def market_regime_snapshot(frame: Optional[pd.DataFrame]) -> dict:
     if frame is None or len(frame) < 60:
-        return {"ok": False, "note": "missing"}
+        return {"ok": False, "note": "missing", "return_20d_pct": None}
     d = prepare(frame) if "ema_slow" not in frame.columns else frame
     row = d.iloc[-1]
     close = float(row.close)
     ok = close > float(row.ema_slow) and float(row.ema_fast) > float(row.ema_slow)
-    return {"ok": ok, "note": "risk-on" if ok else "risk-off", "close": round(close, 2)}
+    return_20d_pct = (close / float(d.iloc[-21].close) - 1) * 100 if len(d) > 20 else None
+    return {
+        "ok": ok,
+        "note": "risk-on" if ok else "risk-off",
+        "close": round(close, 2),
+        "return_20d_pct": round(float(return_20d_pct), 3) if return_20d_pct is not None else None,
+    }
 
 
 def market_permission_from_frames(benchmarks: dict[str, pd.DataFrame]) -> dict:
     probes = {symbol: market_regime_snapshot(benchmarks.get(symbol)) for symbol in ("SPY", "QQQ", "SMH")}
     ok_count = sum(1 for item in probes.values() if item.get("ok"))
-    permission = "ALLOW" if ok_count >= 2 else "BLOCK"
+    available_count = sum(1 for item in probes.values() if item.get("close") is not None)
+    permission = (
+        "BLOCK"
+        if available_count < 3
+        else "ALLOW"
+        if ok_count >= 2
+        else "MIXED"
+        if ok_count == 1
+        else "BLOCK"
+    )
+    benchmark_returns = [
+        float(item["return_20d_pct"])
+        for item in probes.values()
+        if item.get("return_20d_pct") is not None
+    ]
     summary = ", ".join(f"{symbol} {item.get('note', 'unknown')}" for symbol, item in probes.items())
-    return {"market_permission": permission, "market_ok_count": ok_count, "market_regime_summary": summary}
+    return {
+        "market_permission": permission,
+        "market_ok_count": ok_count,
+        "market_probe_count": available_count,
+        "market_regime_summary": summary,
+        "market_return_20d_pct": round(float(np.mean(benchmark_returns)), 3) if benchmark_returns else None,
+    }
 
 
 def market_permission_for_replay_date(benchmarks: dict[str, pd.DataFrame], replay_date: object) -> dict:
@@ -5279,6 +5493,211 @@ def market_permission_for_replay_date(benchmarks: dict[str, pd.DataFrame], repla
         frame_dates = pd.to_datetime(frame["date"], errors="coerce")
         truncated[symbol] = frame.loc[frame_dates <= replay_day].copy()
     return market_permission_from_frames(truncated)
+
+
+def short_execution_regime(
+    d: pd.DataFrame,
+    i: int,
+    personality_type: object,
+    market_permission: Optional[dict],
+) -> dict:
+    """Describe the recent execution state without replacing the 100-session personality."""
+    window = d.iloc[max(0, i - 19) : i + 1]
+    recent = d.iloc[max(0, i - 4) : i + 1]
+    travel = window["close"].diff().abs().sum()
+    efficiency = abs(float(window.iloc[-1].close) - float(window.iloc[0].close)) / travel if travel > 0 else 0.0
+    trend_votes = int(
+        (
+            (recent["close"] > recent["ema_fast"])
+            & (recent["ema_fast"] > recent["ema_slow"])
+        ).sum()
+    )
+    ticker_return_20d = (
+        (float(d.iloc[i].close) / float(d.iloc[i - 20].close) - 1) * 100
+        if i >= 20 and float(d.iloc[i - 20].close) > 0
+        else 0.0
+    )
+    market_return = numeric_or_none((market_permission or {}).get("market_return_20d_pct"))
+    excess_return = ticker_return_20d - float(market_return) if market_return is not None else 0.0
+    relative_strength_score = clamp_float(50.0 + excess_return * 5.0, 0.0, 100.0)
+    relative_leader = excess_return >= 3.0 and relative_strength_score >= 65.0
+    transition_votes_required = 2 if relative_leader else 3
+    transition_trend = trend_votes >= transition_votes_required and efficiency >= 0.20
+    long_personality = str(personality_type or "BALANCED").upper()
+    regime = (
+        "TRANSITION TREND"
+        if transition_trend and long_personality in {"RANGE_BOUND", "BALANCED"}
+        else "TREND"
+        if transition_trend
+        else "BASE / RANGE"
+    )
+    return {
+        "execution_regime": regime,
+        "execution_regime_efficiency_20d": round(float(efficiency), 3),
+        "execution_regime_trend_votes_5d": trend_votes,
+        "relative_strength_20d_pct": round(float(excess_return), 2),
+        "relative_strength_score": round(float(relative_strength_score), 1),
+        "relative_strength_leader": bool_text(relative_leader),
+    }
+
+
+def shadow_execution_decision(row: dict) -> dict:
+    """Evaluate the approved balanced policy without replacing production actions."""
+    setup = str(row.get("setup") or "NONE").upper()
+    setup_forming = setup != "NONE"
+    market_state = str(row.get("market_permission") or "BLOCK").upper()
+    personality_allowed = is_affirmative(row.get("personality_setup_allowed"))
+    ticker_permission = str(row.get("ticker_permission") or "INSUFFICIENT").upper()
+    walk_forward_permission = str(row.get("walk_forward_permission") or "INSUFFICIENT").upper()
+    volatility_regime = str(row.get("volatility_regime") or "NORMAL").upper()
+    distance_atr = numeric_or_none(row.get("distance_from_ref_zone_atr"))
+    risk_pct = numeric_or_none(row.get("risk_pct_to_stop"))
+    entry_low = numeric_or_none(row.get("entry_zone_low"))
+    entry_high = numeric_or_none(row.get("entry_zone_high"))
+    stop = numeric_or_none(row.get("stop_est"))
+    reason_codes = list(row.get("reason_codes") or [])
+
+    history_score = 50.0
+    history_states = {ticker_permission, walk_forward_permission}
+    if history_states == {"ALLOW"}:
+        history_score = 70.0
+    elif "BLOCK" in history_states:
+        history_score = 30.0
+    history_score = clamp_float(
+        history_score + row_float(row, "learning_adjustment") * 2.0,
+        0.0,
+        100.0,
+    )
+
+    demand_score = clamp_float(
+        row_float(row, "buyer_score") * 0.35
+        + row_float(row, "demand_control_score") * 0.35
+        + row_float(row, "absorption_score") * 0.30,
+        0.0,
+        100.0,
+    )
+    market_score = 90.0 if market_state == "ALLOW" else 55.0 if market_state == "MIXED" else 0.0
+    components = {
+        "trend": row_float(row, "trend_location_score", 50.0),
+        "entry": row_float(row, "entry_quality_score", 0.0),
+        "momentum": row_float(row, "transition_edge_score", 45.0),
+        "volume_demand": demand_score,
+        "relative_strength": row_float(row, "relative_strength_score", 50.0),
+        "market": market_score,
+        "history": history_score,
+    }
+    readiness = clamp_float(
+        components["trend"] * 0.25
+        + components["entry"] * 0.20
+        + components["momentum"] * 0.15
+        + components["volume_demand"] * 0.15
+        + components["relative_strength"] * 0.10
+        + components["market"] * 0.10
+        + components["history"] * 0.05,
+        0.0,
+        100.0,
+    )
+
+    hard_blockers: list[str] = []
+    if str(row.get("freshness_block") or "NO").upper() == "YES":
+        hard_blockers.append("Data is too old for execution")
+    if any(numeric_or_none(row.get(field)) is None for field in ("open", "high", "low", "close")):
+        hard_blockers.append("OHLC data is incomplete")
+    if str(row.get("operator_state") or "").upper() == "BULL_TRAP" or row_float(row, "bull_trap_score") >= 58.0:
+        hard_blockers.append("A confirmed bull trap is active")
+    if str(row.get("operator_state") or "").upper() == "DISTRIBUTION" or row_float(row, "distribution_score") >= 55.0:
+        hard_blockers.append("Structural distribution is active")
+    if is_affirmative(row.get("hard_exit_pressure")) or is_affirmative(row.get("confirmed_break")):
+        hard_blockers.append("Price structure has triggered exit risk")
+    if setup_forming and (
+        entry_low is None
+        or entry_high is None
+        or stop is None
+        or entry_high < entry_low
+        or stop >= entry_low
+        or risk_pct is None
+        or risk_pct <= 0
+        or risk_pct > MAX_SIGNAL_RISK_PCT + NUMERIC_TOLERANCE
+    ):
+        hard_blockers.append("The entry and stop plan is not executable")
+    if setup_forming and distance_atr is not None and distance_atr > 1.5:
+        hard_blockers.append("Price is more than 1.5 ATR above the reference entry")
+    if volatility_regime == "CHAOTIC VOLATILITY":
+        hard_blockers.append("Volatility is too disorderly for a planned entry")
+    if market_state not in {"ALLOW", "MIXED"}:
+        hard_blockers.append("All three market benchmarks are risk-off")
+    hard_blockers = list(dict.fromkeys(hard_blockers))
+
+    cautions: list[str] = []
+    if not personality_allowed:
+        cautions.append("The long-term personality has not fully adapted to the recent move")
+    if market_state == "MIXED":
+        cautions.append("The broader market is mixed")
+    if ticker_permission in {"INSUFFICIENT", "UNKNOWN", "NONE"} or walk_forward_permission in {"INSUFFICIENT", "UNKNOWN", "NONE"}:
+        cautions.append("Historical validation is still limited")
+    elif "BLOCK" in history_states:
+        cautions.append("Historical results reduce confidence")
+    if str(row.get("volatility_permission") or "ALLOW").upper() == "CAUTION":
+        cautions.append("Volatility calls for a smaller position")
+    cautions = list(dict.fromkeys(cautions))
+
+    early_setup = setup in {"REVERSAL BUY", "EARLY PULLBACK BUY", "PULLBACK BUY"}
+    mixed_market_leader_ok = market_state != "MIXED" or is_affirmative(row.get("relative_strength_leader"))
+    early_buy = (
+        early_setup
+        and readiness >= 70.0
+        and row_float(row, "transition_edge_score") >= 66.0
+        and row_float(row, "buyer_score") >= 52.0
+        and mixed_market_leader_ok
+    )
+    late_buy = (
+        setup in {"BREAKOUT BUY", "MOMENTUM BUY"}
+        and readiness >= 76.0
+        and row_float(row, "buyer_score") >= 62.0
+        and row_float(row, "relative_volume") >= 1.10
+        and row_float(row, "relative_strength_score") >= 50.0
+        and (distance_atr is None or distance_atr <= 1.0)
+        and market_state in {"ALLOW", "MIXED"}
+        and mixed_market_leader_ok
+        and str(row.get("execution_regime") or "") in {"TREND", "TRANSITION TREND"}
+    )
+
+    shadow_action = "SETUP FORMING" if setup_forming else str(row.get("action") or "WAIT")
+    buy_type = "NONE"
+    size_factor = 0.0
+    if hard_blockers:
+        if is_affirmative(row.get("hard_exit_pressure")) or is_affirmative(row.get("confirmed_break")):
+            shadow_action = "EXIT PRESSURE"
+    elif early_buy or late_buy:
+        shadow_action = "BUY CANDIDATE"
+        complete_evidence = readiness >= 84.0 and market_state == "ALLOW" and personality_allowed and history_states == {"ALLOW"}
+        buy_type = "FULL" if complete_evidence else "STARTER"
+        size_factor = min(1.0, row_float(row, "position_size_factor", 1.0)) if buy_type == "FULL" else 0.50
+    elif not setup_forming and str(row.get("adaptive_mode") or "") in {"POWER TREND", "STEADY TREND"}:
+        shadow_action = "WATCH TREND"
+
+    if hard_blockers:
+        explanation = hard_blockers[0]
+    elif shadow_action == "BUY CANDIDATE" and buy_type == "STARTER":
+        explanation = "Early demand is strong enough for a starter position; keep risk at half size while confirmation develops."
+    elif shadow_action == "BUY CANDIDATE":
+        explanation = "Trend, entry quality, demand, and validation evidence support the full planned position."
+    elif setup_forming:
+        explanation = "The setup is developing, but it has not yet accumulated enough entry-ready evidence."
+    else:
+        explanation = "No entry-ready setup is present today."
+
+    return {
+        "shadow_action": shadow_action,
+        "shadow_buy_type": buy_type,
+        "shadow_position_size_factor": round(float(size_factor), 2),
+        "shadow_readiness_score": round(float(readiness), 1),
+        "shadow_hard_blockers": hard_blockers,
+        "shadow_cautions": cautions,
+        "shadow_policy_allowed": bool_text(shadow_action == "BUY CANDIDATE" and not hard_blockers),
+        "shadow_decision_explanation": explanation,
+        **{f"shadow_readiness_{name}": round(float(value), 1) for name, value in components.items()},
+    }
 
 
 def select_signal_action(
@@ -5420,6 +5839,12 @@ def classify_and_score(
         "MEAN REVERSION" if mean_reversion else
         "HIGH VOLATILITY" if high_vol else
         "MIXED / NEUTRAL"
+    )
+    execution_regime = short_execution_regime(
+        d,
+        i,
+        personality_profile["personality_type"],
+        market_permission,
     )
 
     rsi_oversold = row.rsi < 30
@@ -6331,7 +6756,7 @@ def classify_and_score(
         reason_codes.append("reference_zone_adjusted")
     reason_codes = list(dict.fromkeys(reason_codes))
 
-    return {
+    result = {
         "ticker": display_ticker(ticker),
         "name": stock_name(ticker),
         "date": str(pd.to_datetime(row.date).date()),
@@ -6437,6 +6862,7 @@ def classify_and_score(
         "wf_test_win_rate": walk_forward_stats["wf_test_win_rate"],
         "wf_test_avg_return": walk_forward_stats["wf_test_avg_return"],
         "distance_from_ref_zone_pct": round(float(distance_from_ref_zone_pct), 2) if setup_forming and not math.isnan(distance_from_ref_zone_pct) else "",
+        "distance_from_ref_zone_atr": round(float(distance_from_ref_zone_atr), 3) if setup_forming and not math.isnan(distance_from_ref_zone_atr) else "",
         "extension_state": extension_state,
         "reason_codes": reason_codes,
         "signal_stage": signal_stage(action),
@@ -6449,6 +6875,9 @@ def classify_and_score(
         "confirmed_break": bool_text(confirmed_break),
         "notes": "; ".join(notes),
     }
+    result.update(execution_regime)
+    result.update(shadow_execution_decision(result))
+    return result
 
 
 def action_class(action: str) -> str:
@@ -7901,7 +8330,10 @@ def main() -> None:
     latest_data_date = data_dates[-1]
     earliest_data_date = data_dates[0]
     cached_tickers = {str(item.get("ticker", "")).upper() for item in stale_cache_fallbacks}
-    rows = [apply_anti_signal_penalty(apply_data_freshness_gate(row, today, cached_tickers)) for row in rows]
+    rows = [
+        finalize_shadow_execution(apply_data_freshness_gate(row, today, cached_tickers))
+        for row in rows
+    ]
     prior_outcomes = fetch_signal_outcome_history(today, args.learning_baseline_days)
     if needs_bootstrap:
         # An explicit state migration starts a new canonical outcome identity
@@ -7977,6 +8409,7 @@ def main() -> None:
             calibration_artifact_id = ""
     if calibration_artifact:
         calibration_artifact_id = calibration_artifact.get("artifact_id", "")
+    rows = [activate_balanced_policy(finalize_shadow_execution(row)) for row in rows]
     rows = sorted(
         rows,
         key=lambda item: (

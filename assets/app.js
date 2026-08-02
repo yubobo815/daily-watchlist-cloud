@@ -642,7 +642,7 @@ function renderOperatorPressure(row) {
 function buyTierTone(value) {
   const text = String(value || "").toUpperCase();
   if (text === "A+ BUY") return "strong";
-  if (text === "BUY WATCH" || text === "SETUP ONLY" || text === "WATCH") return "constructive";
+  if (text === "STARTER BUY" || text === "BUY WATCH" || text === "SETUP ONLY" || text === "WATCH") return "constructive";
   if (text.includes("EXIT") || text.includes("NO TRADE")) return "risk";
   return "watch";
 }
@@ -665,6 +665,7 @@ function renderDataProvider(row) {
 function permissionShort(value) {
   const text = String(value || "").toUpperCase();
   if (text === "ALLOW") return "A";
+  if (text === "MIXED") return "M";
   if (text === "CAUTION") return "C";
   if (text === "BLOCK") return "B";
   if (text === "INSUFFICIENT") return "I";
@@ -676,7 +677,7 @@ function permissionShort(value) {
 function permissionTone(value) {
   const text = String(value || "").toUpperCase();
   if (text === "ALLOW") return "strong";
-  if (text === "CAUTION" || text === "INSUFFICIENT") return "watch";
+  if (text === "CAUTION" || text === "INSUFFICIENT" || text === "MIXED") return "watch";
   if (text === "BLOCK") return "risk";
   return "risk";
 }
@@ -771,6 +772,8 @@ function naturalActionSentence(row) {
   const kind = actionKind(row.action);
   const pattern = setupLabel(row.setup);
   const style = String(payloadValue(row, "execution_style") || "").toUpperCase();
+  const buyType = String(payloadValue(row, "buy_type") || payloadValue(row, "shadow_buy_type") || "").toUpperCase();
+  if (kind === "buy" && buyType === "STARTER") return `${pattern} has enough early evidence for a half-size starter; add only after price and demand confirm.`;
   if (kind === "buy" && style === "BREAKOUT TRIGGER") return `${pattern} conditions are in place; enter only if price reaches the breakout entry range without running above the maximum entry.`;
   if (kind === "buy") return `${pattern} conditions are in place; use a limit entry only inside the pullback zone and require it to hold.`;
   if (kind === "continue") return "The existing trend remains constructive, but a new entry should avoid chasing strength.";
@@ -781,6 +784,18 @@ function naturalActionSentence(row) {
 }
 
 function executionChecksClear(row) {
+  const balancedPolicy = String(payloadValue(row, "policy_version") || "").toLowerCase() === "balanced-v1";
+  if (balancedPolicy && actionKind(row?.action) === "buy") {
+    const hardBlockers = shadowList(payloadValue(row, "shadow_hard_blockers"));
+    const policyAllowed = String(payloadValue(row, "shadow_policy_allowed") || "").toUpperCase() === "YES";
+    const market = String(payloadValue(row, "market_permission") || "").toUpperCase();
+    const risk = String(payloadValue(row, "risk_permission") || "").toUpperCase();
+    return !qualityConstraintLabel(row)
+      && policyAllowed
+      && hardBlockers.length === 0
+      && ["ALLOW", "MIXED"].includes(market)
+      && risk === "ALLOW";
+  }
   const permissions = ["market_permission", "risk_permission", "ticker_permission", "walk_forward_permission"]
     .map((key) => String(payloadValue(row, key) || "").toUpperCase())
     .filter(Boolean);
@@ -1323,6 +1338,39 @@ function renderScoreBreakdown(row) {
   `;
 }
 
+function shadowList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  const text = String(value || "").trim();
+  if (!text || text === "[]") return [];
+  return text
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((item) => item.trim().replace(/^['\"]|['\"]$/g, ""))
+    .filter(Boolean);
+}
+
+function renderShadowPolicyPreview(row) {
+  const shadowAction = String(payloadValue(row, "shadow_action") || "").toUpperCase();
+  if (!shadowAction) return "";
+  const buyType = String(payloadValue(row, "shadow_buy_type") || "NONE").toUpperCase();
+  const readiness = Number(payloadValue(row, "shadow_readiness_score"));
+  const explanation = String(payloadValue(row, "shadow_decision_explanation") || "");
+  const blockers = shadowList(payloadValue(row, "shadow_hard_blockers"));
+  const cautions = shadowList(payloadValue(row, "shadow_cautions"));
+  const headline = shadowAction === "BUY CANDIDATE"
+    ? buyType === "STARTER" ? "Starter position · 50% of normal size" : "Full planned position"
+    : shadowAction === "SETUP FORMING" ? "Setup still developing" : ACTION_LABELS[shadowAction] || shadowAction;
+  const supporting = blockers[0] || cautions[0] || explanation;
+  return `
+    <section class="policy-preview">
+      <span class="eyebrow">Balanced readiness</span>
+      <strong>${escapeHtml(headline)}</strong>
+      <p>${escapeHtml(explanation)}</p>
+      ${Number.isFinite(readiness) ? `<small>Readiness ${escapeHtml(fmtNumber(readiness, 1))}/100${supporting ? ` · ${escapeHtml(supporting)}` : ""}</small>` : ""}
+    </section>
+  `;
+}
+
 function similarCasesNarrative(row) {
   const sentences = [];
   const volatility = String(payloadValue(row, "volatility_regime") || "NORMAL").toUpperCase();
@@ -1703,11 +1751,16 @@ function riskSummaryLabel(row) {
   const tickerPermission = String(payloadValue(row, "ticker_permission") || "").toUpperCase();
   const walkForwardPermission = String(payloadValue(row, "walk_forward_permission") || "").toUpperCase();
   const personalityAllowed = String(payloadValue(row, "personality_setup_allowed") || "").toUpperCase();
+  const balancedPolicy = String(payloadValue(row, "policy_version") || "").toLowerCase() === "balanced-v1";
   if (kind === "exit") return ["risk", "PROTECT CAPITAL"];
   if (kind === "avoid") return ["risk", "NO ENTRY"];
   if (row.action === "WAIT") return ["watch", "NO CLEAR EDGE"];
   if (payloadValue(row, "freshness_block") === "YES") return ["risk", "DATA TOO OLD"];
   if (antiLevel === "BLOCK") return ["risk", "DO NOT ENTER"];
+  if (balancedPolicy && kind === "buy") {
+    const buyType = String(payloadValue(row, "buy_type") || payloadValue(row, "shadow_buy_type") || "").toUpperCase();
+    return buyType === "STARTER" ? ["constructive", "HALF SIZE"] : ["strong", "CHECKS CLEAR"];
+  }
   if (antiLevel === "CAUTION") return ["watch", "USE CAUTION"];
   if (payloadValue(row, "extension_state") === "EXTENDED") return ["watch", "DO NOT CHASE"];
   if (riskPermission !== "ALLOW" || marketPermission !== "ALLOW" || tickerPermission !== "ALLOW" || walkForwardPermission !== "ALLOW" || personalityAllowed === "NO") return ["risk", "WAIT"];
@@ -1789,6 +1842,16 @@ function selectedRow() {
 }
 
 function validationSummary(row) {
+  const balancedPolicy = String(payloadValue(row, "policy_version") || "").toLowerCase() === "balanced-v1";
+  if (balancedPolicy) {
+    const blockers = shadowList(payloadValue(row, "shadow_hard_blockers"));
+    if (blockers.length) return blockers[0];
+    const buyType = String(payloadValue(row, "buy_type") || payloadValue(row, "shadow_buy_type") || "").toUpperCase();
+    if (row?.action === "BUY CANDIDATE" && buyType === "STARTER") {
+      return "Early evidence supports a half-size starter position while confirmation develops.";
+    }
+    if (row?.action === "BUY CANDIDATE") return "The weighted readiness checks support the normal planned position.";
+  }
   const items = [
     ["Market", payloadValue(row, "market_permission")],
     ["Risk", payloadValue(row, "risk_permission")],
@@ -2576,6 +2639,7 @@ function renderLatestHistoryPanel(latest) {
       </div>
       <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
+      ${renderShadowPolicyPreview(latest)}
       ${activePlan
         ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
         : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}

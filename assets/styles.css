@@ -4448,6 +4448,18 @@ body.ticker-page .decision-callout strong { font-family: Georgia, "Times New Rom
 .ticker-detail-panel .decision-callout p,
 body.ticker-page .decision-callout p { margin-top: 5px; }
 
+.policy-preview {
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 82%, var(--tone-setup) 18%);
+}
+.policy-preview strong { color: var(--ink); font-size: 15px; }
+.policy-preview p, .policy-preview small { margin: 0; color: var(--muted); line-height: 1.45; }
+.policy-preview p { font-size: 13px; }
+.policy-preview small { font-size: 11px; }
+
 .ticker-detail-panel .inactive-plan,
 body.ticker-page .inactive-plan {
   padding: 12px 0;

@@ -34,10 +34,12 @@
     const riskPermission = String(value(row, "risk_permission") || "").toUpperCase();
     const tickerPermission = String(value(row, "ticker_permission") || "").toUpperCase();
     const walkForwardPermission = String(value(row, "walk_forward_permission") || "").toUpperCase();
+    const balancedPolicy = String(value(row, "policy_version") || "").toLowerCase() === "balanced-v1";
     if (freshnessBlocked) return "DATA NEEDS REFRESH";
     if (antiSignal === "BLOCK") return "DO NOT ENTER";
     if (marketPermission === "BLOCK") return "MARKET BLOCKED";
     if (riskPermission === "BLOCK") return "RISK BLOCKED";
+    if (balancedPolicy) return "";
     if (tickerPermission === "BLOCK") return "TICKER BLOCKED";
     if (walkForwardPermission === "BLOCK") return "SETUP FAILED";
     if (walkForwardPermission === "INSUFFICIENT") return "SETUP UNPROVEN";

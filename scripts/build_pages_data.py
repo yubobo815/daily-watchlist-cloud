@@ -23,7 +23,7 @@ SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # a single-stock page.
 WATCHLIST_FIELDS = frozenset(
     """
-    action anti_signal_level buy_tier close data_date date day_change_pct
+    action anti_signal_level buy_tier buy_type policy_version legacy_action close data_date date day_change_pct
     entry_est entry_zone_high entry_zone_low entry_zone_plan execution_fill_probability
     execution_fill_state extension_state freshness_block freshness_status
     market_permission name next_day_bias next_day_plan notes operator_pressure
@@ -32,6 +32,9 @@ WATCHLIST_FIELDS = frozenset(
     score setup stop_est take_profit_1 take_profit_1_reduce_pct target_est ticker
     ticker_permission volume_state walk_forward_permission
     execution_priority
+    execution_regime relative_strength_20d_pct relative_strength_leader
+    shadow_action shadow_buy_type shadow_policy_allowed shadow_readiness_score
+    shadow_position_size_factor shadow_decision_explanation
     """.split()
 )
 
@@ -62,6 +65,12 @@ TICKER_SNAPSHOT_FIELDS = WATCHLIST_FIELDS | frozenset(
     prediction_model_version prediction_no_edge_probability prediction_upside_probability
     profit_stage psychology reason_codes seller_score signal_quality transition_label
     transition_score volatility_regime
+    shadow_hard_blockers shadow_cautions shadow_readiness_trend shadow_readiness_entry
+    shadow_readiness_momentum shadow_readiness_volume_demand shadow_readiness_relative_strength
+    shadow_readiness_market shadow_readiness_history execution_regime_efficiency_20d
+    execution_regime_trend_votes_5d relative_strength_score
+    legacy_signal_stage legacy_adjusted_score legacy_position_size_factor
+    legacy_suggested_position_value legacy_actual_risk_dollars
     """.split()
 )
 
@@ -72,6 +81,8 @@ HISTORY_FIELDS = frozenset(
     action adjusted_score buyer_score close data_date date day_change_pct high low name open
     operator_pressure operator_state reason_codes run_date score setup ticker
     seller_score volume_state
+    shadow_action shadow_buy_type shadow_readiness_score shadow_policy_allowed
+    buy_type policy_version legacy_action
     """.split()
 )
 

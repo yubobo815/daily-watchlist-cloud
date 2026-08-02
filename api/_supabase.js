@@ -79,6 +79,14 @@ const RUN_OPTIONAL_FIELDS = [
 
 const PAYLOAD_FIELDS = [
   "adjusted_score",
+  "policy_version",
+  "buy_type",
+  "legacy_action",
+  "legacy_signal_stage",
+  "legacy_adjusted_score",
+  "legacy_position_size_factor",
+  "legacy_suggested_position_value",
+  "legacy_actual_risk_dollars",
   "anti_signal_level",
   "anti_signal_plan",
   "anti_signal_score",
@@ -245,11 +253,32 @@ const PAYLOAD_FIELDS = [
   "position_value_1k_risk",
   "suggested_position_value",
   "actual_risk_dollars",
+  "execution_regime",
+  "execution_regime_efficiency_20d",
+  "execution_regime_trend_votes_5d",
+  "relative_strength_20d_pct",
+  "relative_strength_score",
+  "relative_strength_leader",
+  "shadow_action",
+  "shadow_buy_type",
+  "shadow_policy_allowed",
+  "shadow_position_size_factor",
+  "shadow_readiness_score",
+  "shadow_readiness_trend",
+  "shadow_readiness_entry",
+  "shadow_readiness_momentum",
+  "shadow_readiness_volume_demand",
+  "shadow_readiness_relative_strength",
+  "shadow_readiness_market",
+  "shadow_readiness_history",
+  "shadow_hard_blockers",
+  "shadow_cautions",
+  "shadow_decision_explanation",
 ];
 
 const AUDIT_GATE_FIELDS = ["market_permission", "ticker_permission", "walk_forward_permission", "risk_permission"];
 const AUDIT_GATE_VALUES = {
-  market_permission: new Set(["ALLOW", "BLOCK"]),
+  market_permission: new Set(["ALLOW", "MIXED", "BLOCK"]),
   ticker_permission: new Set(["ALLOW", "CAUTION", "BLOCK", "INSUFFICIENT"]),
   walk_forward_permission: new Set(["ALLOW", "BLOCK", "INSUFFICIENT", "NONE"]),
   risk_permission: new Set(["ALLOW", "BLOCK"]),
@@ -385,8 +414,51 @@ function auditGateState(source, field) {
   };
 }
 
+function sourceValue(source, field) {
+  return source?.[field] ?? source?.payload?.[field];
+}
+
+function listValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  const text = String(value || "").trim();
+  if (!text || text === "[]") return [];
+  return text.replace(/^\[|\]$/g, "").split(",")
+    .map((item) => item.trim().replace(/^['\"]|['\"]$/g, ""))
+    .filter(Boolean);
+}
+
+function isBalancedPolicy(source) {
+  const versions = [source?.policy_version, source?.payload?.policy_version]
+    .filter((value) => value !== undefined && value !== null && value !== "")
+    .map((value) => String(value).toLowerCase());
+  return versions.length > 0 && versions.every((value) => value === "balanced-v1");
+}
+
+function balancedPolicyExecutable(source) {
+  const market = auditGateState(source, "market_permission");
+  const risk = auditGateState(source, "risk_permission");
+  const policyStates = [source?.shadow_policy_allowed, source?.payload?.shadow_policy_allowed]
+    .filter((value) => value !== undefined && value !== null && value !== "")
+    .map(normalizeAuditGate);
+  const blockers = [
+    ...listValue(source?.shadow_hard_blockers),
+    ...listValue(source?.payload?.shadow_hard_blockers),
+  ];
+  return isBalancedPolicy(source)
+    && policyStates.length > 0
+    && policyStates.every((value) => value === "YES")
+    && blockers.length === 0
+    && !market.contradictory
+    && market.valid
+    && ["ALLOW", "MIXED"].includes(market.value)
+    && !risk.contradictory
+    && risk.valid
+    && risk.value === "ALLOW";
+}
+
 function applyPersonalitySetupGate(output, source) {
   if (!BUY_LIKE_ACTIONS.has(output.action)) return output;
+  if (isBalancedPolicy(source)) return output;
 
   const topLevel = normalizeAuditGate(source?.personality_setup_allowed);
   const nested = normalizeAuditGate(source?.payload?.personality_setup_allowed);
@@ -421,7 +493,7 @@ function applyVolatilityGate(output, source) {
   const permission = [topLevel, nested].includes("BLOCK")
     ? "BLOCK"
     : ([topLevel, nested].includes("CAUTION") ? "CAUTION" : "ALLOW");
-  if (permission === "ALLOW") return output;
+  if (permission === "ALLOW" || (isBalancedPolicy(source) && permission === "CAUTION")) return output;
 
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
   payload.volatility_permission = permission;
@@ -446,6 +518,11 @@ function applyVolatilityGate(output, source) {
 
 function applyAuditGateFallback(output, source) {
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  if (BUY_LIKE_ACTIONS.has(output.action) && balancedPolicyExecutable(source)) {
+    payload.audit_gate_status = "BALANCED_POLICY_ALLOW";
+    output.payload = payload;
+    return output;
+  }
   const gates = AUDIT_GATE_FIELDS.map((field) => auditGateState(source, field));
   const hasAllGates = gates.every((gate) => !gate.contradictory && gate.valid && gate.value === "ALLOW");
   if (hasAllGates) {
@@ -528,6 +605,7 @@ function applyFreshnessFallback(output) {
 
 function applyFillabilityFallback(output) {
   if (!['BUY CANDIDATE', 'STRONG CONTINUATION'].includes(output.action)) return output;
+  if (isBalancedPolicy(output)) return output;
   const payload = output.payload && typeof output.payload === 'object' ? { ...output.payload } : {};
   const state = String(payload.execution_fill_state || '').toUpperCase();
   const probability = Number(payload.execution_fill_probability);
@@ -552,6 +630,10 @@ function applyFillabilityFallback(output) {
 
 function antiSignalFallback(output) {
   const payload = output.payload && typeof output.payload === "object" ? { ...output.payload } : {};
+  if (balancedPolicyExecutable(output)) {
+    output.payload = payload;
+    return output;
+  }
   const operatorState = String(payload.operator_state || "").toUpperCase();
   const operatorPressure = String(payload.operator_pressure || "").toUpperCase();
   const nextDay = String(payload.next_day_bias || "").toUpperCase();
@@ -656,9 +738,11 @@ function applyBuyTierFallback(output) {
       payload.execution_plan = "Do not execute directly; treat as a setup until the blocker clears.";
       appendReasonCode(payload, "setup_only_tier");
     } else if (output.action === "BUY CANDIDATE") {
-      payload.buy_tier = "BUY WATCH";
+      payload.buy_tier = String(payload.buy_type || "").toUpperCase() === "STARTER" ? "STARTER BUY" : "BUY WATCH";
       payload.execution_priority = 2;
-      payload.execution_plan = "Qualified buy watch; prefer reference-zone entry and Pine confirmation.";
+      payload.execution_plan = payload.buy_tier === "STARTER BUY"
+        ? "Begin with half the normal position and add only after confirmation."
+        : "Use the normal planned position inside the entry zone.";
     } else if (output.action === "WATCH TREND") {
       payload.buy_tier = "WATCH";
       payload.execution_priority = 5;

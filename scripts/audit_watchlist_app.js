@@ -196,6 +196,21 @@ function auditPresentationSemantics() {
   assert(qualityConstraintLabel(blocked) === "MARKET BLOCKED", "entry setups must expose their hard market block");
   assert(qualityConstraintLabel(avoid) === "NO ENTRY", "avoid rows must lead with the action rather than an irrelevant entry gate");
   assert(qualityConstraintLabel(exit) === "PROTECT CAPITAL", "exit rows must lead with capital protection");
+  const balancedStarter = {
+    action: "BUY CANDIDATE",
+    data_date: currentSession,
+    payload: {
+      policy_version: "balanced-v1",
+      market_permission: "MIXED",
+      risk_permission: "ALLOW",
+      ticker_permission: "BLOCK",
+      walk_forward_permission: "INSUFFICIENT",
+      anti_signal_level: "NONE",
+      freshness_block: "NO",
+    },
+  };
+  assert(qualityConstraintLabel(balancedStarter) === "", "balanced Starter BUY must present soft uncertainty without a blocked-quality label");
+  assert(qualityConstraintLabel({ ...balancedStarter, payload: { ...balancedStarter.payload, market_permission: "BLOCK" } }) === "MARKET BLOCKED", "balanced policy must still expose a true market block");
   const partial = runHealthStatus({
     symbols_analyzed: 186,
     symbols_total: 192,
@@ -212,7 +227,7 @@ function auditPresentationSemantics() {
   const expired = runHealthStatus({ symbols_analyzed: 1, symbols_total: 1, latest_data_date: "2026-01-02" }, [{ ticker: "OLD", date: "2026-01-02" }]);
   assert(expired.tone === "bad", "an expired static publication must fail closed even if stored stale flags say fresh");
   assert(qualityConstraintLabel({ action: "BUY CANDIDATE", data_date: "2026-01-02" }) === "DATA NEEDS REFRESH", "expired rows must block entry in the browser");
-  return { readinessCases: 4, healthCases: 4 };
+  return { readinessCases: 6, healthCases: 4 };
 }
 
 function auditDecisionFunnelUi() {
@@ -287,7 +302,9 @@ function auditDecisionFunnelUi() {
   assert(!tickerSource.includes("Buy = scanner candidate; chart confirmation required; not trade execution."), "ticker detail must not repeat a generic BUY disclaimer");
   assert(pageSource.includes('id="mobile-search-count">Loading...</strong>'), "mobile loading state must not report a false zero-result count");
   assert(tickerSource.includes("Loading current data..."), "ticker loading state must not report a false missing-history error");
-  assert(tickerSource.includes("v3-3-compact-activity") && pageSource.includes("v3-3-compact-activity"), "both app surfaces must load the current shared application bundle");
+  const pageBundleVersion = pageSource.match(/assets\/app\.js\?v=([^"']+)/)?.[1];
+  const tickerBundleVersion = tickerSource.match(/assets\/app\.js\?v=([^"']+)/)?.[1];
+  assert(pageBundleVersion && pageBundleVersion === tickerBundleVersion, "both app surfaces must load the current shared application bundle");
   assert(stylesSource.includes("@media (prefers-color-scheme: dark)") && stylesSource.includes("html { color-scheme: dark; }"), "shared app surfaces must follow the device dark-mode preference");
   assert(pageSource.includes('media="(prefers-color-scheme: light)"') && pageSource.includes('media="(prefers-color-scheme: dark)"'), "watchlist browser chrome must follow the device theme");
   assert(tickerSource.includes('media="(prefers-color-scheme: light)"') && tickerSource.includes('media="(prefers-color-scheme: dark)"'), "ticker browser chrome must follow the device theme");
@@ -865,6 +882,58 @@ function auditSupabaseFallback() {
   assert(gated.payload.data_provider === "polygon", "execution-gated BUY row must keep data provider");
   assert(gated.payload.data_provider_status === "LIVE_OK", "execution-gated BUY row must keep data provider status");
 
+  const balancedStarter = rowDto({
+    ticker: "SOFT",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    setup: "REVERSAL BUY",
+    score: 82,
+    payload: {
+      policy_version: "balanced-v1",
+      buy_type: "STARTER",
+      shadow_action: "BUY CANDIDATE",
+      shadow_buy_type: "STARTER",
+      shadow_policy_allowed: "YES",
+      shadow_hard_blockers: [],
+      shadow_cautions: ["The broader market is mixed", "Historical validation is still limited"],
+      market_permission: "MIXED",
+      ticker_permission: "BLOCK",
+      walk_forward_permission: "INSUFFICIENT",
+      risk_permission: "ALLOW",
+      personality_setup_allowed: "NO",
+      volatility_permission: "CAUTION",
+      anti_signal_level: "CAUTION",
+      execution_fill_state: "INSUFFICIENT",
+      freshness_status: "LIVE_OR_CURRENT",
+      freshness_block: "NO",
+      data_age_days: 0,
+      buy_tier: "STARTER BUY",
+      execution_priority: 2,
+    },
+  });
+  assert(balancedStarter.action === "BUY CANDIDATE", "balanced Starter BUY must survive soft confidence gates");
+  assert(balancedStarter.payload.buy_tier === "STARTER BUY", "balanced Starter BUY must retain its half-size tier");
+
+  const contradictoryBalanced = rowDto({
+    ticker: "CONFLICT",
+    data_date: new Date().toISOString().slice(0, 10),
+    action: "BUY CANDIDATE",
+    market_permission: "ALLOW",
+    payload: {
+      policy_version: "balanced-v1",
+      buy_type: "STARTER",
+      shadow_policy_allowed: "YES",
+      shadow_hard_blockers: [],
+      market_permission: "MIXED",
+      ticker_permission: "INSUFFICIENT",
+      walk_forward_permission: "INSUFFICIENT",
+      risk_permission: "ALLOW",
+      freshness_block: "NO",
+      data_age_days: 0,
+    },
+  });
+  assert(contradictoryBalanced.action === "SETUP FORMING", "contradictory balanced hard-gate evidence must fail closed");
+
   const unprovenFill = rowDto({
     ticker: "UNPROVEN",
     data_date: new Date().toISOString().slice(0, 10),
@@ -1063,6 +1132,9 @@ function auditSupabaseFallback() {
     gatedAction: gated.action,
     gatedGates: gateValues(gated),
     gatedProvider: gated.payload.data_provider,
+    balancedStarterAction: balancedStarter.action,
+    balancedStarterTier: balancedStarter.payload.buy_tier,
+    contradictoryBalancedAction: contradictoryBalanced.action,
     unprovenFillAction: unprovenFill.action,
     lowFillAction: lowFill.action,
     unsafeGateActions: unsafeGates.map(({ dto }) => dto.action),

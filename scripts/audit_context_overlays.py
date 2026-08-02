@@ -535,6 +535,70 @@ def audit_learning_upgrade_respects_personality_gate():
     assert_true("learning_confirmed_setup" not in blocked["reason_codes"], "blocked setup must not record a learning promotion")
 
 
+def audit_balanced_policy_promotes_soft_uncertainty_to_starter():
+    candidate = learning_confirmed_setup_row(
+        action="SETUP FORMING",
+        personality_setup_allowed="NO",
+        market_permission="MIXED",
+        ticker_permission="BLOCK",
+        walk_forward_permission="INSUFFICIENT",
+        risk_permission="ALLOW",
+        reason_codes=["personality_setup_not_allowed", "market_regime_block", "setup_only_tier"],
+        shadow_action="BUY CANDIDATE",
+        shadow_buy_type="STARTER",
+        shadow_position_size_factor=0.5,
+        shadow_policy_allowed="YES",
+        shadow_hard_blockers=[],
+        shadow_cautions=["The broader market is mixed", "Historical validation is still limited"],
+        shadow_readiness_score=76.0,
+        position_value_1k_risk=20_000,
+        risk_pct_to_stop=5.0,
+    )
+    dwo.activate_balanced_policy(candidate)
+    assert_true(candidate["action"] == "BUY CANDIDATE", "soft uncertainty must not veto a balanced Starter BUY")
+    assert_true(candidate["buy_type"] == "STARTER", "soft uncertainty must produce an explicit Starter position")
+    assert_true(candidate["suggested_position_value"] == 10_000, "Starter BUY must use half the normal position")
+    assert_true(candidate["actual_risk_dollars"] == 500, "Starter BUY must halve the planned risk dollars")
+    assert_true(candidate["legacy_action"] == "SETUP FORMING", "policy activation must preserve the legacy decision")
+    assert_true(candidate["anti_signal_score"] == 0.0, "soft uncertainty must not survive as a duplicate anti-signal penalty")
+    assert_true(candidate["anti_signal_level"] == "NONE", "readiness cautions must not masquerade as hard anti-signals")
+    tier, priority, _ = dwo.buy_tier_for(candidate, 0)
+    assert_true((tier, priority) == ("STARTER BUY", 2), "Starter BUY must remain executable in tiering")
+
+
+def audit_balanced_policy_never_overrides_hard_risk():
+    candidate = learning_confirmed_setup_row(
+        shadow_action="SETUP FORMING",
+        shadow_buy_type="NONE",
+        shadow_policy_allowed="NO",
+        shadow_hard_blockers=["A confirmed bull trap is active"],
+        shadow_cautions=[],
+        position_size_factor=1.0,
+    )
+    dwo.activate_balanced_policy(candidate)
+    assert_true(candidate["action"] == "SETUP FORMING", "hard risk must prevent balanced BUY activation")
+    assert_true(candidate["anti_signal_level"] == "BLOCK", "hard risk must remain an explicit execution block")
+    assert_true(candidate["position_size_factor"] == 0.0, "hard-blocked setup must not carry position size")
+
+
+def audit_shadow_finalization_removes_legacy_gate_stacking():
+    candidate = learning_confirmed_setup_row(
+        anti_signal_level="BLOCK",
+        anti_signal_score=70.0,
+        next_day_bias="EXECUTION BLOCKED",
+        market_permission="ALLOW",
+        risk_permission="ALLOW",
+        entry_zone_low=98.0,
+        entry_zone_high=101.0,
+        stop_est=94.0,
+        risk_pct_to_stop=5.0,
+    )
+    finalized = dwo.finalize_shadow_execution(candidate)
+    assert_true(finalized["shadow_hard_blockers"] == [], "fixture must have no true hard blocker")
+    assert_true(finalized["anti_signal_level"] == "NONE", "legacy execution-block state must not become a second anti-signal gate")
+    assert_true(finalized["anti_signal_score"] == 0.0, "legacy anti-signal score must be cleared before learning")
+
+
 def executable_prior(**overrides):
     prior = row(
         "2026-06-01",
@@ -611,14 +675,11 @@ def audit_outcome_does_not_depend_on_current_action():
 
 
 def audit_hard_gate_blocked_signal_cannot_work_or_learn():
-    gate_blocks = {
-        "personality_setup_allowed": "NO",
+    hard_gate_blocks = {
         "market_permission": "BLOCK",
-        "ticker_permission": "CAUTION",
         "risk_permission": "BLOCK",
-        "walk_forward_permission": "INSUFFICIENT",
     }
-    for gate, value in gate_blocks.items():
+    for gate, value in hard_gate_blocks.items():
         outcome = dwo.self_score_prior_signal(
             executable_prior(**{gate: value}),
             executable_current(close=104),
@@ -631,6 +692,22 @@ def audit_hard_gate_blocked_signal_cannot_work_or_learn():
             not dwo.build_learning_stats(pd.DataFrame([outcome])),
             f"{gate} block must not contribute to learning stats",
         )
+
+    soft_uncertainty = {
+        "personality_setup_allowed": "NO",
+        "ticker_permission": "CAUTION",
+        "walk_forward_permission": "INSUFFICIENT",
+        "market_permission": "MIXED",
+    }
+    for gate, value in soft_uncertainty.items():
+        outcome = dwo.self_score_prior_signal(
+            executable_prior(**{gate: value}),
+            executable_current(close=104),
+            "2026-06-02",
+        )
+        assert_true(outcome["entry_eligible"] is True, f"{gate} uncertainty must not become a hard block")
+        assert_true(outcome["outcome_label"] == "WORKING", f"{gate} uncertainty must retain the observed outcome")
+        assert_true(outcome["outcome_learnable"] is True, f"{gate} uncertainty must remain learnable")
 
 
 def outcome_rows(count, learning_key, *, model_version=dwo.LEARNING_MODEL_VERSION, ticker_prefix="T"):
@@ -1048,15 +1125,12 @@ def audit_outcome_freezes_original_prediction():
     assert_true(outcome["prior_prediction_state"] == "CALIBRATED", "outcomes must retain the original prediction state")
 
 
-def audit_learning_promotion_requires_all_execution_gates():
+def audit_learning_promotion_respects_hard_gates_only():
     key = dwo.learning_key_for(learning_confirmed_setup_row())
     stats = dwo.build_learning_stats(pd.DataFrame(outcome_rows(30, key)))
     blocked_gates = {
         "market_permission": "BLOCK",
-        "ticker_permission": "BLOCK",
-        "walk_forward_permission": "BLOCK",
         "risk_permission": "BLOCK",
-        "personality_setup_allowed": "NO",
     }
     for gate, blocked_value in blocked_gates.items():
         current = learning_confirmed_setup_row(**{gate: blocked_value})
@@ -1066,6 +1140,19 @@ def audit_learning_promotion_requires_all_execution_gates():
         assert_true(current["adjusted_score"] == 78.0, f"{gate} must preserve the pre-learning score")
         assert_true(not current["learning_promotion_eligible"], f"{gate} must block learning promotion eligibility")
         assert_true(current["learning_reporting_only"], f"{gate} must keep learning reporting-only")
+
+    soft_gates = {
+        "market_permission": "MIXED",
+        "ticker_permission": "BLOCK",
+        "walk_forward_permission": "INSUFFICIENT",
+        "personality_setup_allowed": "NO",
+    }
+    for gate, value in soft_gates.items():
+        current = learning_confirmed_setup_row(**{gate: value})
+        current["adjusted_score"] = 78
+        dwo.apply_learning_adjustments([current], stats)
+        assert_true(current["learning_adjustment"] > 0.0, f"{gate} must not suppress validated positive learning")
+        assert_true(current["learning_promotion_eligible"], f"{gate} uncertainty must remain promotion eligible")
 
 
 def audit_personality_setup_governor_blocks_range_chase():
@@ -1334,6 +1421,9 @@ def main():
     audit_safety_gates_preserve_raw_technical_score()
     audit_freshness_gate_preserves_raw_technical_score()
     audit_learning_upgrade_respects_personality_gate()
+    audit_balanced_policy_promotes_soft_uncertainty_to_starter()
+    audit_balanced_policy_never_overrides_hard_risk()
+    audit_shadow_finalization_removes_legacy_gate_stacking()
     audit_stop_breach_cannot_be_working()
     audit_stale_stop_breach_is_not_learnable()
     audit_gap_through_entry_stop_is_non_learnable()
@@ -1361,7 +1451,7 @@ def main():
     audit_walk_forward_prediction_has_no_future_leakage()
     audit_bad_walk_forward_calibration_blocks_promotion()
     audit_outcome_freezes_original_prediction()
-    audit_learning_promotion_requires_all_execution_gates()
+    audit_learning_promotion_respects_hard_gates_only()
     audit_replay_market_gate_matches_live_context()
     audit_replay_gate_cache_is_bounded_and_historical()
     audit_ohlcv_cache_reuses_persistent_history()
@@ -1383,7 +1473,7 @@ def main():
     audit_fillability_fails_closed()
     print({
         "contextOverlayAudit": "ok",
-        "cases": 77,
+        "cases": 80,
     })
 
 
