@@ -773,7 +773,7 @@ function naturalActionSentence(row) {
   const pattern = setupLabel(row.setup);
   const style = String(payloadValue(row, "execution_style") || "").toUpperCase();
   const buyType = String(payloadValue(row, "buy_type") || payloadValue(row, "shadow_buy_type") || "").toUpperCase();
-  if (kind === "buy" && buyType === "STARTER") return `${pattern} has enough early evidence for a half-size starter; add only after price and demand confirm.`;
+  if (kind === "buy" && buyType === "STARTER") return `${pattern} has enough early evidence for a half-size starter plan; enter only at the stated price and after demand confirms.`;
   if (kind === "buy" && style === "BREAKOUT TRIGGER") return `${pattern} conditions are in place; enter only if price reaches the breakout entry range without running above the maximum entry.`;
   if (kind === "buy") return `${pattern} conditions are in place; use a limit entry only inside the pullback zone and require it to hold.`;
   if (kind === "continue") return "The existing trend remains constructive, but a new entry should avoid chasing strength.";
@@ -781,6 +781,16 @@ function naturalActionSentence(row) {
   if (kind === "watch") return "There is no clean entry yet; wait for either a stronger breakout or a controlled pullback.";
   if (kind === "exit") return "The trend is under pressure; protect capital rather than looking for a new entry.";
   return "There is no favourable setup at the moment.";
+}
+
+function detailSignalCaption(row) {
+  return actionKind(row?.action) === "buy" ? "Qualified setup" : "Latest signal";
+}
+
+function detailSignalLabel(row) {
+  if (actionKind(row?.action) !== "buy") return ACTION_LABELS[row?.action] || row?.action || "WAIT";
+  const buyType = String(payloadValue(row, "buy_type") || payloadValue(row, "shadow_buy_type") || "").toUpperCase();
+  return buyType === "STARTER" ? "STARTER BUY SETUP" : "BUY SETUP";
 }
 
 function executionChecksClear(row) {
@@ -1357,15 +1367,29 @@ function renderShadowPolicyPreview(row) {
   const explanation = String(payloadValue(row, "shadow_decision_explanation") || "");
   const blockers = shadowList(payloadValue(row, "shadow_hard_blockers"));
   const cautions = shadowList(payloadValue(row, "shadow_cautions"));
+  const position = referenceZonePosition(row);
+  const waitingAboveZone = shadowAction === "BUY CANDIDATE" && position.includes("above");
+  const insideZone = shadowAction === "BUY CANDIDATE" && position.includes("inside");
   const headline = shadowAction === "BUY CANDIDATE"
-    ? buyType === "STARTER" ? "Starter position · 50% of normal size" : "Full planned position"
+    ? buyType === "STARTER"
+      ? waitingAboveZone
+        ? "Wait for pullback · then use 50% size"
+        : insideZone
+          ? "Starter entry plan · 50% of normal size"
+          : "Conditional starter plan · 50% of normal size"
+      : waitingAboveZone ? "Wait for pullback before entry" : "Conditional full-size entry plan"
     : shadowAction === "SETUP FORMING" ? "Setup still developing" : ACTION_LABELS[shadowAction] || shadowAction;
   const supporting = blockers[0] || cautions[0] || explanation;
+  const policyExplanation = waitingAboveZone
+    ? "The setup qualifies, but price is above the entry zone. Do not enter until a controlled pullback reaches the zone and holds."
+    : insideZone && buyType === "STARTER"
+      ? "The setup qualifies for a half-size entry only while price remains inside the stated entry zone and demand holds."
+      : explanation;
   return `
     <section class="policy-preview">
       <span class="eyebrow">Balanced readiness</span>
       <strong>${escapeHtml(headline)}</strong>
-      <p>${escapeHtml(explanation)}</p>
+      <p>${escapeHtml(policyExplanation)}</p>
       ${Number.isFinite(readiness) ? `<small>Readiness ${escapeHtml(fmtNumber(readiness, 1))}/100${supporting ? ` · ${escapeHtml(supporting)}` : ""}</small>` : ""}
     </section>
   `;
@@ -1916,7 +1940,7 @@ function renderTickerDetailPanel() {
   panel.innerHTML = `
     <div class="detail-panel-head"><div><span class="eyebrow">Selected stock</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open details</a></div>
     <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
-    <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
+    <div class="detail-signal"><span class="eyebrow">${escapeHtml(detailSignalCaption(row))}</span><span class="badge ${kind}">${escapeHtml(detailSignalLabel(row))}</span></div>
     <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
     ${activePlan
       ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(row, { active: true })}</section>`
@@ -2634,8 +2658,8 @@ function renderLatestHistoryPanel(latest) {
   panel.innerHTML = `
     <div class="latest-card tone-${actionKind(latest.action)}">
       <div class="latest-head">
-        <span class="latest-label">Latest signal</span>
-        <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[latest.action] || latest.action)}</span>
+        <span class="latest-label">${escapeHtml(detailSignalCaption(latest))}</span>
+        <span class="badge ${kind}">${escapeHtml(detailSignalLabel(latest))}</span>
       </div>
       <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
@@ -2719,7 +2743,12 @@ function historyInterpretation(latest, priceMovePct, summaryApi) {
   if (state === "setup") return "The technical picture is developing, but it has not reached an entry signal.";
   if (state === "watch") return "The recent record remains mixed; there is no confirmed entry.";
   if (state === "continue") return "The recent trend remains constructive, but this is not a fresh entry signal by itself.";
-  if (state === "buy") return "The recent record is constructive and the latest Buy has passed the current execution checks.";
+  if (state === "buy") {
+    const position = referenceZonePosition(latest);
+    if (position.includes("above")) return "The setup is qualified, but execution is waiting for price to return to the planned entry zone.";
+    if (position.includes("inside")) return "The setup is qualified and price is inside the planned entry zone; entry still depends on the zone holding.";
+    return "The setup is qualified, but entry remains conditional on the stated price plan.";
+  }
   return `Price ${priceMovePct >= 0 ? "improved" : "weakened"} over the measured period, but the latest session does not provide an executable entry.`;
 }
 

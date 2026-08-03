@@ -127,6 +127,18 @@ function auditSearchBehavior() {
   };
 }
 
+function auditConditionalBuyPresentation() {
+  const source = fs.readFileSync("assets/app.js", "utf8");
+  assert(source.includes('return actionKind(row?.action) === "buy" ? "Qualified setup" : "Latest signal"'), "BUY qualification must not be labelled as an immediately executable signal");
+  assert(source.includes('"STARTER BUY SETUP"'), "Starter BUY must be presented as a setup qualification");
+  assert(source.includes('"Wait for pullback · then use 50% size"'), "an above-zone Starter BUY must make the pullback condition explicit");
+  assert(source.includes('"The setup qualifies, but price is above the entry zone. Do not enter until a controlled pullback reaches the zone and holds."'), "readiness copy must not imply immediate entry above the zone");
+  assert(source.includes('"The setup is qualified, but execution is waiting for price to return to the planned entry zone."'), "recent-behavior summary must respect an above-zone wait state");
+  assert(!source.includes('"Starter position · 50% of normal size"'), "detail UI must not present a conditional setup as an open position");
+  assert(!source.includes("latest Buy has passed the current execution checks"), "detail UI must not equate risk checks with an executable entry");
+  return true;
+}
+
 function auditHistorySummary() {
   const completeRows = Array.from({ length: 30 }, (_, index) => ({
     history_date: `2026-06-${String(index + 1).padStart(2, "0")}`,
@@ -1296,6 +1308,7 @@ async function main() {
     supabaseFallback: auditSupabaseFallback(),
     historicalReplayDto: auditHistoricalReplayDto(),
     searchBehavior: auditSearchBehavior(),
+    conditionalBuyPresentation: auditConditionalBuyPresentation(),
     historySummary: auditHistorySummary(),
     presentationSemantics: auditPresentationSemantics(),
     decisionFunnelUi: auditDecisionFunnelUi(),
