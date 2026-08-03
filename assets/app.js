@@ -400,6 +400,7 @@ const state = {
 
 const APP_NOTIFICATION_HISTORY = "daily-watchlist-notification-history";
 const APP_NOTIFICATION_READ = "daily-watchlist-notification-read";
+const NOTIFICATION_RETENTION_MARKET_SESSIONS = 5;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -2302,10 +2303,24 @@ function writeStoredList(key, values) {
   }
 }
 
+function notificationIsWithinRetention(item, now = new Date()) {
+  const date = String(item?.date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const age = globalThis.WatchlistMarketSession?.marketSessionAge?.(date, now);
+  return Number.isInteger(age) && age >= 0 && age <= NOTIFICATION_RETENTION_MARKET_SESSIONS;
+}
+
+function pruneNotificationReadState(items) {
+  const activeIds = new Set(items.map((item) => item.id));
+  const retained = readStoredList(APP_NOTIFICATION_READ).filter((id) => activeIds.has(id));
+  writeStoredList(APP_NOTIFICATION_READ, retained);
+}
+
 function notificationForRow(row) {
   const ticker = normaliseTicker(row.ticker);
   if (!ticker) return null;
   const date = String(row.data_date || row.date || row.run_date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const stage = String(payloadValue(row, "profit_stage") || "").toUpperCase();
   const overlay = String(payloadValue(row, "contextual_overlay") || "").toUpperCase();
   const takeProfit1 = payloadNumeric(row, "take_profit_1");
@@ -2349,14 +2364,15 @@ function notificationForRow(row) {
 
 function notificationHistory() {
   const stored = readStoredList(APP_NOTIFICATION_HISTORY)
-    .filter((item) => item && item.id && item.ticker && item.title);
-  const current = state.rows.map(notificationForRow).filter(Boolean);
+    .filter((item) => item && item.id && item.ticker && item.title && notificationIsWithinRetention(item));
+  const current = state.rows.map(notificationForRow).filter((item) => item && notificationIsWithinRetention(item));
   const merged = new Map(stored.map((item) => [item.id, item]));
   current.forEach((item) => merged.set(item.id, item));
   const items = [...merged.values()]
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
     .slice(0, 50);
   writeStoredList(APP_NOTIFICATION_HISTORY, items);
+  pruneNotificationReadState(items);
   return items;
 }
 

@@ -305,6 +305,9 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes('stage === "PROTECT REMAINDER"'), "notification center must detect profit-protection events");
   assert(appSource.includes('row.action === "EXIT PRESSURE" && state.focusTickers.includes(ticker)'), "exit alerts must be limited to saved Focus List names");
   assert(appSource.includes("function markNotificationsRead(ids)"), "notification center must persist read state");
+  assert(appSource.includes("const NOTIFICATION_RETENTION_MARKET_SESSIONS = 5"), "notification history must expire after five completed market sessions");
+  assert(appSource.includes("notificationIsWithinRetention(item)"), "stored notification history must enforce market-session retention");
+  assert(appSource.includes("pruneNotificationReadState(items)"), "expired notification read markers must be reclaimed");
   assert(appSource.includes(".slice(0, 50)"), "notification history must remain storage-bounded");
   assert(!appSource.includes("Notification.requestPermission"), "in-app notifications must not request browser notification permission");
   assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
@@ -382,6 +385,10 @@ function auditMarketSessionFreshness() {
   assert(marketSessionAge("2026-07-02", independenceHoliday) === 0, "exchange holiday must not create a phantom completed session");
   assert(marketSessionAge("2026-11-27", blackFridayAfterEarlyClose) === 0, "early-close session must become current after its actual close");
   assert(marketSessionAge("2099-01-01", thursdayAfterClose) === null, "future market dates must fail closed");
+  const fifthSessionAfterAlert = new Date("2026-07-17T21:00:00Z");
+  const sixthSessionAfterAlert = new Date("2026-07-20T21:00:00Z");
+  assert(marketSessionAge("2026-07-10", fifthSessionAfterAlert) === 5, "notification retention boundary must count completed sessions, not calendar days");
+  assert(marketSessionAge("2026-07-10", sixthSessionAfterAlert) === 6, "notifications must expire on the sixth completed session");
 
   const currentSession = latestCompletedMarketSession().toISOString().slice(0, 10);
   const dto = rowDto({
