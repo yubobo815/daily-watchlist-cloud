@@ -14,10 +14,10 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=v4.0.8">
-    <script defer src="./assets/market-session.js?v=v4.0.8"></script>
-    <script defer src="./assets/presentation.js?v=v4.0.8"></script>
-    <script defer src="./assets/app.js?v=v4.0.8"></script>
+    <link rel="stylesheet" href="./assets/styles.css?v=v4.0.9">
+    <script defer src="./assets/market-session.js?v=v4.0.9"></script>
+    <script defer src="./assets/presentation.js?v=v4.0.9"></script>
+    <script defer src="./assets/app.js?v=v4.0.9"></script>
   </head>
   <body data-page="watchlist">
     <main class="shell">
@@ -26,12 +26,9 @@
         <section class="secondary-tools" aria-label="Watchlist tools">
           <section id="profit-alerts" class="profit-alert-center" aria-live="polite"></section>
           <details id="market-activity" class="secondary-insights">
-            <summary>Market activity <span>changes, movers, saved names</span></summary>
+            <summary>Market activity <span>previous-session highlights</span></summary>
             <div class="utility-drawer-body">
-              <section id="today-focus" class="today-focus"></section>
-              <section id="signal-changes" class="changed-today"></section>
-              <section id="price-movers" class="price-movers"></section>
-              <section id="focus-list" class="focus-list"></section>
+              <section id="market-highlights" class="market-highlights"></section>
             </div>
           </details>
         </section>

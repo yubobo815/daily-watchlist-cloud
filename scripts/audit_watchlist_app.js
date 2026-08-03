@@ -270,8 +270,12 @@ function auditDecisionFunnelUi() {
   const stylesSource = fs.readFileSync("assets/styles.css", "utf8");
   const presentationSource = fs.readFileSync("assets/presentation.js", "utf8");
   assert(stylesSource.includes("#market-activity[open] > summary"), "open market activity must have a scoped surface treatment");
-  assert(stylesSource.includes("#market-activity .focus-item"), "market activity cards must use scoped palette overrides");
-  assert(stylesSource.includes("#market-activity .focus-unlock input"), "saved-name controls must use the shared light palette");
+  assert(pageSource.includes('id="market-highlights"'), "market activity must use one concise highlight surface");
+  assert(appSource.includes("function previousSessionHighlights(limit = 8)"), "market activity must cap and deduplicate latest-session highlights");
+  assert(appSource.includes("if (item.row?.ticker && !unique.has(item.row.ticker))"), "a stock must not be repeated across activity categories");
+  assert(appSource.includes("function activityHighlightReason(item)"), "activity cards must explain why each stock matters in natural language");
+  assert(appSource.includes('state.rows[0]?.data_date || state.rows[0]?.date || state.rows[0]?.run_date'), "activity highlights must identify the latest market date across publication formats");
+  assert(!pageSource.includes('id="signal-changes"') && !pageSource.includes('id="price-movers"') && !pageSource.includes('id="focus-list"'), "market activity must not retain the repetitive multi-section layout");
   assert(appSource.includes("function renderTickerDetailPanel"), "desktop watchlist must expose an in-place ticker scanner review panel");
   assert(!appSource.includes("Confirm any BUY on the TradingView Pine chart before acting."), "ticker panel must not repeat the removed Pine confirmation copy");
   assert(appSource.includes("function decisionHeadline(row)"), "ticker context must lead with a clear user decision");
@@ -322,7 +326,7 @@ function auditDecisionFunnelUi() {
   assert(stylesSource.includes("v3.3 concept workspace"), "both app surfaces must use the approved concept workspace design layer");
   assert(pageSource.indexOf('class="secondary-tools"') < pageSource.indexOf('class="hero editorial-hero"'), "supporting tools must be reachable from the top utility rail");
   assert(stylesSource.includes(".secondary-tools .utility-drawer-body"), "market activity must open as a non-disruptive top drawer");
-  assert(stylesSource.includes(".utility-drawer-body .focus-grid"), "market activity cards must use the compact drawer layout");
+  assert(stylesSource.includes(".activity-highlight-grid"), "market activity must use a compact card grid");
   assert(stylesSource.includes("body[data-page=\"watchlist\"] .execution-queue::after { display: none; }"), "watchlist summary strip must not retain decorative card ornaments");
   assert(stylesSource.includes("body.ticker-page .moment-card::before"), "ticker history must use timeline markers instead of nested cards");
   assert(stylesSource.includes("body.ticker-page .history-visual { gap: 0; border: 0; background: transparent; }"), "ticker summary must remain a flat editorial section");

@@ -1154,8 +1154,6 @@ async function ensureFocusPin() {
   const pin = window.prompt("Enter your Focus List PIN");
   if (!pin) {
     state.focusMessage = "Enter the PIN to sync your Focus List.";
-    renderFocusList();
-    attachFocusControls();
     return false;
   }
   saveFocusPin(pin);
@@ -2040,250 +2038,68 @@ function renderDailyBrief(counts) {
   });
 }
 
-function securityDisplay(row) {
-  const name = displaySecurityName(row.name, row.ticker);
-  return name ? `${row.ticker} · ${name}` : row.ticker;
+function activityHighlightReason(item) {
+  const { row, previous, pricePct, source } = item;
+  if (previous && row.action !== previous.action) {
+    return `Signal changed from ${ACTION_LABELS[previous.action] || previous.action} to ${ACTION_LABELS[row.action] || row.action}.`;
+  }
+  if (previous && row.setup !== previous.setup) return `The chart pattern changed to ${setupLabel(row.setup)}.`;
+  if (source === "move") return `Closed ${pricePct >= 0 ? "up" : "down"} ${fmtNumber(Math.abs(pricePct), 1)}% in the latest session.`;
+  if (actionKind(row.action) === "exit") return "Selling pressure made this a priority risk review.";
+  if (actionKind(row.action) === "buy") return "One of the strongest qualified setups from the latest session.";
+  return "This stock stood out in the latest completed session.";
 }
 
-function reasonChips(row, previous = previousRowFor(row), limit = 3) {
-  const reasons = whyThisMatters(row, previous).slice(0, limit);
-  return reasons.map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`).join("");
+function previousSessionHighlights(limit = 8) {
+  const changes = dailyChangeItems(state.rows, state.previousRows, 8).map((item) => ({ ...item, source: "signal" }));
+  const movers = currentDayMoverItems(state.rows).slice(0, 6).map((item) => ({ ...item, source: "move" }));
+  const ranked = [...state.rows].sort((a, b) => convictionScore(b) - convictionScore(a));
+  const strongestBuy = ranked.find((row) => actionKind(row.action) === "buy");
+  const highestRisk = [...state.rows]
+    .filter((row) => actionKind(row.action) === "exit")
+    .sort((a, b) => riskPriority(b) - riskPriority(a))[0];
+  const anchors = [strongestBuy, highestRisk].filter(Boolean).map((row) => ({
+    row,
+    previous: previousRowFor(row),
+    pricePct: numericValue(row, "day_change_pct"),
+    source: "priority",
+  }));
+  const unique = new Map();
+  [...changes, ...movers, ...anchors].forEach((item) => {
+    if (item.row?.ticker && !unique.has(item.row.ticker)) unique.set(item.row.ticker, item);
+  });
+  return [...unique.values()].slice(0, limit);
 }
 
-function focusItem(row, reason) {
-  if (!row) return "";
+function activityHighlightCard(item) {
+  const { row, pricePct } = item;
   const kind = actionKind(row.action);
   return `
-    <a class="focus-item tone-${kind}" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
-      <span class="focus-kicker">${escapeHtml(reason)}</span>
-      <span class="focus-main">
+    <a class="activity-highlight-card tone-${kind}" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
+      <span class="activity-highlight-head">
         <strong>${escapeHtml(row.ticker)}</strong>
-        <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
-      </span>
-      <span class="focus-meta">
         <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-        <span>Close ${fmtNumber(row.close, 2)} ${renderMovePct(row.day_change_pct)}</span>
       </span>
-      <span class="reason-row">${reasonChips(row, previousRowFor(row), 2)}</span>
+      <span class="activity-highlight-move ${moveClass(pricePct)}">${fmtSignedNumber(pricePct, 1)}%</span>
+      <span class="activity-highlight-reason">${escapeHtml(activityHighlightReason(item))}</span>
     </a>
   `;
 }
 
-function renderTodayFocus() {
-  const panel = document.querySelector("#today-focus");
+function renderMarketActivity() {
+  const panel = document.querySelector("#market-highlights");
   if (!panel) return;
-  const runDate = state.rows[0]?.run_date || "";
-  const ranked = [...state.rows].sort((a, b) => convictionScore(b) - convictionScore(a));
-  const strongest = ranked.find((row) => actionKind(row.action) === "buy");
-  const building = ranked.find((row) => actionKind(row.action) === "setup");
-  const pressure = [...state.rows]
-    .filter((row) => actionKind(row.action) === "exit")
-    .sort((a, b) => convictionScore(a) - convictionScore(b))[0];
-  const bestDay = [...state.rows]
-    .filter((row) => ["buy", "continue", "setup", "watch"].includes(actionKind(row.action)))
-    .sort((a, b) => Number(b.day_change_pct || 0) - Number(a.day_change_pct || 0))[0];
-
-  const items = [
-    focusItem(strongest, copyText("buyFocus")),
-    focusItem(building, copyText("buildingFocus")),
-    focusItem(pressure, copyText("exitFocus")),
-    focusItem(bestDay, copyText("moveFocus"))
-  ].filter(Boolean);
-
+  const runDate = state.rows[0]?.data_date || state.rows[0]?.date || state.rows[0]?.run_date || "";
+  const highlights = previousSessionHighlights();
   panel.innerHTML = `
-    <div class="section-heading">
-      <div>
-        <span>${escapeHtml(copyText("todayFocus"))}</span>
-      </div>
-      ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
+    <div class="activity-highlight-heading">
+      <span><strong>Previous session highlights</strong><small>Only the stocks that changed or moved enough to review.</small></span>
+      ${runDate ? `<time>${escapeHtml(runDate)}</time>` : ""}
     </div>
-    <div class="focus-grid">${items.join("")}</div>
+    ${highlights.length
+      ? `<div class="activity-highlight-grid">${highlights.map(activityHighlightCard).join("")}</div>`
+      : '<div class="activity-highlight-empty">No material signal changes or price moves in the latest session.</div>'}
   `;
-}
-
-function changedTodayCard({ row, previous, pricePct }, duplicate = false) {
-  const signal = ACTION_LABELS[row.action] || row.action || "Signal";
-  return `
-    <a class="change-card tone-${actionKind(row.action)}" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}"${duplicate ? ' aria-hidden="true" tabindex="-1"' : ""}>
-      <div class="change-card-head">
-        <strong>${escapeHtml(row.ticker)}</strong>
-        <span>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</span>
-      </div>
-      <div class="change-card-body">
-        <span class="badge ${actionKind(row.action)}">${escapeHtml(signal)}</span>
-        ${transitionBadge(row, previous)}
-        <span class="change-chip ${moveClass(pricePct)}">Price ${fmtSignedNumber(pricePct, 1)}%</span>
-      </div>
-      <div class="reason-row">${reasonChips(row, previous, 2)}</div>
-    </a>
-  `;
-}
-
-function moversSectionHeading(title, runDate) {
-  return `
-    <div class="section-heading">
-      <div>
-        <span>${escapeHtml(title)}</span>
-      </div>
-      ${runDate ? `<span class="section-date">${escapeHtml(runDate)}</span>` : ""}
-    </div>
-  `;
-}
-
-function renderSignalChanges() {
-  const panel = document.querySelector("#signal-changes");
-  if (!panel) return;
-  const runDate = state.rows[0]?.run_date || "";
-  const changes = dailyChangeItems(state.rows, state.previousRows);
-  if (!changes.length) {
-    panel.innerHTML = `
-      ${moversSectionHeading(copyText("signalChanges"), runDate)}
-      <div class="empty compact-empty">${escapeHtml(copyText("noScannerChanges"))}</div>
-    `;
-    return;
-  }
-
-  const rolling = changes.length > 1;
-  const cards = changes.map((change) => changedTodayCard(change)).join("");
-  const duplicateCards = rolling ? changes.map((change) => changedTodayCard(change, true)).join("") : "";
-  panel.innerHTML = `
-    ${moversSectionHeading(copyText("signalChanges"), runDate)}
-    <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Latest-session movers">
-      <div class="change-track">
-        ${cards}
-        ${duplicateCards}
-      </div>
-    </div>
-  `;
-}
-
-function renderPriceMovers() {
-  const panel = document.querySelector("#price-movers");
-  if (!panel) return;
-  const runDate = state.rows[0]?.run_date || "";
-  const movers = currentDayMoverItems(state.rows);
-  if (!movers.length) {
-    panel.innerHTML = `
-      ${moversSectionHeading(copyText("priceMovers"), runDate)}
-      <div class="empty compact-empty">${escapeHtml(copyText("noPriceMoves"))}</div>
-    `;
-    return;
-  }
-
-  const rolling = movers.length > 1;
-  const cards = movers.map((change) => changedTodayCard(change)).join("");
-  const duplicateCards = rolling ? movers.map((change) => changedTodayCard(change, true)).join("") : "";
-  panel.innerHTML = `
-    ${moversSectionHeading(copyText("priceMovers"), runDate)}
-    <div class="change-rail${rolling ? " rolling" : ""}" aria-label="Price movers">
-      <div class="change-track">
-        ${cards}
-        ${duplicateCards}
-      </div>
-    </div>
-  `;
-}
-
-function renderFocusList() {
-  const panel = document.querySelector("#focus-list");
-  if (!panel) return;
-  const runDate = state.rows[0]?.run_date || "";
-  const focusStatus = state.focusSyncing ? "Syncing..." : state.focusMessage;
-  const focusControls = state.focusPin ? `
-    <div class="focus-controls">
-      <span>${escapeHtml(focusStatus || "Cloud Focus List unlocked.")}</span>
-      <button type="button" id="focus-sign-out">Sign out</button>
-    </div>
-  ` : `
-    <div class="focus-unlock">
-      <span>
-        <strong>Cloud Focus List</strong>
-        <small>Enter your PIN to sync starred tickers across devices.</small>
-      </span>
-      <form id="focus-pin-form">
-        <input id="focus-pin-input" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN" aria-label="Focus List PIN">
-        <button type="submit">Unlock</button>
-      </form>
-      ${focusStatus ? `<em>${escapeHtml(focusStatus)}</em>` : ""}
-    </div>
-  `;
-  const focusRows = state.focusTickers
-    .map((ticker) => state.rows.find((row) => row.ticker === ticker))
-    .filter(Boolean)
-    .sort((a, b) => convictionScore(b) - convictionScore(a));
-
-  if (!focusRows.length) {
-    panel.innerHTML = `
-      ${moversSectionHeading(copyText("focusList"), runDate)}
-      ${focusControls}
-      <div class="focus-empty">
-        <span>${state.focusPin ? "Star tickers in the watchlist to keep your personal list here." : "Unlock first, then star tickers from the Watchlist."}</span>
-      </div>
-    `;
-    return;
-  }
-
-  panel.innerHTML = `
-    ${moversSectionHeading(copyText("focusList"), runDate)}
-    ${focusControls}
-    <div class="focus-list-grid">
-      ${focusRows.map((row) => {
-        const kind = actionKind(row.action);
-        const previous = previousRowFor(row);
-        return `
-          <div class="focus-list-item tone-${kind}">
-            <a class="focus-list-link" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">
-              <span>
-                <strong>${escapeHtml(row.ticker)}</strong>
-                <small>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</small>
-              </span>
-              <span class="focus-list-tags">
-                ${transitionBadge(row, previous)}
-                <span class="badge ${kind}">${escapeHtml(ACTION_LABELS[row.action] || row.action)}</span>
-                <span class="badge conviction-pill score-${strengthTone(row)}">${escapeHtml(strengthLabel(row))}</span>
-                ${renderMovePct(row.day_change_pct)}
-              </span>
-            </a>
-            <button class="focus-remove" type="button" data-remove-focus="${escapeHtml(row.ticker)}" aria-label="Remove ${escapeHtml(row.ticker)} from Focus List">×</button>
-          </div>
-        `;
-      }).join("")}
-    </div>
-  `;
-}
-
-function attachFocusControls() {
-  const form = document.querySelector("#focus-pin-form");
-  if (form) {
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const input = document.querySelector("#focus-pin-input");
-      saveFocusPin(input?.value || "");
-      const unlocked = await loadCloudFocusTickers();
-      if (!unlocked) saveFocusPin("");
-      renderWatchlist();
-    });
-  }
-
-  const signOut = document.querySelector("#focus-sign-out");
-  if (signOut) {
-    signOut.addEventListener("click", () => {
-      saveFocusPin("");
-      state.focusMessage = "Signed out on this device.";
-      renderWatchlist();
-    });
-  }
-
-  document.querySelectorAll("[data-remove-focus]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const ticker = normaliseTicker(button.dataset.removeFocus);
-      state.focusTickers = state.focusTickers.filter((value) => value !== ticker);
-      saveFocusTickers();
-      renderWatchlist();
-      await saveCloudFocusTickers();
-      renderWatchlist();
-    });
-  });
 }
 
 function readStoredList(key) {
@@ -2432,10 +2248,7 @@ function renderWatchlist({ refreshOverview = true } = {}) {
   if (refreshOverview) {
     renderCards(counts);
     renderDailyBrief(counts);
-    renderTodayFocus();
-    renderSignalChanges();
-    renderPriceMovers();
-    renderFocusList();
+    renderMarketActivity();
     renderNotificationCenter();
   }
 
@@ -2478,7 +2291,6 @@ function renderWatchlist({ refreshOverview = true } = {}) {
       <td class="mobile-summary">${renderMobileWatchlistSummary(row)}</td>
     </tr>
   `).join("");
-  if (refreshOverview) attachFocusControls();
   document.querySelector("#count").textContent = searchActive
     ? `${renderedRows.length} / ${state.visibleRows.length} matches across all categories · ${state.rows.length} total`
     : `${renderedRows.length} / ${state.visibleRows.length} filtered · ${state.rows.length} total`;

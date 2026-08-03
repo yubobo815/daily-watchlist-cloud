@@ -4373,54 +4373,64 @@ body[data-page="watchlist"] .secondary-tools .utility-drawer-body {
   right: 0;
   z-index: 40;
   overflow: auto;
-  width: min(920px, calc(100vw - 48px));
+  width: min(760px, calc(100vw - 48px));
   max-height: min(72vh, 720px);
   padding: 16px;
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: 0 22px 54px rgba(27, 35, 31, 0.18);
 }
-body[data-page="watchlist"] .secondary-tools .utility-drawer-body > section { margin: 0 0 14px; }
-body[data-page="watchlist"] .secondary-tools .utility-drawer-body > section:last-child { margin-bottom: 0; }
-body[data-page="watchlist"] .utility-drawer-body .section-heading { margin: 8px 0 7px; }
-body[data-page="watchlist"] .utility-drawer-body .focus-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+body[data-page="watchlist"] .activity-highlight-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 10px;
 }
-body[data-page="watchlist"] .utility-drawer-body .focus-item,
-body[data-page="watchlist"] .utility-drawer-body .change-card {
-  grid-template-rows: auto;
-  gap: 5px;
-  padding: 9px 10px;
-  border-top-width: 3px;
-  border-radius: 10px;
+body[data-page="watchlist"] .activity-highlight-heading > span { display: grid; gap: 2px; }
+body[data-page="watchlist"] .activity-highlight-heading strong { font-size: 13px; }
+body[data-page="watchlist"] .activity-highlight-heading small,
+body[data-page="watchlist"] .activity-highlight-heading time { color: var(--muted); font-size: 10px; }
+body[data-page="watchlist"] .activity-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
 }
-body[data-page="watchlist"] .utility-drawer-body .focus-item strong,
-body[data-page="watchlist"] .utility-drawer-body .change-card-head strong { font-size: 14px; }
-body[data-page="watchlist"] .utility-drawer-body .focus-main span,
-body[data-page="watchlist"] .utility-drawer-body .change-card-head span,
-body[data-page="watchlist"] .utility-drawer-body .focus-meta { font-size: 10.5px; }
-body[data-page="watchlist"] .utility-drawer-body .focus-meta,
-body[data-page="watchlist"] .utility-drawer-body .change-card-body,
-body[data-page="watchlist"] .utility-drawer-body .change-chips { min-height: 22px; gap: 4px; }
-body[data-page="watchlist"] .utility-drawer-body .reason-row { gap: 3px; min-height: 18px; }
-body[data-page="watchlist"] .utility-drawer-body .reason-chip {
-  min-height: 17px;
-  padding: 1px 5px;
-  font-size: 9px;
+body[data-page="watchlist"] .activity-highlight-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  min-height: 92px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--tone-watch);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel-strong);
+  text-decoration: none;
 }
-body[data-page="watchlist"] .utility-drawer-body .change-rail { border-radius: 10px; }
-body[data-page="watchlist"] .utility-drawer-body .change-track { gap: 8px; }
-body[data-page="watchlist"] .utility-drawer-body .change-card { flex-basis: 205px; }
-body[data-page="watchlist"] .utility-drawer-body .focus-list-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+body[data-page="watchlist"] .activity-highlight-card.tone-buy { border-top-color: var(--tone-buy); }
+body[data-page="watchlist"] .activity-highlight-card.tone-continue { border-top-color: var(--tone-continue); }
+body[data-page="watchlist"] .activity-highlight-card.tone-setup { border-top-color: var(--tone-setup); }
+body[data-page="watchlist"] .activity-highlight-card.tone-exit,
+body[data-page="watchlist"] .activity-highlight-card.tone-avoid { border-top-color: var(--tone-exit); }
+body[data-page="watchlist"] .activity-highlight-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+body[data-page="watchlist"] .activity-highlight-head { display: grid; justify-items: start; gap: 5px; min-width: 0; }
+body[data-page="watchlist"] .activity-highlight-head strong { font-size: 14px; letter-spacing: 0.02em; }
+body[data-page="watchlist"] .activity-highlight-head .badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-page="watchlist"] .activity-highlight-move { align-self: start; font-size: 11px; font-weight: 760; }
+body[data-page="watchlist"] .activity-highlight-reason {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  display: -webkit-box;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
-body[data-page="watchlist"] .utility-drawer-body .focus-list-item {
-  gap: 8px;
-  padding: 7px 8px;
-  border-radius: 9px;
-}
+body[data-page="watchlist"] .activity-highlight-empty { padding: 16px 0; color: var(--muted); font-size: 12px; }
 
 .ticker-detail-panel .decision-callout,
 body.ticker-page .decision-callout {
@@ -4586,11 +4596,7 @@ body.ticker-page .lookback-price { justify-self: end; }
   body[data-page="watchlist"] .secondary-tools #market-activity > summary { min-height: 32px; padding: 6px 8px; }
   body[data-page="watchlist"] .secondary-tools .notification-body,
   body[data-page="watchlist"] .secondary-tools .utility-drawer-body { width: 100%; max-height: 68vh; }
-  body[data-page="watchlist"] .utility-drawer-body .focus-grid,
-  body[data-page="watchlist"] .utility-drawer-body .focus-list-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  body[data-page="watchlist"] .utility-drawer-body .focus-item,
-  body[data-page="watchlist"] .utility-drawer-body .change-card { padding: 8px; }
-  body[data-page="watchlist"] .utility-drawer-body .change-card { flex-basis: min(190px, 72vw); }
+  body[data-page="watchlist"] .activity-highlight-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   body[data-page="watchlist"] .editorial-hero { padding: 15px 2px 13px !important; }
   body[data-page="watchlist"] .editorial-hero .brand-name { font-size: 34px; }
   body[data-page="watchlist"] .hero-brief { margin-top: 10px; }
