@@ -129,6 +129,7 @@ function auditSearchBehavior() {
 
 function auditConditionalBuyPresentation() {
   const source = fs.readFileSync("assets/app.js", "utf8");
+  const styles = fs.readFileSync("assets/styles.css", "utf8");
   assert(source.includes('return actionKind(row?.action) === "buy" ? "Qualified setup" : "Latest signal"'), "BUY qualification must not be labelled as an immediately executable signal");
   assert(source.includes('"STARTER BUY SETUP"'), "Starter BUY must be presented as a setup qualification");
   assert(source.includes('"Wait for pullback · then use 50% size"'), "an above-zone Starter BUY must make the pullback condition explicit");
@@ -142,6 +143,10 @@ function auditConditionalBuyPresentation() {
   assert(!source.includes('"Planned downside"'), "the unexplained downside label must not return");
   assert(!source.includes("before it becomes a buy"), "developing setups must use the BUY SETUP product term");
   assert(!source.includes("upgrade the stock to a buy."), "learning copy must use the BUY SETUP product term");
+  assert(styles.includes('grid-template-columns: minmax(0, 1fr) clamp(340px, 31vw, 420px)'), "desktop detail width must leave enough room for the watchlist");
+  assert(styles.includes('body[data-page="watchlist"] .watchlist-workspace table { min-width: 980px; }'), "desktop watchlist must preserve readable column widths");
+  assert(styles.includes('body[data-page="watchlist"] .watchlist-workspace th:nth-child(6)'), "loss-to-stop column must have an explicit desktop width");
+  assert(styles.includes('white-space: normal;'), "desktop table headings must be allowed to wrap naturally");
   return true;
 }
 
