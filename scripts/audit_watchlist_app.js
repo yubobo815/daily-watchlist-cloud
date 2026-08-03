@@ -147,6 +147,8 @@ function auditConditionalBuyPresentation() {
   assert(styles.includes('body[data-page="watchlist"] .watchlist-workspace table { min-width: 980px; }'), "desktop watchlist must preserve readable column widths");
   assert(styles.includes('body[data-page="watchlist"] .watchlist-workspace th:nth-child(6)'), "loss-to-stop column must have an explicit desktop width");
   assert(styles.includes('white-space: normal;'), "desktop table headings must be allowed to wrap naturally");
+  assert(styles.includes('font-size: clamp(38px, 3.4vw, 52px)'), "watchlist masthead must not overpower the decision workspace");
+  assert(styles.includes('body[data-page="watchlist"] .editorial-hero .brand-name { font-size: 34px; }'), "mobile masthead must preserve first-screen workspace");
   return true;
 }
 

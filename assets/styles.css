@@ -4216,7 +4216,7 @@ body[data-page="watchlist"] .editorial-hero {
   display: block;
   min-height: 0;
   margin: 0;
-  padding: 24px 12px 20px !important;
+  padding: 20px 12px 17px !important;
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -4224,9 +4224,9 @@ body[data-page="watchlist"] .editorial-hero {
 
 body[data-page="watchlist"] .editorial-hero .brand-mark { display: none; }
 body[data-page="watchlist"] .editorial-hero .brand-name {
-  font-size: clamp(48px, 5vw, 76px);
-  line-height: 0.98;
-  letter-spacing: -0.055em;
+  font-size: clamp(38px, 3.4vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.05em;
 }
 
 body[data-page="watchlist"] .hero-brief {
@@ -4591,8 +4591,8 @@ body.ticker-page .lookback-price { justify-self: end; }
   body[data-page="watchlist"] .utility-drawer-body .focus-item,
   body[data-page="watchlist"] .utility-drawer-body .change-card { padding: 8px; }
   body[data-page="watchlist"] .utility-drawer-body .change-card { flex-basis: min(190px, 72vw); }
-  body[data-page="watchlist"] .editorial-hero { padding: 18px 2px 16px !important; }
-  body[data-page="watchlist"] .editorial-hero .brand-name { font-size: 42px; }
+  body[data-page="watchlist"] .editorial-hero { padding: 15px 2px 13px !important; }
+  body[data-page="watchlist"] .editorial-hero .brand-name { font-size: 34px; }
   body[data-page="watchlist"] .hero-brief { margin-top: 10px; }
   body[data-page="watchlist"] .hero-brief p { font-size: 12px; }
   body[data-page="watchlist"] .cards { gap: 0; }
