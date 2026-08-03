@@ -41,7 +41,7 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.08.03-balanced-v1.2"
+SCANNER_VERSION = "2026.08.03-balanced-v1.3"
 LEARNING_MODEL_VERSION = "five-session-execution-v6"
 INCREMENTAL_STATE_VERSION = "incremental-state-v1"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
@@ -1042,6 +1042,19 @@ SUPABASE_HISTORY_PAYLOAD_ALIASES = (
     "raw_window_hash",
     "indicator_state_version",
     "execution_fill_model_version",
+    # History renders concise evidence, not every version of generated prose.
+    # The complete current-day plans remain available on the snapshot row.
+    "data_provider_error",
+    "feedback_plan",
+    "learning_plan",
+    "operator_plan",
+    "operator_state_plan",
+    "entry_zone_plan",
+    "next_day_plan",
+    "freshness_plan",
+    "execution_plan",
+    "contextual_plan",
+    "anti_signal_plan",
 )
 
 # These fields can carry the same generated sentence under different semantic
@@ -1397,7 +1410,9 @@ def sync_supabase(
                 "entry_est": numeric_or_none(row.get("entry_est")),
                 "stop_est": numeric_or_none(row.get("stop_est")),
                 "target_est": numeric_or_none(row.get("target_est")),
-                "notes": row.get("notes"),
+                # Current rationale is stored on the snapshot. Repeating prose
+                # across every replay day consumed most of the staging budget.
+                "notes": None,
                 "signal_stage": row.get("signal_stage"),
                 "transition_label": row.get("transition_label"),
                 "transition_score": numeric_or_none(row.get("transition_score")),
@@ -7479,11 +7494,16 @@ def write_history_html(path: Path) -> None:
       const runDate = latestRuns[0].run_date;
       const publicationId = latestRuns[0].publication_id;
       const selectedTicker = ticker.trim().toUpperCase();
-      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=payload&publication_id=eq.${encodeURIComponent(publicationId)}&run_date=eq.${encodeURIComponent(runDate)}&ticker=eq.${encodeURIComponent(selectedTicker)}&order=history_date.asc`;
+      const historyFields = "ticker,history_date,action,setup,score,open,high,low,close,day_change_pct,adjusted_score,reason_codes,payload";
+      const historyUrl = `${baseUrl}/rest/v1/watchlist_behavior_history?select=${historyFields}&publication_id=eq.${encodeURIComponent(publicationId)}&run_date=eq.${encodeURIComponent(runDate)}&ticker=eq.${encodeURIComponent(selectedTicker)}&order=history_date.asc`;
       const historyResponse = await fetch(historyUrl, { headers: supabaseHeaders(config) });
       if (!historyResponse.ok) throw new Error("Could not read Supabase history.");
       const rows = await historyResponse.json();
-      return rows.map((row) => row.payload || row);
+      return rows.map((row) => ({
+        ...row,
+        ...(row.payload || {}),
+        date: row.history_date,
+      }));
     }
 
     async function loadStaticHistory(ticker) {

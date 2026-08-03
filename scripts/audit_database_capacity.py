@@ -93,9 +93,9 @@ def assert_payload_compaction() -> None:
     )
     compacted_bytes = len(json.dumps(compacted, separators=(",", ":")).encode("utf-8"))
     assert compacted_bytes <= scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES
-    assert "anti_signal_plan" in compacted
+    assert "anti_signal_plan" not in compacted
     assert "execution_plan" not in compacted
-    assert "freshness_plan" in compacted
+    assert "freshness_plan" not in compacted
     assert "next_day_plan" not in compacted
     assert compacted["execution_fill_probability"] == 0.895
     assert compacted["execution_fill_sample_count"] == 15
