@@ -136,6 +136,12 @@ function auditConditionalBuyPresentation() {
   assert(source.includes('"The setup is qualified, but execution is waiting for price to return to the planned entry zone."'), "recent-behavior summary must respect an above-zone wait state");
   assert(!source.includes('"Starter position · 50% of normal size"'), "detail UI must not present a conditional setup as an open position");
   assert(!source.includes("latest Buy has passed the current execution checks"), "detail UI must not equate risk checks with an executable entry");
+  assert(source.includes('"BUY CANDIDATE": "BUY SETUP"'), "all user-facing action labels must call a qualified candidate a BUY SETUP");
+  assert(!source.includes('"BUY CANDIDATE": "BUY"'), "the UI must not shorten a conditional setup to BUY");
+  assert(source.includes('["If the stop is reached", risk ? `Estimated loss: about ${fmtNumber(Math.abs(risk), 1)}% from the planned entry`'), "stop risk must be explained as a potential loss in natural language");
+  assert(!source.includes('"Planned downside"'), "the unexplained downside label must not return");
+  assert(!source.includes("before it becomes a buy"), "developing setups must use the BUY SETUP product term");
+  assert(!source.includes("upgrade the stock to a buy."), "learning copy must use the BUY SETUP product term");
   return true;
 }
 

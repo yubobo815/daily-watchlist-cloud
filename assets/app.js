@@ -1,6 +1,6 @@
 const UI_LABELS = {
   actions: {
-    "BUY CANDIDATE": "BUY",
+    "BUY CANDIDATE": "BUY SETUP",
     "STRONG CONTINUATION": "TRENDING",
     "SETUP FORMING": "BUILDING",
     "WATCH TREND": "WATCH",
@@ -17,7 +17,7 @@ const UI_LABELS = {
     "NONE": "None"
   },
   kinds: {
-    buy: "BUY",
+    buy: "BUY SETUP",
     continue: "TRENDING",
     setup: "BUILDING",
     watch: "WATCH",
@@ -30,7 +30,7 @@ const UI_LABELS = {
     score: "Signal readiness",
     entry_est: "Reference zone",
     stop_est: "Protection",
-    risk_pct_to_stop: "Downside",
+    risk_pct_to_stop: "Loss if stopped",
     trade_context: "What it means",
   },
   text: {
@@ -40,15 +40,15 @@ const UI_LABELS = {
     result: "result",
     results: "results",
     dailyBrief: "Daily Brief",
-    actionableNames: "{total} actionable names: {buy} BUY, {building} BUILDING",
+    actionableNames: "{total} names need attention: {buy} buy setups, {building} still developing",
     fresh: "Fresh",
     upgraded: "Upgraded",
     movers: "Movers",
     risk: "Risk",
     reviewTicker: "Review {ticker}",
-    showBuy: "Show BUY",
+    showBuy: "Show buy setups",
     todayFocus: "Latest Session Focus",
-    buyFocus: "Buy",
+    buyFocus: "Buy setup",
     buildingFocus: "Building",
     exitFocus: "Exit",
     moveFocus: "Move",
@@ -86,8 +86,8 @@ const REASON_LABELS = {
   exit_pressure: "Exit pressure",
   extended_from_zone: "Extended from zone",
   reference_zone_adjusted: "Reference zone adjusted",
-  stale_buy_no_progress: "Stale buy: no progress",
-  fresh_buy_signal: "Fresh buy signal",
+  stale_buy_no_progress: "Older buy setup: no progress",
+  fresh_buy_signal: "New buy setup",
   market_leader: "Market leader",
   market_lagging: "Market lagging",
   event_risk: "Event risk",
@@ -164,7 +164,7 @@ function watchlistColumns() {
 
 function executionQueues(counts) {
   return [
-    { key: "buy", filter: "buy", label: "BUY", count: counts.buy || 0, detail: "Entry-ready candidates" },
+    { key: "buy", filter: "buy", label: "BUY SETUPS", count: counts.buy || 0, detail: "Qualified plans; enter only at the stated price" },
     {
       key: "building",
       filter: "building",
@@ -777,7 +777,7 @@ function naturalActionSentence(row) {
   if (kind === "buy" && style === "BREAKOUT TRIGGER") return `${pattern} conditions are in place; enter only if price reaches the breakout entry range without running above the maximum entry.`;
   if (kind === "buy") return `${pattern} conditions are in place; use a limit entry only inside the pullback zone and require it to hold.`;
   if (kind === "continue") return "The existing trend remains constructive, but a new entry should avoid chasing strength.";
-  if (kind === "setup") return `${pattern} is taking shape, but it still needs confirmation before it becomes a buy.`;
+  if (kind === "setup") return `${pattern} is taking shape, but it still needs confirmation before it qualifies as a buy setup.`;
   if (kind === "watch") return "There is no clean entry yet; wait for either a stronger breakout or a controlled pullback.";
   if (kind === "exit") return "The trend is under pressure; protect capital rather than looking for a new entry.";
   return "There is no favourable setup at the moment.";
@@ -937,7 +937,7 @@ function behaviorDetail(row) {
   if (marketContext === "LAGGING" && ["buy", "setup", "continue"].includes(kind)) {
     return `${pattern} behavior is forming, but it is lagging SPY/QQQ over the last 20 sessions.`;
   }
-  if (transition === "Stale Buy") return "Stale BUY: signal has not made enough price progress yet.";
+  if (transition === "Stale Buy") return "Older buy setup: price has not made enough progress yet.";
   if (payloadValue(row, "feedback_quality") === "FAILED") return feedbackPlan;
   if (payloadValue(row, "feedback_quality") === "STALE") return feedbackPlan;
   if (nextDayPlan) return nextDayPlan;
@@ -978,7 +978,7 @@ function learningReadout(row) {
 
   const coverage = `${fmtNumber(samples, 0)} comparable settled signals${Number.isFinite(distinctTickers) ? ` from ${fmtNumber(distinctTickers, 0)} stocks` : ""}${Number.isFinite(evaluationDates) ? ` over ${fmtNumber(evaluationDates, 0)} market dates` : ""}`;
   if (defensiveAction) {
-    return `Reviewed ${coverage}. This evidence supports risk control only; it cannot upgrade the stock to a buy.`;
+    return `Reviewed ${coverage}. This evidence supports risk control only; it cannot upgrade the stock to a buy setup.`;
   }
 
   const eligible = Boolean(modelVersion)
@@ -1001,10 +1001,10 @@ function fillabilityReadout(row) {
   const state = String(payloadValue(row, "execution_fill_state") || "INSUFFICIENT").toUpperCase();
   const style = String(payloadValue(row, "execution_style") || "entry plan").toLowerCase();
   if (!Number.isFinite(samples) || samples <= 0 || !Number.isFinite(probability)) {
-    return "Comparable entry plans have not produced enough fill evidence, so this cannot be presented as an executable buy.";
+    return "Comparable entry plans have not produced enough evidence that this entry can be acted on.";
   }
   const summary = `${fmtNumber(probability * 100, 0)}% estimated chance that the ${style} trades within five sessions, based on ${fmtNumber(samples, 0)} comparable plans.`;
-  return state === "VALIDATED" ? summary : `${summary} Evidence is still insufficient for a BUY.`;
+  return state === "VALIDATED" ? summary : `${summary} There is not enough evidence to treat this as an entry that can be acted on.`;
 }
 
 function learningBoolean(value) {
@@ -1214,7 +1214,7 @@ function transitionLabel(row, previous = previousRowFor(row)) {
 }
 
 function displayTransitionLabel(label) {
-  if (label === "Fresh Setup To Buy") return "Fresh Building To Buy";
+  if (label === "Fresh Setup To Buy") return "New buy setup";
   return label;
 }
 
@@ -1439,11 +1439,11 @@ function mainRiskNarrative(row, context = {}) {
   const nextDayBias = String(context.nextDayBias || payloadValue(row, "next_day_bias") || "").toUpperCase();
   if (payloadValue(row, "freshness_block") === "YES") return "Price data is not current, so no action is suggested.";
   if (["YES", "true", true].includes(payloadValue(row, "event_risk"))) return "A company report is close, so a gap could invalidate the price plan.";
-  if (payloadValue(row, "extension_state") === "EXTENDED") return "Price is above the preferred entry area; chasing it would increase downside risk.";
+  if (payloadValue(row, "extension_state") === "EXTENDED") return "Price is above the preferred entry area; chasing it would increase the potential loss.";
   if (kind === "exit") return "Selling pressure is damaging the trend; capital protection matters more than a new entry.";
   if (Number.isFinite(seller) && Number.isFinite(buyer) && seller >= buyer + 12) return "Sellers currently have the advantage, so wait for demand to return.";
   if (!executionChecksClear(row)) return validationSummary(row);
-  if (nextDayBias.includes("BEARISH")) return "The latest price pattern points to near-term downside risk.";
+  if (nextDayBias.includes("BEARISH")) return "The latest price pattern points to a greater risk of a near-term decline.";
   const stop = numericValue(row, "stop_est");
   if (stop && ["buy", "continue"].includes(kind)) return `The constructive view is invalid if price closes below ${fmtNumber(stop, 2)}.`;
   return "No single risk dominates, but the setup still depends on price and volume holding together.";
@@ -1872,9 +1872,9 @@ function validationSummary(row) {
     if (blockers.length) return blockers[0];
     const buyType = String(payloadValue(row, "buy_type") || payloadValue(row, "shadow_buy_type") || "").toUpperCase();
     if (row?.action === "BUY CANDIDATE" && buyType === "STARTER") {
-      return "Early evidence supports a half-size starter position while confirmation develops.";
+      return "Early evidence supports a half-size entry plan after price reaches the stated zone and holds.";
     }
-    if (row?.action === "BUY CANDIDATE") return "The weighted readiness checks support the normal planned position.";
+    if (row?.action === "BUY CANDIDATE") return "The weighted checks support a normal-size entry plan, but only at the stated price.";
   }
   const items = [
     ["Market", payloadValue(row, "market_permission")],
@@ -1923,7 +1923,7 @@ function renderReferenceLevels(row, { active = false } = {}) {
       ["First profit review", takeProfit1 ? `${fmtNumber(takeProfit1, 2)} · consider trimming ${fmtNumber(reducePct || 33, 0)}%` : "Unavailable"],
       ["After first target", postTp1Stop ? `Raise protection to ${fmtNumber(postTp1Stop, 2)} or higher` : "Unavailable"],
       ["Further target", target ? fmtNumber(target, 2) : "Unavailable"],
-      ["Planned downside", risk ? `${fmtNumber(Math.abs(risk), 1)}%` : "Unavailable"]
+      ["If the stop is reached", risk ? `Estimated loss: about ${fmtNumber(Math.abs(risk), 1)}% from the planned entry` : "Unavailable"]
     ] : [])
   ];
   return `<dl class="execution-sheet">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
