@@ -81,6 +81,7 @@ def sample_signal() -> dict:
         "entry_zone_high": 101,
         "entry_est": 100,
         "stop_est": 95,
+        "take_profit_1": 107,
         "target_est": 110,
         "close": 102,
         "score": 80,
@@ -91,12 +92,13 @@ def sample_signal() -> dict:
 def audit_incremental_settlement() -> None:
     bars = pd.DataFrame(
         [
-            {"date": f"2026-07-0{day}", "open": 102, "high": 108 if day < 6 else 111, "low": 100, "close": 106 if day < 6 else 110, "volume": 1000}
+            {"date": f"2026-07-0{day}", "open": 102, "high": 106 if day == 2 else 108 if day < 6 else 111, "low": 100, "close": 105 if day == 2 else 106 if day < 6 else 110, "volume": 1000}
             for day in range(2, 7)
         ]
     )
     outcome = scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, pd.DataFrame())
     assert len(outcome) == 1 and outcome.iloc[0]["outcome_label"] == "WORKING"
+    assert outcome.iloc[0]["evaluation_run_date"] == "2026-07-06", "learning must continue from TP1 through the frozen further target"
     assert scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, outcome).empty
     frozen = scanner.freeze_final_signal_history(
         [{**sample_signal(), "action": "BUY CANDIDATE"}],
@@ -106,6 +108,7 @@ def audit_incremental_settlement() -> None:
     assert frozen[-1]["action"] == "SETUP FORMING" and frozen[-1]["prediction_state"] == "FINAL"
     rebuilt = scanner.rebuild_canonical_signal_outcomes(outcome, {"TEST": bars})
     assert len(rebuilt) == 1 and rebuilt.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
+    assert rebuilt.iloc[0]["prior_take_profit_1"] == 107
     legacy = outcome.copy()
     legacy.loc[legacy.index[0], "entry_model_version"] = ""
     assert scanner.calibration_parity_report(legacy, legacy, {"TEST": "2026-06-01"})["incremental_settled"] == 0

@@ -333,7 +333,8 @@ def audit_unfilled_buy_is_excluded_from_learning():
     ]
     outcomes = dwo.build_backfilled_signal_outcomes(history_rows)
     first = outcomes.iloc[0].to_dict()
-    assert_true(first["outcome_label"] == "NOT_FILLED", "gap-away BUY must not be recorded as a working trade")
+    assert_true(first["path_status"] == "INVALIDATED", "a breakout that opens above its maximum entry must be invalidated as a chase gap")
+    assert_true(first["outcome_label"] == "NON_LEARNABLE", "a chase gap must not become execution learning")
     assert_true(not dwo.build_learning_stats(outcomes), "unfilled BUY must not change learning weights")
 
 
@@ -346,7 +347,7 @@ def audit_known_open_fill_then_stop_is_learned_as_failure():
 
 
 def audit_unknown_entry_stop_order_is_excluded_from_learning():
-    prior = executable_prior()
+    prior = executable_prior(setup="PULLBACK BUY", execution_style="PULLBACK LIMIT")
     bars = [executable_current(open=105, high=106, low=96, close=101) for _ in range(dwo.LEARNING_HORIZON_SESSIONS)]
     outcome = dwo.score_signal_horizon(prior, bars)
     assert_true(outcome["path_status"] == "AMBIGUOUS", "entry and stop order remains unknown when price opens above the zone")
@@ -798,7 +799,7 @@ def audit_invalid_probabilities_are_excluded_from_calibration():
 
 
 def audit_same_bar_entry_target_order_is_ambiguous():
-    prior = executable_prior(target_est=103)
+    prior = executable_prior(target_est=103, setup="PULLBACK BUY", execution_style="PULLBACK LIMIT")
     bars = [executable_current(open=105, high=106, low=100, close=104)] * dwo.LEARNING_HORIZON_SESSIONS
     outcome = dwo.score_signal_horizon(prior, bars)
     assert_true(outcome["path_status"] == "AMBIGUOUS", "daily OHLC cannot order a target touch before versus after a pullback entry")
@@ -1329,6 +1330,7 @@ def fillability_outcome(
     return {
         "entry_model_version": dwo.LEARNING_MODEL_VERSION,
         "path_status": "SETTLED" if filled else "NOT_FILLED",
+        "entry_filled": filled,
         "prior_action": action,
         "prior_setup": setup,
         "prior_execution_style": dwo.execution_style_for_setup(setup),
@@ -1357,7 +1359,6 @@ def audit_not_filled_trains_fillability():
         fillability_outcome(
             index,
             index < 5,
-            action="SETUP FORMING" if index >= 4 else "BUY CANDIDATE",
             walk_forward_permission="INSUFFICIENT" if index >= 4 else "ALLOW",
         )
         for index in range(8)
@@ -1367,7 +1368,7 @@ def audit_not_filled_trains_fillability():
     exact = stats[key]
     assert_true(exact["sample_count"] == 8, "fillability must count every valid plan")
     assert_true(exact["not_filled_count"] == 3, "NOT_FILLED plans must remain learning evidence")
-    assert_true(exact["filled_count"] == 5, "structurally valid SETUP plans must resolve fillability cold start")
+    assert_true(exact["filled_count"] == 5, "frozen BUY plans must resolve fillability without BUILDING counterfactuals")
     assert_true(exact["fill_probability"] < exact["fill_rate"], "fillability probability must be conservatively smoothed")
 
 

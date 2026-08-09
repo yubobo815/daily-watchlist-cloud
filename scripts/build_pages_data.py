@@ -35,6 +35,16 @@ WATCHLIST_FIELDS = frozenset(
     execution_regime relative_strength_20d_pct relative_strength_leader
     shadow_action shadow_buy_type shadow_policy_allowed shadow_readiness_score
     shadow_position_size_factor shadow_decision_explanation
+    execution_plan_id execution_plan_model_version execution_plan_status
+    execution_plan_signal_date execution_plan_last_evaluation_date
+    execution_plan_age_sessions execution_plan_valid_sessions execution_plan_setup
+    execution_plan_style execution_plan_personality execution_plan_volatility_regime
+    execution_plan_zone_low execution_plan_zone_high execution_plan_stop
+    execution_plan_target execution_plan_source_close execution_plan_fill_est
+    execution_plan_final_target execution_plan_entry_date execution_plan_risk_pct
+    execution_plan_post_tp1_stop execution_plan_management_sessions
+    execution_plan_reason_code execution_plan_summary execution_plan_events
+    execution_plan_previous_id execution_plan_previous_status execution_plan_previous_date
     """.split()
 )
 
@@ -83,6 +93,16 @@ HISTORY_FIELDS = frozenset(
     seller_score volume_state
     shadow_action shadow_buy_type shadow_readiness_score shadow_policy_allowed
     buy_type policy_version legacy_action
+    execution_plan_id execution_plan_model_version execution_plan_status
+    execution_plan_signal_date execution_plan_last_evaluation_date
+    execution_plan_age_sessions execution_plan_valid_sessions execution_plan_setup
+    execution_plan_style execution_plan_personality execution_plan_volatility_regime
+    execution_plan_zone_low execution_plan_zone_high execution_plan_stop
+    execution_plan_target execution_plan_source_close execution_plan_fill_est
+    execution_plan_final_target execution_plan_entry_date execution_plan_risk_pct
+    execution_plan_post_tp1_stop execution_plan_management_sessions
+    execution_plan_reason_code execution_plan_summary execution_plan_events
+    execution_plan_previous_id execution_plan_previous_status execution_plan_previous_date
     """.split()
 )
 

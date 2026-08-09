@@ -103,6 +103,23 @@ def assert_payload_compaction() -> None:
     assert "indicator_state_version" not in compacted
     assert "execution_fill_model_version" not in compacted
 
+    frozen_plan = scanner.create_execution_plan({
+        "ticker": "MU", "date": "2026-08-03", "action": "BUY CANDIDATE",
+        "setup": "PULLBACK BUY", "execution_style": "PULLBACK LIMIT",
+        "personality_type": "BALANCED", "close": 110,
+        "entry_zone_low": 103, "entry_zone_high": 105,
+        "stop_est": 99, "take_profit_1": 115, "target_est": 120,
+        "freshness_block": "NO",
+    })
+    lifecycle_payload = scanner.compact_payload(
+        {"core_evidence": "x" * 6500, "created_at": "volatile", "updated_at": "volatile", **frozen_plan},
+        {}, aliases=scanner.SUPABASE_HISTORY_PAYLOAD_ALIASES,
+        max_bytes=scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES,
+    )
+    assert len(json.dumps(lifecycle_payload, separators=(",", ":")).encode("utf-8")) <= scanner.SUPABASE_HISTORY_PAYLOAD_MAX_BYTES
+    assert lifecycle_payload["execution_plan_id"] == frozen_plan["execution_plan_id"]
+    assert "created_at" not in lifecycle_payload and "updated_at" not in lifecycle_payload
+
     overflow_payload = scanner.compact_payload(
         {
             "action": "SETUP FORMING",
@@ -148,7 +165,7 @@ def assert_capacity_contract() -> None:
         "readonly SNAPSHOT_MAX_ROWS=750",
         "readonly SNAPSHOT_MAX_BYTES=12000000",
         "readonly MAX_STAGED_PUBLICATION_BYTES=95000000",
-        "readonly OHLCV_MAX_BYTES=65000000",
+        "readonly OHLCV_MAX_BYTES=25000000",
         "readonly BEHAVIOR_MAX_BYTES=65000000",
         "readonly OUTCOME_MAX_BYTES=45000000",
         "ohlcv_growth_reserve + MAX_STAGED_PUBLICATION_BYTES",

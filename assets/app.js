@@ -28,8 +28,8 @@ const UI_LABELS = {
     ticker: "Ticker",
     action: "Signal",
     score: "Signal readiness",
-    entry_est: "Reference zone",
-    stop_est: "Protection",
+    entry_est: "Planned entry area",
+    stop_est: "Planned protection",
     risk_pct_to_stop: "Loss if stopped",
     trade_context: "What it means",
   },
@@ -1703,22 +1703,95 @@ function renderWatchlistCell(row, key) {
   if (key === "score") return renderQualityScore(row);
   if (key === "day_change_pct") return renderMovePct(row[key]);
   if (key === "risk_pct_to_stop") {
+    if (activeExecutionPlan(row)) {
+      const planRisk = payloadNumeric(row, "execution_plan_risk_pct");
+      return planRisk ? `<span class="risk-value">-${escapeHtml(fmtNumber(Math.abs(planRisk), 1))}%</span>` : "-";
+    }
     if (!executionChecksClear(row) || !["buy", "continue"].includes(actionKind(row.action))) return "-";
     const risk = payloadNumeric(row, "risk_pct_to_stop");
     return risk ? `<span class="risk-value">-${escapeHtml(fmtNumber(Math.abs(risk), 1))}%</span>` : "-";
   }
   if (key === "position_value_1k_risk") return escapeHtml(fmtNumber(payloadValue(row, "position_value_1k_risk"), 0));
   if (key === "entry_est") return escapeHtml(formatEntryZone(row) || "-");
+  if (key === "stop_est" && activeExecutionPlan(row)) return escapeHtml(fmtNumber(payloadValue(row, "execution_plan_stop"), 2) || "-");
   if (key === "stop_est" && (!executionChecksClear(row) || !["buy", "continue"].includes(actionKind(row.action)))) return "-";
   if (["close", "entry_est", "stop_est", "target_est"].includes(key)) return escapeHtml(fmtNumber(row[key], 2));
   return escapeHtml(row[key]);
 }
 
 function formatEntryZone(row) {
+  if (activeExecutionPlan(row)) {
+    const planLow = payloadNumeric(row, "execution_plan_zone_low");
+    const planHigh = payloadNumeric(row, "execution_plan_zone_high");
+    if (planLow && planHigh) return planLow < planHigh
+      ? `${fmtNumber(planLow, 2)}-${fmtNumber(planHigh, 2)}`
+      : fmtNumber(planHigh, 2);
+  }
   const low = payloadNumeric(row, "entry_zone_low");
   const high = payloadNumeric(row, "entry_zone_high") || numericValue(row, "entry_est");
   if (low && high && low < high) return `${fmtNumber(low, 2)}-${fmtNumber(high, 2)}`;
   return fmtNumber(high || row?.entry_est, 2);
+}
+
+function executionPlanStatus(row) {
+  return String(payloadValue(row, "execution_plan_status") || "").toUpperCase();
+}
+
+function activeExecutionPlan(row) {
+  return ["ARMED", "MODEL_FILLED", "TP1_HIT"].includes(executionPlanStatus(row));
+}
+
+function executionPlanSentence(row) {
+  const status = executionPlanStatus(row);
+  const zone = formatEntryZone(row) || "the planned entry area";
+  const reason = String(payloadValue(row, "execution_plan_reason_code") || "").toUpperCase();
+  if (status === "ARMED") return `Waiting for price to reach ${zone}; the earlier BUY SETUP remains valid.`;
+  if (status === "MODEL_FILLED") return `Price reached ${zone}. This confirms a market touch, not that you bought the stock.`;
+  if (status === "TP1_HIT") return "Price reached the first profit review. The model raised protection and continues to track the further target.";
+  if (status === "TARGET_HIT") return "Price reached the frozen plan's first target after the planned entry condition was met.";
+  if (status === "STOPPED") return "Price reached the frozen protection level after the planned entry condition was met.";
+  if (status === "EXPIRED") return "The entry condition was not reached before the frozen plan expired.";
+  if (status === "CLOSED") return "The five-session management window ended. Review this stock as a new decision.";
+  if (status === "AMBIGUOUS") return "The daily price range crossed entry and an exit level, but daily data cannot show which happened first.";
+  if (status === "INVALIDATED" && reason === "OPENED_ABOVE_MAX_ENTRY") return "Price opened above the maximum entry price, so the plan correctly avoided chasing.";
+  if (status === "INVALIDATED" && reason === "OPENED_BELOW_ZONE") return "Price opened below the planned entry area, so the earlier setup was no longer valid.";
+  if (status === "INVALIDATED" && reason === "HARD_RISK_CONFIRMED") return "A confirmed trap, distribution pattern, or structural exit invalidated the earlier plan before entry.";
+  if (status === "INVALIDATED") return "The earlier execution plan was closed because its safety conditions were no longer valid.";
+  return "";
+}
+
+function renderFrozenExecutionPlan(row) {
+  const status = executionPlanStatus(row);
+  if (!status) return "";
+  const zoneLow = payloadNumeric(row, "execution_plan_zone_low");
+  const zoneHigh = payloadNumeric(row, "execution_plan_zone_high");
+  const zone = zoneLow && zoneHigh ? `${fmtNumber(zoneLow, 2)}-${fmtNumber(zoneHigh, 2)}` : "Unavailable";
+  const age = Number(payloadValue(row, "execution_plan_age_sessions")) || 0;
+  const validity = Number(payloadValue(row, "execution_plan_valid_sessions")) || 0;
+  const remaining = Math.max(0, validity - age);
+  const statusLabel = {
+    ARMED: "Waiting for entry",
+    MODEL_FILLED: "Entry area reached",
+    TP1_HIT: "First profit review reached",
+    TARGET_HIT: "First target reached",
+    STOPPED: "Protection reached",
+    INVALIDATED: "Plan no longer valid",
+    EXPIRED: "Plan expired",
+    AMBIGUOUS: "Order cannot be verified",
+    CLOSED: "Plan review complete",
+  }[status] || "Plan update";
+  const rows = [
+    ["Plan created", payloadValue(row, "execution_plan_signal_date") || "Unavailable"],
+    [payloadValue(row, "execution_plan_style") === "BREAKOUT TRIGGER" ? "Trigger band" : "Entry area", zone],
+    ["Protect below", fmtNumber(payloadValue(row, "execution_plan_stop"), 2) || "Unavailable"],
+    ["First target", fmtNumber(payloadValue(row, "execution_plan_target"), 2) || "Unavailable"],
+    ...(status === "TP1_HIT" ? [
+      ["Raised protection", fmtNumber(payloadValue(row, "execution_plan_post_tp1_stop"), 2) || "Unavailable"],
+      ["Further target", fmtNumber(payloadValue(row, "execution_plan_final_target"), 2) || "Unavailable"]
+    ] : []),
+    ...(status === "ARMED" ? [["Time remaining", remaining === 1 ? "One trading session" : `${remaining} trading sessions`]] : []),
+  ];
+  return `<section class="active-plan frozen-execution-plan"><span class="eyebrow">Frozen execution plan</span><strong>${escapeHtml(statusLabel)}</strong><p>${escapeHtml(executionPlanSentence(row))}</p><dl class="execution-sheet">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>`;
 }
 
 function renderDecisionSummary(row) {
@@ -1746,6 +1819,9 @@ function renderPriceSummary(row) {
 }
 
 function renderTradeContext(row) {
+  if (executionPlanStatus(row)) {
+    return `<span class="read-stack"><strong>${escapeHtml(executionPlanSentence(row))}</strong><small>Today's technical signal is shown separately and does not rewrite this frozen plan.</small></span>`;
+  }
   const position = referenceZonePosition(row);
   const reason = position ? `Price is ${position}.` : decisionHeadline(row);
   const validation = validationSummary(row);
@@ -1832,7 +1908,9 @@ function renderMobileWatchlistSummary(row) {
   const [riskTone, riskLabel] = riskSummaryLabel(row);
   const isRisk = ["exit", "avoid"].includes(kind);
   const activePlan = executionChecksClear(row) && ["buy", "continue"].includes(kind);
-  const execution = isRisk
+  const execution = executionPlanStatus(row)
+    ? executionPlanSentence(row)
+    : isRisk
     ? decisionHeadline(row)
     : activePlan
       ? `${entryPlanLabel(row, { active: true })} ${formatEntryZone(row) || "-"} · Protect below ${fmtNumber(row.stop_est, 2) || "-"}`
@@ -1936,14 +2014,15 @@ function renderTickerDetailPanel() {
   state.selectedTicker = row.ticker;
   const kind = actionKind(row.action);
   const activePlan = executionChecksClear(row) && ["buy", "continue"].includes(kind);
+  const frozenPlan = renderFrozenExecutionPlan(row);
   panel.innerHTML = `
     <div class="detail-panel-head"><div><span class="eyebrow">Selected stock</span><h2>${escapeHtml(row.ticker)}</h2><p>${escapeHtml(displaySecurityName(row.name, row.ticker) || row.name || "")}</p></div><a href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}" aria-label="Open complete ${escapeHtml(row.ticker)} detail">Open details</a></div>
     <div class="detail-price"><strong>${escapeHtml(fmtNumber(row.close, 2))}</strong>${renderMovePct(row.day_change_pct)}</div>
     <div class="detail-signal"><span class="eyebrow">${escapeHtml(detailSignalCaption(row))}</span><span class="badge ${kind}">${escapeHtml(detailSignalLabel(row))}</span></div>
     <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(row))}</strong><p>${escapeHtml(decisionNarrative(row))}</p></section>
-    ${activePlan
+    ${frozenPlan || (activePlan
       ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(row, { active: true })}</section>`
-      : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}
+      : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`)}
     <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
   `;
 }
@@ -2483,6 +2562,7 @@ function renderLatestHistoryPanel(latest) {
   }
   const kind = actionKind(latest.action);
   const activePlan = executionChecksClear(latest) && ["buy", "continue"].includes(kind);
+  const frozenPlan = renderFrozenExecutionPlan(latest);
   panel.innerHTML = `
     <div class="latest-card tone-${actionKind(latest.action)}">
       <div class="latest-head">
@@ -2492,9 +2572,9 @@ function renderLatestHistoryPanel(latest) {
       <div class="latest-price"><span>Latest close</span><strong>${fmtNumber(latest.close, 2)} ${renderMovePct(latest.day_change_pct)}</strong></div>
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escapeHtml(decisionHeadline(latest))}</strong><p>${escapeHtml(decisionNarrative(latest))}</p></section>
       ${renderShadowPolicyPreview(latest)}
-      ${activePlan
+      ${frozenPlan || (activePlan
         ? `<section class="active-plan"><span class="eyebrow">Price plan</span>${renderReferenceLevels(latest, { active: true })}</section>`
-        : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`}
+        : `<div class="inactive-plan">No entry is recommended from the latest session.</div>`)}
       <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(latest)}</section>
     </div>
   `;

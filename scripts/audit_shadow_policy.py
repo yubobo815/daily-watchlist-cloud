@@ -208,7 +208,9 @@ def audit_counterfactual_contract() -> None:
         for day in range(2, 12)
     ]
     outcome = dwo.score_signal_horizon(prior, future)
-    assert_true(outcome["outcome_learnable"] is True, "soft uncertainty must remain execution-learnable")
+    assert_true(outcome["outcome_learnable"] is False, "BUILDING must not become an executable fill sample")
+    assert_true(outcome["forecast_learnable"] is True, "soft uncertainty must remain forecast-learnable")
+    assert_true(outcome["entry_filled"] is False, "counterfactual BUILDING must not infer a trade")
     assert_true(outcome["counterfactual_outcome"] == "MISSED_OPPORTUNITY", "profitable blocked setup must be identified")
     assert_true(outcome["gate_evaluation"] == "GATE_FALSE_REJECTION", "missed opportunity must audit the old gate")
     assert_true(outcome["counterfactual_return_10d_pct"] != "", "ten-session counterfactual return must be retained")

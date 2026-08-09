@@ -363,6 +363,9 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("The technical picture is developing, but it has not reached an entry signal."), "Building must remain explicitly non-executable");
   assert(appSource.includes("function similarCasesNarrative(row)"), "plain-language evidence must retain comparable historical context");
   assert(appSource.includes("No entry is recommended from the latest session."), "inactive signals must not expose misleading planning levels");
+  assert(appSource.includes("Frozen execution plan"), "ticker surfaces must separate a frozen plan from today's signal");
+  assert(appSource.includes("This confirms a market touch, not that you bought the stock."), "daily OHLC must not claim that the user entered a trade");
+  assert(appSource.includes("daily data cannot show which happened first"), "ambiguous daily paths need plain-language disclosure");
   assert(tickerSource.includes("Latest decision") && tickerSource.includes("Recent behavior"), "ticker detail must follow the user decision order without implying stale data is current");
   assert(stylesSource.includes("body.ticker-page :is(a, button, input, summary):focus-visible"), "ticker controls must expose keyboard focus");
   assert(appSource.includes('if (!hash?.startsWith("#")) return;'), "ordinary navigation links must not be parsed as CSS hash targets");
@@ -411,11 +414,19 @@ function auditMarketSessionFreshness() {
       risk_permission: "ALLOW",
       execution_fill_state: "VALIDATED",
       execution_fill_probability: 0.68,
+      execution_plan_id: "dto-plan",
+      execution_plan_status: "ARMED",
+      execution_plan_zone_low: 100,
+      execution_plan_zone_high: 105,
+      execution_plan_stop: 96,
+      execution_plan_risk_pct: 8.57,
     },
   });
   assert(dto.payload.data_age_days === 0, "API DTO must agree with the scanner for the latest completed session");
   assert(dto.payload.freshness_block === "NO", "API DTO must not stale-block the latest completed session");
   assert(dto.score === 96 && adjustedScore(dto) === 96, "fresh API DTO must preserve raw and adjusted scores");
+  assert(dto.payload.execution_plan_id === "dto-plan" && dto.payload.execution_plan_status === "ARMED", "API DTO must preserve frozen plan identity and state");
+  assert(dto.payload.execution_plan_zone_low === 100 && dto.payload.execution_plan_stop === 96, "API DTO must preserve frozen plan prices");
 
   return {
     utcRolloverAge: marketSessionAge("2026-07-16", thursdayAfterClose),

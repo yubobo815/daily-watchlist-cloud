@@ -19,6 +19,8 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+
+from execution_plan_state import apply_execution_plan_lifecycle, create_execution_plan, evaluate_execution_plan
 from pandas.tseries.holiday import (
     AbstractHolidayCalendar,
     GoodFriday,
@@ -1039,6 +1041,8 @@ SUPABASE_STORAGE_OVERHEAD_FACTOR = 2.0
 SUPABASE_STORAGE_FIXED_BYTES = 5_000_000
 SUPABASE_HISTORY_PAYLOAD_ALIASES = (
     "date",
+    "created_at",
+    "updated_at",
     "raw_window_hash",
     "indicator_state_version",
     "execution_fill_model_version",
@@ -2988,7 +2992,7 @@ def self_score_prior_signal(prior: dict, current: dict, evaluation_run_date: str
         str(prior.get("freshness_block") or "").upper() == "YES"
         or str(current.get("freshness_block") or "").upper() == "YES"
     )
-    executable_action = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    executable_action = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION"}
     hard_gates_allow, hard_gate_blockers = prior_signal_hard_gate_status(prior, prior_action)
     entry_eligible = executable_action and hard_gates_allow
     zone_low = numeric_or_none(prior.get("entry_zone_low"))
@@ -3290,7 +3294,9 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_entry_zone_high": numeric_or_none(prior.get("entry_zone_high")),
         "prior_entry_est": numeric_or_none(prior.get("entry_est")),
         "prior_stop_est": numeric_or_none(prior.get("stop_est")),
+        "prior_take_profit_1": numeric_or_none(prior.get("take_profit_1")),
         "prior_target_est": numeric_or_none(prior.get("target_est")),
+        "prior_final_target": numeric_or_none(prior.get("target_est")),
         "prior_prediction_upside_probability": numeric_or_none(prior.get("prediction_upside_probability")),
         "prior_prediction_downside_probability": numeric_or_none(prior.get("prediction_downside_probability")),
         "prior_prediction_no_edge_probability": numeric_or_none(prior.get("prediction_no_edge_probability")),
@@ -3336,7 +3342,22 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         return base
 
     gates_allow, gate_blockers = hard_gates_allow, hard_gate_blockers
-    executable = prior_action in {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    executable = prior_action == "BUY CANDIDATE"
+    if prior_action == "SETUP FORMING":
+        counterfactual_return = numeric_or_none(counterfactual_returns.get("counterfactual_return_5d_pct"))
+        positive = (numeric_or_none(counterfactual_mfe) or -999.0) >= 3.0 or (counterfactual_return or -999.0) >= 3.0
+        negative = (numeric_or_none(counterfactual_mae) or 999.0) <= -3.0 or (counterfactual_return or 999.0) <= -3.0
+        base.update({
+            "path_status": "SETTLED",
+            "entry_eligible": False,
+            "entry_filled": False,
+            "outcome_learnable": False,
+            "forecast_learnable": True,
+            "outcome_label": "WORKING" if positive else "FAILED" if negative else "STALE",
+            "outcome_score": 1.0 if positive else -1.0 if negative else 0.0,
+            "outcome_reason": "BUILDING was evaluated only as a five-session technical forecast; no trade or fill was inferred.",
+        })
+        return base
     if not executable:
         base.update({
             "path_status": "NON_EXECUTABLE",
@@ -3350,16 +3371,25 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
             "the OHLCV path is retained only for forecast calibration."
         )
 
-    zone_low = numeric_or_none(prior.get("entry_zone_low")) or numeric_or_none(prior.get("entry_est"))
-    zone_high = numeric_or_none(prior.get("entry_zone_high")) or zone_low
-    stop = numeric_or_none(prior.get("stop_est"))
-    if zone_low is None or zone_high is None or stop is None or float(zone_high) < float(zone_low) or float(stop) >= float(zone_low):
-        base.update({"path_status": "UNUSABLE", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Missing a valid entry zone or stop; excluded from learning."})
+    legacy_stop = numeric_or_none(prior.get("stop_est"))
+    legacy_close = numeric_or_none(prior.get("close"))
+    legacy_target = (
+        legacy_close + (legacy_close - legacy_stop)
+        if legacy_close is not None and legacy_stop is not None and legacy_close > legacy_stop
+        else None
+    )
+    plan_source = {
+        **prior,
+        "execution_style": prior.get("execution_style") or execution_style_for_setup(prior.get("setup")),
+        "target_est": prior.get("target_est") or legacy_target,
+    }
+    plan = create_execution_plan(plan_source)
+    if not plan:
+        base.update({"path_status": "UNUSABLE", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Missing a valid frozen BUY execution plan; excluded from execution learning."})
         return base
 
     entry = None
-    target = None
-    entry_opened_above_zone = False
+    tp1_reached = False
     highs: list[float] = []
     lows: list[float] = []
     for offset, bar in enumerate(future_rows[:horizon], start=1):
@@ -3367,41 +3397,55 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         if any(value is None for value in (open_, high, low, close)):
             base.update({"path_status": "UNUSABLE", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Incomplete OHLC inside the evaluation window; excluded from learning."})
             return base
-        if entry is None:
-            if float(open_) <= float(stop):
-                base.update({"path_status": "GAP", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Price gapped through the stop before a valid entry."})
-                return base
-            touches_zone = float(low) <= float(zone_high) and float(high) >= float(zone_low)
-            if not touches_zone:
-                continue
-            open_in_zone = float(zone_low) <= float(open_) <= float(zone_high)
-            if float(low) <= float(stop) and not open_in_zone:
-                base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both the entry area and stop; intraday order is unknown."})
-                return base
-            entry_opened_above_zone = float(open_) > float(zone_high)
-            entry = float(open_) if open_in_zone else float(zone_high)
-            target = numeric_or_none(prior.get("target_est")) or entry + (entry - float(stop))
+        plan = evaluate_execution_plan(plan, bar)
+        status = str(plan.get("execution_plan_status") or "").upper()
+        if entry is None and numeric_or_none(plan.get("execution_plan_fill_est")) is not None:
+            entry = float(plan["execution_plan_fill_est"])
             base.update({"entry_eligible": gates_allow, "entry_filled": True, "entry_fill_est": round(entry, 2)})
-        highs.append(float(high))
-        lows.append(float(low))
-        hit_stop, hit_target = float(low) <= float(stop), float(high) >= float(target)
-        if hit_stop and hit_target:
-            base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Daily bar touched both stop and target; intraday order is unknown."})
+        if entry is not None:
+            highs.append(float(high))
+            lows.append(float(low))
+        if status in {"AMBIGUOUS", "INVALIDATED"} and tp1_reached:
+            base.update({
+                "path_status": "SETTLED", "target_hit": True, "stop_hit": False,
+                "evaluation_run_date": canonical_date(bar.get("date") or bar.get("history_date")) or evaluation_date,
+                "mfe_pct": round((max(highs) / entry - 1) * 100, 2), "mae_pct": round((min(lows) / entry - 1) * 100, 2),
+                "close_return_pct": round((float(close) / entry - 1) * 100, 2), "current_close": round(float(close), 2),
+                "outcome_learnable": gates_allow, "forecast_learnable": True,
+                "outcome_label": "WORKING", "outcome_score": 1.0,
+                "outcome_reason": "The first profit review was reached before the later plan became unlearnable or invalid.",
+            })
             return base
-        if hit_target and entry_opened_above_zone and len(highs) == 1:
-            base.update({"path_status": "AMBIGUOUS", "outcome_label": "NON_LEARNABLE", "outcome_reason": "Entry zone and target were both touched after opening above the zone; intraday order is unknown."})
+        if status in {"AMBIGUOUS", "INVALIDATED"}:
+            base.update({
+                "path_status": status,
+                "outcome_label": "NON_LEARNABLE",
+                "outcome_reason": str(plan.get("execution_plan_summary") or "The daily execution path is not learnable."),
+            })
             return base
-        if hit_target or hit_stop:
+        if status == "EXPIRED":
+            base.update({"path_status": "NOT_FILLED", "outcome_label": "NOT_FILLED", "outcome_reason": str(plan.get("execution_plan_summary") or "The entry plan expired without a touch.")})
+            return base
+        if status == "TP1_HIT":
+            tp1_reached = True
+            continue
+        if status in {"TARGET_HIT", "STOPPED"}:
             mfe = (max(highs) / entry - 1) * 100
             mae = (min(lows) / entry - 1) * 100
             close_return = (float(close) / entry - 1) * 100
+            hit_target = status == "TARGET_HIT" or tp1_reached
+            successful = hit_target
             base.update({
-                "path_status": "SETTLED", "target_hit": hit_target, "stop_hit": hit_stop,
+                "path_status": "SETTLED", "target_hit": hit_target, "stop_hit": status == "STOPPED",
                 "evaluation_run_date": canonical_date(bar.get("date") or bar.get("history_date")) or evaluation_date,
                 "mfe_pct": round(mfe, 2), "mae_pct": round(mae, 2), "close_return_pct": round(close_return, 2),
                 "current_close": round(float(close), 2), "outcome_learnable": gates_allow, "forecast_learnable": True,
-                "outcome_label": "WORKING" if hit_target else "FAILED", "outcome_score": 1.0 if hit_target else -1.0,
-                "outcome_reason": f"{'Target' if hit_target else 'Stop'} was reached first within {offset} session(s).",
+                "outcome_label": "WORKING" if successful else "FAILED", "outcome_score": 1.0 if successful else -1.0,
+                "outcome_reason": (
+                    "The first profit review was reached before raised protection later closed the plan."
+                    if tp1_reached and status == "STOPPED"
+                    else f"{'Further target' if status == 'TARGET_HIT' else 'Protection'} was reached within {offset} session(s) under the frozen plan."
+                ),
             })
             return base
 
@@ -3410,11 +3454,16 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         return base
     final_close = numeric_or_none(future_rows[horizon - 1].get("close"))
     base.update({
-        "path_status": "SETTLED", "outcome_learnable": gates_allow, "forecast_learnable": True, "outcome_label": "STALE", "outcome_score": 0.0,
+        "path_status": "SETTLED", "outcome_learnable": gates_allow, "forecast_learnable": True,
+        "outcome_label": "WORKING" if tp1_reached else "STALE", "outcome_score": 1.0 if tp1_reached else 0.0,
         "mfe_pct": round((max(highs) / entry - 1) * 100, 2), "mae_pct": round((min(lows) / entry - 1) * 100, 2),
         "close_return_pct": round((float(final_close) / entry - 1) * 100, 2) if final_close else "",
         "current_close": round(float(final_close), 2) if final_close else "",
-        "outcome_reason": f"Entry filled but neither target nor stop was reached within {horizon} sessions.",
+        "outcome_reason": (
+            f"The first profit review was reached; the further target remained open at {horizon} sessions."
+            if tp1_reached
+            else f"The modeled entry condition was reached, but neither first target nor protection was reached within {horizon} sessions."
+        ),
     })
     return base
 
@@ -3494,6 +3543,7 @@ def build_incremental_signal_outcomes(
     behavior_rows: list[dict],
     raw_frames: dict[str, pd.DataFrame],
     existing_outcomes: pd.DataFrame,
+    replay_rows: Optional[list[dict]] = None,
 ) -> pd.DataFrame:
     """Settle only canonical signals whose five-session path is now available."""
     existing_ids = {
@@ -3501,8 +3551,11 @@ def build_incremental_signal_outcomes(
         for row in (existing_outcomes.to_dict(orient="records") if not existing_outcomes.empty else [])
     }
     candidates = behavior_history_by_ticker(behavior_rows)
+    replay_by_ticker = behavior_history_by_ticker(replay_rows or behavior_rows)
     settled: list[dict] = []
-    executable_actions = {"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"}
+    # BUILDING remains valuable counterfactual evidence, but it is not an
+    # executable plan and must never enter fill/stop learning.
+    outcome_candidate_actions = {"BUY CANDIDATE", "SETUP FORMING"}
     for ticker, ticker_rows in candidates.items():
         raw = raw_frames.get(ticker)
         if raw is None or raw.empty:
@@ -3510,8 +3563,17 @@ def build_incremental_signal_outcomes(
         bars = raw.copy()
         bars["date"] = pd.to_datetime(bars["date"], errors="coerce")
         bars = bars.dropna(subset=["date"]).sort_values("date")
+        replay_by_date = {
+            canonical_date(item.get("date") or item.get("history_date")): item
+            for item in replay_by_ticker.get(ticker, [])
+        }
+        bars = pd.DataFrame([
+            {**bar, **replay_by_date.get(canonical_date(bar.get("date")), {})}
+            for bar in bars.to_dict(orient="records")
+        ])
+        bars["date"] = pd.to_datetime(bars["date"], errors="coerce")
         for prior in ticker_rows:
-            if str(prior.get("action") or "") not in executable_actions:
+            if str(prior.get("action") or "") not in outcome_candidate_actions:
                 continue
             identity = signal_outcome_identity({
                 **prior,
@@ -3536,11 +3598,13 @@ def build_incremental_signal_outcomes(
 def rebuild_canonical_signal_outcomes(
     canonical_outcomes: pd.DataFrame,
     raw_frames: dict[str, pd.DataFrame],
+    replay_rows: Optional[list[dict]] = None,
 ) -> pd.DataFrame:
     """Re-score frozen production plans against the canonical OHLCV path."""
     rebuilt: list[dict] = []
     if canonical_outcomes is None or canonical_outcomes.empty:
         return pd.DataFrame()
+    replay_by_ticker = behavior_history_by_ticker(replay_rows or [])
     for raw_outcome in canonical_outcomes.to_dict(orient="records"):
         outcome = merge_payload_row(raw_outcome)
         if str(outcome.get("entry_model_version") or "") != LEARNING_MODEL_VERSION:
@@ -3551,6 +3615,15 @@ def rebuild_canonical_signal_outcomes(
         if bars is None or bars.empty or pd.isna(signal_date):
             continue
         future = bars.copy()
+        future["date"] = pd.to_datetime(future["date"], errors="coerce")
+        replay_by_date = {
+            canonical_date(item.get("date") or item.get("history_date")): item
+            for item in replay_by_ticker.get(ticker, [])
+        }
+        future = pd.DataFrame([
+            {**bar, **replay_by_date.get(canonical_date(bar.get("date")), {})}
+            for bar in future.to_dict(orient="records")
+        ])
         future["date"] = pd.to_datetime(future["date"], errors="coerce")
         future = future.loc[future["date"] > signal_date].dropna(subset=["date"]).sort_values("date").head(max(10, LEARNING_HORIZON_SESSIONS))
         if len(future) < LEARNING_HORIZON_SESSIONS:
@@ -3574,6 +3647,7 @@ def rebuild_canonical_signal_outcomes(
             "entry_zone_high": outcome.get("prior_entry_zone_high"),
             "entry_est": outcome.get("prior_entry_est"),
             "stop_est": outcome.get("prior_stop_est"),
+            "take_profit_1": outcome.get("prior_take_profit_1"),
             "target_est": outcome.get("prior_target_est"),
             "close": outcome.get("prior_close"),
             "prediction_upside_probability": outcome.get("prior_prediction_upside_probability"),
@@ -4006,20 +4080,13 @@ def fillability_key_candidates(row: dict) -> list[tuple[str, str]]:
 
 
 def build_fillability_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
-    """Learn whether a structurally valid entry plan trades, including NOT_FILLED.
-
-    Fillability is an execution property, not a directional forecast. SETUP
-    plans therefore provide valid evidence when the market, ticker, risk, and
-    personality gates allowed the plan, even if walk-forward direction evidence
-    was still accumulating. This avoids a cold-start loop where BUY needs proven
-    fillability but fillability could previously learn only from existing BUYs.
-    """
-    required = {"entry_model_version", "path_status", "prior_action", "ticker", "signal_run_date"}
+    """Learn fills only from frozen BUY plans, never BUILDING counterfactuals."""
+    required = {"entry_model_version", "path_status", "prior_action", "entry_filled", "ticker", "signal_run_date"}
     if outcome_history is None or outcome_history.empty or not required.issubset(outcome_history.columns):
         return {}
     usable = outcome_history[
         (outcome_history["entry_model_version"].astype(str) == LEARNING_MODEL_VERSION)
-        & outcome_history["prior_action"].astype(str).isin({"BUY CANDIDATE", "STRONG CONTINUATION", "SETUP FORMING"})
+        & (outcome_history["prior_action"].astype(str) == "BUY CANDIDATE")
         & outcome_history["path_status"].astype(str).str.upper().isin({"SETTLED", "NOT_FILLED"})
     ].copy()
     for gate in ("prior_market_permission", "prior_ticker_permission", "prior_risk_permission"):
@@ -4035,7 +4102,7 @@ def build_fillability_stats(outcome_history: pd.DataFrame) -> dict[str, dict]:
         lambda row: row.get("prior_execution_style") or execution_style_for_setup(row.get("prior_setup")),
         axis=1,
     )
-    usable["_filled"] = usable["path_status"].astype(str).str.upper() == "SETTLED"
+    usable["_filled"] = usable["entry_filled"].map(is_affirmative)
     usable["_key_exact"] = usable.apply(
         lambda row: fillability_key(row.get("_style"), row.get("prior_setup"), row.get("prior_personality_type")), axis=1
     )
@@ -8375,9 +8442,12 @@ def main() -> None:
                 previous_history_rows,
                 raw_frames,
                 prior_outcomes,
+                learning_history_rows,
             )
             canonical_outcomes = combine_signal_outcomes(prior_outcomes, newly_settled_outcomes)
-            verified_incremental_outcomes = rebuild_canonical_signal_outcomes(canonical_outcomes, raw_frames)
+            verified_incremental_outcomes = rebuild_canonical_signal_outcomes(
+                canonical_outcomes, raw_frames, learning_history_rows
+            )
             parity_report = calibration_parity_report(
                 canonical_outcomes,
                 verified_incremental_outcomes,
@@ -8400,6 +8470,7 @@ def main() -> None:
             previous_history_rows,
             raw_frames,
             prior_outcomes,
+            history_rows,
         )
         backfilled_outcomes = pd.DataFrame()
         outcome_candidates = combine_signal_outcomes(prior_outcomes, newly_settled_outcomes)
@@ -8446,6 +8517,28 @@ def main() -> None:
         ),
     )
     rows = apply_buy_tiers(rows)
+    # The current signal may change tomorrow, but a BUY SETUP's price terms do
+    # not. Advance the prior frozen plan before storing today's final history.
+    prior_plan_rows = behavior_history_by_ticker(previous_history_rows)
+    active_plan_tickers = {
+        ticker
+        for ticker, ticker_rows in prior_plan_rows.items()
+        if ticker_rows and str(ticker_rows[-1].get("execution_plan_status") or "").upper() in {"ARMED", "MODEL_FILLED", "TP1_HIT"}
+    }
+    execution_bars: dict[str, list[dict]] = {}
+    for ticker, frame in raw_frames.items():
+        shown_ticker = display_ticker(ticker)
+        if not all(column in frame.columns for column in ("date", "open", "high", "low", "close")):
+            continue
+        bars = frame[["date", "open", "high", "low", "close"]].to_dict(orient="records")
+        if shown_ticker in active_plan_tickers:
+            # Rebuild only the few sessions that an active plan could span so
+            # recovery after a missed workflow also sees trap/distribution/exit.
+            replay = build_behavior_history(ticker, frame, days=5, benchmark_frames=benchmark_frames)
+            replay_by_date = {str(item.get("date") or ""): item for item in replay}
+            bars = [{**bar, **replay_by_date.get(str(pd.to_datetime(bar["date"]).date()), {})} for bar in bars]
+        execution_bars[shown_ticker] = bars
+    rows = apply_execution_plan_lifecycle(rows, previous_history_rows, execution_bars)
     history_rows = freeze_final_signal_history(history_rows, rows, args.history_days)
     outcomes = learning_history.copy()
     if not outcomes.empty:

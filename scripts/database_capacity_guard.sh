@@ -22,7 +22,9 @@ readonly OUTCOME_MAX_ROWS=20000
 readonly LEARNING_STATE_MAX_ROWS=1000
 readonly INDICATOR_STATE_MAX_ROWS=500
 readonly REFRESH_RUN_MAX_ROWS=125
-readonly OHLCV_MAX_BYTES=65000000
+# Actual 400-bar storage is about 12MB for the current universe. A 25MB hard
+# budget leaves growth room without reserving most of the 250MB database cap.
+readonly OHLCV_MAX_BYTES=25000000
 readonly SNAPSHOT_MAX_BYTES=12000000
 readonly BEHAVIOR_MAX_BYTES=65000000
 readonly OUTCOME_MAX_BYTES=45000000

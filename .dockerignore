@@ -1,0 +1,11 @@
+.git
+.playwright-cli
+.pycache
+node_modules
+output
+watchlist_*_1y.csv
+daily_watchlist_overview_*.csv
+daily_watchlist_overview_*.html
+daily_signal_outcomes_*.csv
+watchlist_behavior_history_*.csv
+daily_watchlist_run_metadata_*.json

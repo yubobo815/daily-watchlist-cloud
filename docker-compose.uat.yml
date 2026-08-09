@@ -1,0 +1,37 @@
+services:
+  audit:
+    image: daily-watchlist-cloud-uat:local
+    build:
+      context: .
+      dockerfile: Dockerfile.uat
+    command: npm run audit:watchlist
+  fixture:
+    image: daily-watchlist-cloud-uat:local
+    build:
+      context: .
+      dockerfile: Dockerfile.uat
+    command: python3 scripts/build_execution_plan_uat_fixture.py
+    volumes:
+      - ./output:/workspace/output
+  web:
+    image: python:3.11-slim
+    depends_on:
+      fixture:
+        condition: service_completed_successfully
+    command: python3 -m http.server 4178 --directory /site
+    volumes:
+      - ./output/execution-plan-uat:/site:ro
+  browser:
+    image: mcr.microsoft.com/playwright:v1.58.2-noble
+    depends_on:
+      web:
+        condition: service_started
+    environment:
+      BASE_URL: http://web:4178
+    working_dir: /work
+    volumes:
+      - ./:/work:ro
+    command: >-
+      sh -lc "cd /tmp && npm init -y >/dev/null && npm install --silent @playwright/test@1.58.2 &&
+      cp /work/scripts/uat_execution_plan_browser.spec.js /tmp/uat_execution_plan_browser.spec.js &&
+      npx playwright test /tmp/uat_execution_plan_browser.spec.js --reporter=line --output=/tmp/test-results"
