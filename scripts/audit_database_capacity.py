@@ -155,6 +155,7 @@ def assert_capacity_contract() -> None:
     for contract in (
         "readonly WARNING_BYTES=175000000",
         "readonly STAGING_LIMIT_BYTES=220000000",
+        "readonly STAGING_SAFETY_BYTES=15000000",
         "readonly HARD_LIMIT_BYTES=250000000",
         "readonly MAX_TICKERS=250",
         "readonly OHLCV_BARS_PER_TICKER=400",
@@ -164,11 +165,13 @@ def assert_capacity_contract() -> None:
         "readonly CALIBRATION_MAX_BYTES=8000000",
         "readonly SNAPSHOT_MAX_ROWS=750",
         "readonly SNAPSHOT_MAX_BYTES=12000000",
-        "readonly MAX_STAGED_PUBLICATION_BYTES=95000000",
+        "readonly MAX_STAGED_PUBLICATION_BYTES=120000000",
         "readonly OHLCV_MAX_BYTES=25000000",
         "readonly BEHAVIOR_MAX_BYTES=65000000",
         "readonly OUTCOME_MAX_BYTES=45000000",
         "ohlcv_growth_reserve + MAX_STAGED_PUBLICATION_BYTES",
+        "export_staging_budget_inputs",
+        "SUPABASE_CURRENT_DATABASE_BYTES=$current_bytes",
         "record_storage_metrics",
         "evaluation_run_date not in",
         "delete from public.watchlist_learning_state",
@@ -201,7 +204,10 @@ def assert_capacity_contract() -> None:
     estimate = scanner.estimate_supabase_publication_bytes([{"payload": "x" * 1000}])
     assert 5_000_000 < estimate < scanner.SUPABASE_MAX_STAGED_PUBLICATION_BYTES
     assert scanner.SUPABASE_STORAGE_OVERHEAD_FACTOR == 2.0
-    assert scanner.SUPABASE_MAX_STAGED_PUBLICATION_BYTES == 95_000_000
+    assert scanner.SUPABASE_MAX_STAGED_PUBLICATION_BYTES == 120_000_000
+    assert scanner.supabase_staged_publication_budget(100_256_915) == 104_743_085
+    assert scanner.supabase_staged_publication_budget(50_000_000) == 120_000_000
+    assert scanner.supabase_staged_publication_budget(0) == 95_000_000
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ mode="${1:-}"
 
 readonly WARNING_BYTES=175000000
 readonly STAGING_LIMIT_BYTES=220000000
+readonly STAGING_SAFETY_BYTES=15000000
 readonly HARD_LIMIT_BYTES=250000000
 readonly MAX_TICKERS=250
 readonly OHLCV_BARS_PER_TICKER=400
@@ -31,8 +32,9 @@ readonly OUTCOME_MAX_BYTES=45000000
 readonly LEARNING_STATE_MAX_BYTES=6000000
 readonly INDICATOR_STATE_MAX_BYTES=4000000
 readonly REFRESH_RUN_MAX_BYTES=4000000
-# Conservative upper bound for one complete non-OHLCV staged publication.
-readonly MAX_STAGED_PUBLICATION_BYTES=95000000
+# Absolute upper bound for one complete non-OHLCV staged publication. The
+# scanner further reduces this from measured database headroom at runtime.
+readonly MAX_STAGED_PUBLICATION_BYTES=120000000
 readonly LOCK_KEY=741852963
 
 metadata_value() {
@@ -45,6 +47,20 @@ metadata_value() {
 
 database_bytes() {
   psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select pg_database_size(current_database())"
+}
+
+export_staging_budget_inputs() {
+  local current_bytes
+  current_bytes="$(database_bytes)"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    {
+      echo "SUPABASE_CURRENT_DATABASE_BYTES=$current_bytes"
+      echo "SUPABASE_STAGING_LIMIT_BYTES=$STAGING_LIMIT_BYTES"
+      echo "SUPABASE_STAGING_SAFETY_BYTES=$STAGING_SAFETY_BYTES"
+      echo "SUPABASE_MAX_STAGED_PUBLICATION_BYTES=$MAX_STAGED_PUBLICATION_BYTES"
+    } >> "$GITHUB_ENV"
+  fi
+  echo "Dynamic staging inputs: database=$current_bytes limit=$STAGING_LIMIT_BYTES safety=$STAGING_SAFETY_BYTES max_publication=$MAX_STAGED_PUBLICATION_BYTES"
 }
 
 trim_ohlcv() {
@@ -369,6 +385,7 @@ case "$mode" in
     trim_ohlcv
     psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "vacuum (analyze) public.watchlist_ohlcv, public.watchlist_snapshots, public.watchlist_behavior_history, public.watchlist_signal_outcomes, public.watchlist_learning_state, public.watchlist_indicator_state, public.watchlist_calibration_artifacts, public.watchlist_refresh_runs"
     assert_capacity "$WARNING_BYTES" "preflight"
+    export_staging_budget_inputs
     ;;
   staged)
     trim_ohlcv

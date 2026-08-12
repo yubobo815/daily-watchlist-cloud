@@ -1033,7 +1033,10 @@ OHLCV_INCREMENTAL_YEARS = float(os.getenv("OHLCV_INCREMENTAL_YEARS", "0.1"))
 SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_SNAPSHOT_PAYLOAD_MAX_BYTES", "8192"))
 SUPABASE_HISTORY_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_HISTORY_PAYLOAD_MAX_BYTES", "8192"))
 SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES = int(os.getenv("SUPABASE_OUTCOME_PAYLOAD_MAX_BYTES", "2048"))
-SUPABASE_MAX_STAGED_PUBLICATION_BYTES = int(os.getenv("SUPABASE_MAX_STAGED_PUBLICATION_BYTES", "95000000"))
+SUPABASE_MAX_STAGED_PUBLICATION_BYTES = int(os.getenv("SUPABASE_MAX_STAGED_PUBLICATION_BYTES", "120000000"))
+SUPABASE_FALLBACK_STAGED_PUBLICATION_BYTES = int(os.getenv("SUPABASE_FALLBACK_STAGED_PUBLICATION_BYTES", "95000000"))
+SUPABASE_STAGING_LIMIT_BYTES = int(os.getenv("SUPABASE_STAGING_LIMIT_BYTES", "220000000"))
+SUPABASE_STAGING_SAFETY_BYTES = int(os.getenv("SUPABASE_STAGING_SAFETY_BYTES", "15000000"))
 # Typed columns, JSONB/TOAST storage, and indexes are conservatively bounded at
 # twice the serialized request size. A 3x multiplier rejected healthy 42MB
 # publications despite the independent relation-size and 250MB hard guards.
@@ -1317,6 +1320,16 @@ def estimate_supabase_publication_bytes(*record_groups: list[dict]) -> int:
     return int(serialized_bytes * SUPABASE_STORAGE_OVERHEAD_FACTOR) + SUPABASE_STORAGE_FIXED_BYTES
 
 
+def supabase_staged_publication_budget(current_database_bytes: Optional[int] = None) -> int:
+    """Bound a staged write by measured headroom, with a conservative fallback."""
+    if current_database_bytes is None:
+        current_database_bytes = int(numeric_or_none(os.getenv("SUPABASE_CURRENT_DATABASE_BYTES")) or 0)
+    if current_database_bytes <= 0:
+        return min(SUPABASE_MAX_STAGED_PUBLICATION_BYTES, SUPABASE_FALLBACK_STAGED_PUBLICATION_BYTES)
+    available = SUPABASE_STAGING_LIMIT_BYTES - current_database_bytes - SUPABASE_STAGING_SAFETY_BYTES
+    return max(0, min(SUPABASE_MAX_STAGED_PUBLICATION_BYTES, available))
+
+
 def sync_supabase(
     report: pd.DataFrame,
     history: pd.DataFrame,
@@ -1491,10 +1504,11 @@ def sync_supabase(
         outcome_records,
         auxiliary_records,
     )
-    if estimated_publication_bytes > SUPABASE_MAX_STAGED_PUBLICATION_BYTES:
+    staged_publication_budget = supabase_staged_publication_budget()
+    if estimated_publication_bytes > staged_publication_budget:
         raise ValueError(
             f"Publication is estimated at {estimated_publication_bytes} bytes; "
-            f"staging budget is {SUPABASE_MAX_STAGED_PUBLICATION_BYTES} bytes."
+            f"dynamic staging budget is {staged_publication_budget} bytes."
         )
 
     if run_metadata:
@@ -1505,6 +1519,7 @@ def sync_supabase(
             **publishing_payload,
             "sync_state": "publishing",
             "prewrite_estimated_bytes": estimated_publication_bytes,
+            "prewrite_budget_bytes": staged_publication_budget,
         }
         # Child rows are publication-scoped and foreign-keyed to this marker.
         # Failing here must abort rather than create an untraceable partial run.
