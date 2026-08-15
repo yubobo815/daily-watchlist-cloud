@@ -43,8 +43,8 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.08.09-balanced-v1.4"
-LEARNING_MODEL_VERSION = "five-session-execution-v7"
+SCANNER_VERSION = "2026.08.15-balanced-v1.5"
+LEARNING_MODEL_VERSION = "five-session-execution-v8"
 INCREMENTAL_STATE_VERSION = "incremental-state-v1"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
 CALIBRATION_ARTIFACT_VERSION = "calibration-artifact-v1"
@@ -3290,7 +3290,15 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         gate_evaluation = "POLICY_ALLOWED" if policy_allowed else "NO_MATERIAL_EDGE"
 
     base = {
-        "signal_run_date": canonical_date(prior.get("run_date") or prior.get("date") or prior.get("data_date")),
+        # Supabase history rows carry both the publication run_date and the
+        # historical market date. Learning identity must follow the market
+        # session or multiple replay signals collapse onto one publication day.
+        "signal_run_date": canonical_date(
+            prior.get("date")
+            or prior.get("history_date")
+            or prior.get("data_date")
+            or prior.get("run_date")
+        ),
         "evaluation_run_date": evaluation_date,
         "ticker": prior.get("ticker"),
         "prior_action": prior_action,

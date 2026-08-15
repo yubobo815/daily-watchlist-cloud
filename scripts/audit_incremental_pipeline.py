@@ -98,6 +98,7 @@ def audit_incremental_settlement() -> None:
     )
     outcome = scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, pd.DataFrame())
     assert len(outcome) == 1 and outcome.iloc[0]["outcome_label"] == "WORKING"
+    assert outcome.iloc[0]["signal_run_date"] == "2026-07-01"
     assert outcome.iloc[0]["evaluation_run_date"] == "2026-07-06", "learning must continue from TP1 through the frozen further target"
     assert scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, outcome).empty
     frozen = scanner.freeze_final_signal_history(
@@ -109,6 +110,25 @@ def audit_incremental_settlement() -> None:
     rebuilt = scanner.rebuild_canonical_signal_outcomes(outcome, {"TEST": bars})
     assert len(rebuilt) == 1 and rebuilt.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
     assert rebuilt.iloc[0]["prior_take_profit_1"] == 107
+
+    # Rows read from Supabase include the publication date as run_date. It
+    # must never replace the actual historical market session in the identity.
+    persisted_history_signal = {
+        **sample_signal(),
+        "run_date": "2026-08-09",
+        "history_date": "2026-07-01",
+    }
+    persisted_outcome = scanner.build_incremental_signal_outcomes(
+        [persisted_history_signal], {"TEST": bars}, pd.DataFrame()
+    )
+    assert persisted_outcome.iloc[0]["signal_run_date"] == "2026-07-01"
+    assert scanner.signal_outcome_identity(persisted_outcome.iloc[0].to_dict())[1] == "2026-07-01"
+    persisted_parity = scanner.calibration_parity_report(
+        persisted_outcome,
+        scanner.rebuild_canonical_signal_outcomes(persisted_outcome, {"TEST": bars}),
+        {"TEST": "2026-06-01"},
+    )
+    assert persisted_parity["passed"] is True
     legacy = outcome.copy()
     legacy.loc[legacy.index[0], "entry_model_version"] = ""
     assert scanner.calibration_parity_report(legacy, legacy, {"TEST": "2026-06-01"})["incremental_settled"] == 0
