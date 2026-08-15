@@ -530,6 +530,7 @@ function auditAtomicPublicationContract() {
   assert(workflow.includes("verify_pages_publication.py") && pageVerifier.includes("hashlib.sha256") && pageVerifier.includes("ticker_count") && pageVerifier.includes("site_files"), "Pages verification must validate payload, UI integrity, and ticker mappings");
   assert(pageVerifier.includes("set(tickers) != set(ticker_paths)"), "Pages verification must reject a latest payload missing any manifest ticker");
   assert(rollbackBuilder.includes("site_files.items()") && rollbackBuilder.includes("Published site file failed integrity validation") && !rollbackBuilder.includes("--template"), "Pages rollback must preserve the manifest's complete verified site inventory");
+  assert(rollbackBuilder.includes("RETRYABLE_HTTP_STATUS") && rollbackBuilder.includes("FETCH_MAX_ATTEMPTS"), "Pages rollback downloads must retry bounded transient service failures");
   assert(workflow.includes("Retry previous Pages publication restore") && workflow.includes("Verify restored Pages publication"), "Pages rollback must retry and verify compensation");
   assert(workflow.includes("build-publication:") && workflow.includes("deploy-pages:") && workflow.includes("verify-and-activate:"), "build, deployment, and activation must use separate jobs");
   assert(workflow.indexOf("deploy-pages:") < workflow.indexOf("verify-and-activate:"), "online verification must run only after the Pages deployment job completes");

@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import shutil
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -18,6 +19,8 @@ from pathlib import Path, PurePosixPath
 
 MAX_FILES = 1000
 MAX_BYTES = 50_000_000
+FETCH_MAX_ATTEMPTS = 4
+RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
 
 
 class AssetParser(HTMLParser):
@@ -41,8 +44,21 @@ def safe_path(relative_path: str) -> str:
 
 def fetch(base_url: str, relative_path: str) -> bytes:
     url = urllib.parse.urljoin(base_url.rstrip("/") + "/", safe_path(relative_path))
-    with urllib.request.urlopen(url, timeout=30) as response:
-        return response.read()
+    for attempt in range(1, FETCH_MAX_ATTEMPTS + 1):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "daily-watchlist-rollback/1"})
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRYABLE_HTTP_STATUS or attempt == FETCH_MAX_ATTEMPTS:
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == FETCH_MAX_ATTEMPTS:
+                raise
+        delay = 2 ** (attempt - 1)
+        print(f"Temporary Pages fetch failure for {relative_path}; retrying in {delay}s.", flush=True)
+        time.sleep(delay)
+    raise RuntimeError(f"Pages fetch retries exhausted: {relative_path}")
 
 
 def integrity(content: bytes, ticker: str = "") -> dict[str, int | str]:
