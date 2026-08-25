@@ -20,6 +20,9 @@ readonly CALIBRATION_MAX_BYTES=8000000
 readonly SNAPSHOT_MAX_ROWS=750
 readonly BEHAVIOR_MAX_ROWS=15000
 readonly OUTCOME_MAX_ROWS=20000
+# Atomic staging temporarily holds the active and candidate publications.
+# Each publication remains subject to OUTCOME_MAX_ROWS independently.
+readonly OUTCOME_STAGED_MAX_ROWS=40000
 readonly LEARNING_STATE_MAX_ROWS=1000
 readonly INDICATOR_STATE_MAX_ROWS=500
 readonly REFRESH_RUN_MAX_ROWS=125
@@ -170,16 +173,20 @@ assert_capacity() {
     echo "OHLCV row capacity exceeded: $ohlcv_rows > $OHLCV_MAX_ROWS"
     return 1
   fi
-  local snapshots behavior outcomes learning_state indicator_state refresh_runs
+  local snapshots behavior outcomes outcome_largest_publication learning_state indicator_state refresh_runs
   snapshots="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_snapshots")"
   behavior="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_behavior_history")"
   outcomes="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_signal_outcomes")"
+  outcome_largest_publication="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select coalesce(max(row_count), 0) from (select count(*) as row_count from public.watchlist_signal_outcomes group by publication_id) publication_counts")"
   learning_state="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_learning_state")"
   indicator_state="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_indicator_state")"
   refresh_runs="$(psql "$SUPABASE_DB_URL" -At -v ON_ERROR_STOP=1 -c "select count(*) from public.watchlist_refresh_runs")"
   [ "$snapshots" -le "$SNAPSHOT_MAX_ROWS" ] || { echo "Snapshot row capacity exceeded: $snapshots > $SNAPSHOT_MAX_ROWS"; return 1; }
   [ "$behavior" -le "$BEHAVIOR_MAX_ROWS" ] || { echo "Behavior row capacity exceeded: $behavior > $BEHAVIOR_MAX_ROWS"; return 1; }
-  [ "$outcomes" -le "$OUTCOME_MAX_ROWS" ] || { echo "Outcome row capacity exceeded: $outcomes > $OUTCOME_MAX_ROWS"; return 1; }
+  local outcome_total_limit="$OUTCOME_MAX_ROWS"
+  [ "$phase" = "staged" ] && outcome_total_limit="$OUTCOME_STAGED_MAX_ROWS"
+  [ "$outcomes" -le "$outcome_total_limit" ] || { echo "Outcome row capacity exceeded during $phase: $outcomes > $outcome_total_limit"; return 1; }
+  [ "$outcome_largest_publication" -le "$OUTCOME_MAX_ROWS" ] || { echo "Per-publication outcome capacity exceeded: $outcome_largest_publication > $OUTCOME_MAX_ROWS"; return 1; }
   [ "$learning_state" -le "$LEARNING_STATE_MAX_ROWS" ] || { echo "Learning-state row capacity exceeded: $learning_state > $LEARNING_STATE_MAX_ROWS"; return 1; }
   [ "$indicator_state" -le "$INDICATOR_STATE_MAX_ROWS" ] || { echo "Indicator-state row capacity exceeded: $indicator_state > $INDICATOR_STATE_MAX_ROWS"; return 1; }
   [ "$refresh_runs" -le "$REFRESH_RUN_MAX_ROWS" ] || { echo "Refresh-run row capacity exceeded: $refresh_runs > $REFRESH_RUN_MAX_ROWS"; return 1; }
