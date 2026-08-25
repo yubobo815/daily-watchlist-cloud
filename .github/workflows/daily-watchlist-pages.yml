@@ -31,10 +31,10 @@ on:
     # delay scheduled runs substantially under load.
     - cron: "17 23 * * 1-5"
     # Run the bounded weekly rebuild and parity gate separately on Saturday.
-    - cron: "47 00 * * 6"
+    - cron: "47 03 * * 6"
     # One guarded retry after the Saturday weekly rebuild has time to finish.
     # It runs only when that primary scheduled rebuild failed.
-    - cron: "47 04 * * 6"
+    - cron: "47 07 * * 6"
 
 permissions:
   actions: read
@@ -46,7 +46,9 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: daily-watchlist-pages
+  # Non-refresh pushes must not queue ahead of a market publication. Give each
+  # of them a unique group; all refreshes remain serial.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && !contains(github.event.head_commit.message, '[refresh-watchlist]') && github.run_id || 'publication' }}
   # A cancelled run can stop after writes but before retention cleanup.
   cancel-in-progress: false
 
@@ -61,6 +63,9 @@ jobs:
       rollback_publication_id: ${{ steps.publication.outputs.rollback_publication_id }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Determine whether to refresh
         id: time_gate
         env:
@@ -106,7 +111,7 @@ jobs:
           # Saturday's weekly calibration is intentionally separate from the
           # Friday daily publication. A parity failure must not withhold a
           # valid daily market report.
-          if [ "$EVENT_SCHEDULE" = "47 00 * * 6" ]; then
+          if [ "$EVENT_SCHEDULE" = "47 03 * * 6" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
             echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
@@ -114,23 +119,23 @@ jobs:
             exit 0
           fi
 
-          # Retry the Friday weekly rebuild only when the primary scheduled run
-          # has failed. This repeats the same parity checks; it never bypasses
-          # them or publishes a partially validated result.
-          if [ "$EVENT_SCHEDULE" = "47 04 * * 6" ]; then
-            previous_conclusion="$(
+          # Retry Saturday's weekly rebuild only when that same UTC-day primary
+          # failed. This repeats the same parity checks; it never bypasses them
+          # or mistakes Friday's daily publication for the weekly primary.
+          if [ "$EVENT_SCHEDULE" = "47 07 * * 6" ]; then
+            retry_decision="$(
               curl --fail --silent --show-error \
                 --header "Authorization: Bearer $GITHUB_TOKEN" \
                 --header "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/daily-watchlist-pages.yml/runs?event=schedule&per_page=10" \
-                | python3 -c 'import json, os, sys; runs = json.load(sys.stdin).get("workflow_runs", []); current = os.environ["GITHUB_RUN_ID"]; previous = next((run for run in runs if str(run.get("id")) != current and run.get("status") == "completed"), None); print((previous or {}).get("conclusion", "unknown"))'
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/daily-watchlist-pages.yml/runs?event=schedule&per_page=25" \
+                | python3 scripts/weekly_retry_gate.py --current-run-id "$GITHUB_RUN_ID"
             )"
-            if [ "$previous_conclusion" != "failure" ]; then
+            if [ "$retry_decision" != "retry" ]; then
               echo "run=false" >> "$GITHUB_OUTPUT"
-              echo "Weekly retry skipped; primary scheduled run concluded: $previous_conclusion"
+              echo "Weekly retry skipped by same-day primary selector."
               exit 0
             fi
-            echo "Retrying failed Friday weekly rebuild."
+            echo "Retrying failed or missing Saturday weekly rebuild."
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
             echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
@@ -144,10 +149,6 @@ jobs:
           echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
           echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
           echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout
-        if: steps.time_gate.outputs.run == 'true'
-        uses: actions/checkout@v6
 
       - name: Set up Python
         if: steps.time_gate.outputs.run == 'true'

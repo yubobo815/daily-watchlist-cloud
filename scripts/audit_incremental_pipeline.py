@@ -13,6 +13,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import daily_watchlist_overview as scanner
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from weekly_retry_gate import retry_decision
 
 
 def frame(start: str, periods: int, base: float = 100.0) -> pd.DataFrame:
@@ -299,7 +301,12 @@ def audit_rolling_window_and_modes() -> None:
     assert "if previous_incremental_metadata and not needs_bootstrap:" in scanner_source
     assert "position_value_1k_risk = required_position_value" in scanner_source
     assert "actual_risk_dollars = suggested_position_value" in scanner_source
-    assert 'cron: "17 23 * * 1-4"' in workflow and 'cron: "17 23 * * 5"' in workflow
+    daily_cron = 'cron: "17 23 * * 1-5"'
+    weekly_cron = 'cron: "47 03 * * 6"'
+    retry_cron = 'cron: "47 07 * * 6"'
+    assert all(cron in workflow for cron in (daily_cron, weekly_cron, retry_cron))
+    assert 'cron: "17 23 * * 1-4"' not in workflow
+    assert 'cron: "17 23 * * 5"' not in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
     assert '${{ steps.time_gate.outputs.stored_ohlcv_arg }}' in workflow
     assert "parity must never be bypassed implicitly" in scanner_source
@@ -308,7 +315,67 @@ def audit_rolling_window_and_modes() -> None:
     assert "build-publication:" in workflow and "deploy-pages:" in workflow and "verify-and-activate:" in workflow
     assert "restore-pages-after-failed-activation:" in workflow
     assert 'EVENT_SCHEDULE: ${{ github.event.schedule }}' in workflow
-    assert 'if [ "$EVENT_SCHEDULE" = "17 23 * * 5" ]' in workflow
+    weekly_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "47 03 * * 6" ]')
+    retry_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "47 07 * * 6" ]')
+    default_gate_start = workflow.index("# Scheduled jobs can start well after", retry_gate_start)
+    weekly_gate = workflow[weekly_gate_start:retry_gate_start]
+    retry_gate = workflow[retry_gate_start:default_gate_start]
+    default_gate = workflow[default_gate_start:workflow.index("      - name: Set up Python", default_gate_start)]
+    assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in weekly_gate
+    assert 'echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"' in weekly_gate
+    assert "scripts/weekly_retry_gate.py" in retry_gate
+    assert 'if [ "$retry_decision" != "retry" ]' in retry_gate
+    assert 'echo "run=false" >> "$GITHUB_OUTPUT"' in retry_gate
+    assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in retry_gate
+    assert 'echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"' in retry_gate
+    assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in default_gate
+    assert 'echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"' in default_gate
+    assert "github.run_id || 'publication'" in workflow
+
+
+def audit_weekly_retry_selector() -> None:
+    current = {
+        "id": 200,
+        "event": "schedule",
+        "status": "in_progress",
+        "conclusion": None,
+        "created_at": "2026-08-29T07:47:00Z",
+    }
+    daily = {
+        "id": 100,
+        "event": "schedule",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-08-28T23:17:00Z",
+    }
+    delayed_same_day_daily = {
+        "id": 101,
+        "event": "schedule",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-08-29T00:17:00Z",
+    }
+
+    def decide(status: str, conclusion) -> str:
+        primary = {
+            "id": 150,
+            "event": "schedule",
+            "status": status,
+            "conclusion": conclusion,
+            "created_at": "2026-08-29T03:48:00Z",
+        }
+        return retry_decision(
+            {"workflow_runs": [current, daily, delayed_same_day_daily, primary]}, "200"
+        )[0]
+
+    assert decide("completed", "success") == "skip"
+    assert decide("queued", None) == "skip"
+    assert decide("in_progress", None) == "skip"
+    for conclusion in ("failure", "cancelled", "timed_out", "startup_failure", "stale", "action_required"):
+        assert decide("completed", conclusion) == "retry"
+    assert retry_decision(
+        {"workflow_runs": [current, daily, delayed_same_day_daily]}, "200"
+    )[0] == "retry"
 
 
 def audit_artifact_integrity() -> None:
@@ -377,9 +444,10 @@ def main() -> None:
     audit_supabase_history_pagination()
     audit_daily_history_inherits_full_publication()
     audit_rolling_window_and_modes()
+    audit_weekly_retry_selector()
     audit_artifact_integrity()
     audit_provider_circuit()
-    print({"incrementalPipelineUAT": "ok", "cases": 7})
+    print({"incrementalPipelineUAT": "ok", "cases": 8})
 
 
 if __name__ == "__main__":
