@@ -29,7 +29,7 @@ on:
     # This path must remain independent of the slower weekly calibration.
     # Avoid the top-of-hour Actions scheduling peak; GitHub may otherwise
     # delay scheduled runs substantially under load.
-    - cron: "17 23 * * 5"
+    - cron: "17 23 * * 1-5"
     # Run the bounded weekly rebuild and parity gate separately on Saturday.
     - cron: "47 00 * * 6"
     # One guarded retry after the Saturday weekly rebuild has time to finish.
