@@ -43,9 +43,9 @@ ETF_HINTS = {
 RUN_TIMEZONE = ZoneInfo("Australia/Melbourne")
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_MARKET_CLOSE_TIME = time_cls(16, 0)
-SCANNER_VERSION = "2026.08.15-balanced-v1.5"
-LEARNING_MODEL_VERSION = "five-session-execution-v8"
-INCREMENTAL_STATE_VERSION = "incremental-state-v1"
+SCANNER_VERSION = "2026.08.25-balanced-v1.6"
+LEARNING_MODEL_VERSION = "five-session-execution-v9"
+INCREMENTAL_STATE_VERSION = "incremental-state-v2"
 INDICATOR_STATE_VERSION = "indicator-state-v1"
 CALIBRATION_ARTIFACT_VERSION = "calibration-artifact-v1"
 PERSONALITY_LOOKBACK_BARS = 100
@@ -3320,6 +3320,14 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_take_profit_1": numeric_or_none(prior.get("take_profit_1")),
         "prior_target_est": numeric_or_none(prior.get("target_est")),
         "prior_final_target": numeric_or_none(prior.get("target_est")),
+        "prior_post_tp1_stop": numeric_or_none(prior.get("post_tp1_stop")),
+        "prior_freshness_block": prior.get("freshness_block"),
+        "prior_shadow_hard_blockers": prior.get("shadow_hard_blockers"),
+        "prior_shadow_policy_allowed": prior.get("shadow_policy_allowed"),
+        "prior_hard_exit_pressure": prior.get("hard_exit_pressure"),
+        "prior_confirmed_break": prior.get("confirmed_break"),
+        "prior_volatility_regime": prior.get("volatility_regime"),
+        "prior_distance_from_ref_zone_atr": numeric_or_none(prior.get("distance_from_ref_zone_atr")),
         "prior_prediction_upside_probability": numeric_or_none(prior.get("prediction_upside_probability")),
         "prior_prediction_downside_probability": numeric_or_none(prior.get("prediction_downside_probability")),
         "prior_prediction_no_edge_probability": numeric_or_none(prior.get("prediction_no_edge_probability")),
@@ -3580,7 +3588,7 @@ def build_incremental_signal_outcomes(
     # executable plan and must never enter fill/stop learning.
     outcome_candidate_actions = {"BUY CANDIDATE", "SETUP FORMING"}
     for ticker, ticker_rows in candidates.items():
-        raw = raw_frames.get(ticker)
+        raw = raw_frame_for_ticker(raw_frames, ticker)
         if raw is None or raw.empty:
             continue
         bars = raw.copy()
@@ -3618,6 +3626,16 @@ def build_incremental_signal_outcomes(
     return pd.DataFrame(settled)
 
 
+def raw_frame_for_ticker(
+    raw_frames: dict[str, pd.DataFrame], ticker: str
+) -> Optional[pd.DataFrame]:
+    """Resolve display/provider aliases without evaluating DataFrame truthiness."""
+    for key in dict.fromkeys((normalize_ticker(ticker), ticker, display_ticker(ticker))):
+        if key in raw_frames:
+            return raw_frames[key]
+    return None
+
+
 def rebuild_canonical_signal_outcomes(
     canonical_outcomes: pd.DataFrame,
     raw_frames: dict[str, pd.DataFrame],
@@ -3633,7 +3651,7 @@ def rebuild_canonical_signal_outcomes(
         if str(outcome.get("entry_model_version") or "") != LEARNING_MODEL_VERSION:
             continue
         ticker = str(outcome.get("ticker") or "").upper()
-        bars = raw_frames.get(ticker)
+        bars = raw_frame_for_ticker(raw_frames, ticker)
         signal_date = pd.to_datetime(outcome.get("signal_run_date"), errors="coerce")
         if bars is None or bars.empty or pd.isna(signal_date):
             continue
@@ -3672,7 +3690,15 @@ def rebuild_canonical_signal_outcomes(
             "stop_est": outcome.get("prior_stop_est"),
             "take_profit_1": outcome.get("prior_take_profit_1"),
             "target_est": outcome.get("prior_target_est"),
+            "post_tp1_stop": outcome.get("prior_post_tp1_stop"),
             "close": outcome.get("prior_close"),
+            "freshness_block": outcome.get("prior_freshness_block"),
+            "shadow_hard_blockers": outcome.get("prior_shadow_hard_blockers"),
+            "shadow_policy_allowed": outcome.get("prior_shadow_policy_allowed"),
+            "hard_exit_pressure": outcome.get("prior_hard_exit_pressure"),
+            "confirmed_break": outcome.get("prior_confirmed_break"),
+            "volatility_regime": outcome.get("prior_volatility_regime"),
+            "distance_from_ref_zone_atr": outcome.get("prior_distance_from_ref_zone_atr"),
             "prediction_upside_probability": outcome.get("prior_prediction_upside_probability"),
             "prediction_downside_probability": outcome.get("prior_prediction_downside_probability"),
             "prediction_no_edge_probability": outcome.get("prior_prediction_no_edge_probability"),
@@ -3752,6 +3778,7 @@ def calibration_parity_report(
     )
     # Incremental state may retain older identities outside the bounded replay,
     # but every identity inside the rebuilt signal/evaluation window must match.
+    # Missing raw coverage is not proof of parity and therefore remains fail-closed.
     passed = bool(shared) and not mismatched and not missing_from_incremental and not missing_from_rebuild
     return {
         "passed": passed,
@@ -3764,6 +3791,8 @@ def calibration_parity_report(
         "older_outside_rebuild": len(older_outside_rebuild),
         "newly_available": len(newly_available),
         "sample_mismatches": [list(item) for item in mismatched[:10]],
+        "sample_missing_from_incremental": [list(item) for item in missing_from_incremental[:10]],
+        "sample_missing_from_rebuild": [list(item) for item in missing_from_rebuild[:10]],
     }
 
 

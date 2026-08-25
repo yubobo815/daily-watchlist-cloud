@@ -113,6 +113,71 @@ def audit_incremental_settlement() -> None:
     assert len(rebuilt) == 1 and rebuilt.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
     assert rebuilt.iloc[0]["prior_take_profit_1"] == 107
 
+    # The raised stop after TP1 is part of the frozen execution plan. Losing it
+    # makes a later rebuild settle the same signal on a different date.
+    managed_signal = {
+        **sample_signal(),
+        "post_tp1_stop": 104,
+        "shadow_hard_blockers": ["manual safety block"],
+        "shadow_policy_allowed": "NO",
+        "hard_exit_pressure": "NO",
+        "confirmed_break": "NO",
+        "volatility_regime": "NORMAL",
+        "distance_from_ref_zone_atr": 0.5,
+    }
+    managed_bars = pd.DataFrame([
+        {"date": "2026-07-02", "open": 100, "high": 108, "low": 99.5, "close": 107, "volume": 1000},
+        {"date": "2026-07-03", "open": 105, "high": 106, "low": 103, "close": 104, "volume": 1000},
+        {"date": "2026-07-06", "open": 104, "high": 106, "low": 103, "close": 105, "volume": 1000},
+        {"date": "2026-07-07", "open": 105, "high": 107, "low": 104, "close": 106, "volume": 1000},
+        {"date": "2026-07-08", "open": 106, "high": 108, "low": 105, "close": 107, "volume": 1000},
+    ])
+    managed = scanner.build_incremental_signal_outcomes(
+        [managed_signal], {"TEST": managed_bars}, pd.DataFrame()
+    )
+    managed_rebuilt = scanner.rebuild_canonical_signal_outcomes(
+        managed, {"TEST": managed_bars}
+    )
+    assert managed.iloc[0]["prior_post_tp1_stop"] == 104
+    assert managed.iloc[0]["evaluation_run_date"] == "2026-07-03"
+    assert managed_rebuilt.iloc[0]["evaluation_run_date"] == "2026-07-03"
+    assert scanner.calibration_parity_report(
+        managed, managed_rebuilt, {"TEST": "2026-06-01"}
+    )["passed"] is True
+    frozen_fields = (
+        "prior_post_tp1_stop",
+        "prior_freshness_block",
+        "prior_shadow_hard_blockers",
+        "prior_shadow_policy_allowed",
+        "prior_hard_exit_pressure",
+        "prior_confirmed_break",
+        "prior_volatility_regime",
+        "prior_distance_from_ref_zone_atr",
+    )
+    managed_row = managed.iloc[0].to_dict()
+    typed = {
+        key: managed_row.get(key)
+        for key in ("signal_run_date", "evaluation_run_date", "ticker", "outcome_label")
+    }
+    persisted = {
+        **typed,
+        "payload": scanner.compact_payload(managed_row, typed, max_bytes=2048),
+    }
+    round_tripped = scanner.merge_payload_row(persisted)
+    assert all(round_tripped.get(key) == managed_row.get(key) for key in frozen_fields)
+
+    alias_signal = {**sample_signal(), "ticker": "BRK.B"}
+    alias_outcome = scanner.build_incremental_signal_outcomes(
+        [alias_signal], {"BRK-B": bars}, pd.DataFrame()
+    )
+    alias_rebuilt = scanner.rebuild_canonical_signal_outcomes(
+        alias_outcome, {"BRK-B": bars}
+    )
+    assert len(alias_outcome) == 1 and len(alias_rebuilt) == 1
+    assert scanner.calibration_parity_report(
+        alias_outcome, alias_rebuilt, {"BRK.B": "2026-06-01"}
+    )["passed"] is True
+
     # Rows read from Supabase include the publication date as run_date. It
     # must never replace the actual historical market session in the identity.
     persisted_history_signal = {
@@ -158,6 +223,7 @@ def audit_incremental_settlement() -> None:
         pd.concat([earliest, outcome], ignore_index=True), outcome, replay_starts
     )
     assert boundary_loss["passed"] is False and boundary_loss["missing_from_rebuild"] == 1
+    assert boundary_loss["sample_missing_from_rebuild"][0][0] == "OLD"
     preserved = scanner.preserve_failed_ticker_history(
         [{"ticker": "TEST", "date": "2026-07-02"}],
         {"TEST": [sample_signal()], "FAIL": [{**sample_signal(), "ticker": "FAIL"}]},
@@ -283,6 +349,15 @@ def audit_rolling_window_and_modes() -> None:
     monday = datetime(2026, 7, 27, 10, tzinfo=ZoneInfo("Australia/Melbourne"))
     assert scanner.resolve_refresh_mode("auto", saturday) == "weekly_rebuild"
     assert scanner.resolve_refresh_mode("auto", monday) == "daily"
+    compatible = {
+        "incremental_state_ready": True,
+        "incremental_state_version": scanner.INCREMENTAL_STATE_VERSION,
+        "learning_model_version": scanner.LEARNING_MODEL_VERSION,
+    }
+    assert scanner.compatible_incremental_metadata(compatible) == compatible
+    assert scanner.compatible_incremental_metadata(
+        {**compatible, "incremental_state_version": "incremental-state-v1"}
+    ) == {}
 
     with tempfile.TemporaryDirectory() as directory:
         history_path = Path(directory) / "history.html"
