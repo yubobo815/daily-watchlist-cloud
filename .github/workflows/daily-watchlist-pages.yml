@@ -25,13 +25,14 @@ on:
         default: false
         type: boolean
   schedule:
-    # Monday-Thursday US sessions use the incremental path. Friday's session
-    # performs the bounded 100-session rebuild and calibration parity gate.
+    # Publish a fresh daily report after every US weekday, including Friday.
+    # This path must remain independent of the slower weekly calibration.
     # Avoid the top-of-hour Actions scheduling peak; GitHub may otherwise
     # delay scheduled runs substantially under load.
-    - cron: "17 23 * * 1-4"
     - cron: "17 23 * * 5"
-    # One guarded retry after the Friday weekly rebuild has had time to finish.
+    # Run the bounded weekly rebuild and parity gate separately on Saturday.
+    - cron: "47 00 * * 6"
+    # One guarded retry after the Saturday weekly rebuild has time to finish.
     # It runs only when that primary scheduled rebuild failed.
     - cron: "47 04 * * 6"
 
@@ -102,6 +103,17 @@ jobs:
             exit 0
           fi
 
+          # Saturday's weekly calibration is intentionally separate from the
+          # Friday daily publication. A parity failure must not withhold a
+          # valid daily market report.
+          if [ "$EVENT_SCHEDULE" = "47 00 * * 6" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
+            echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+            echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Retry the Friday weekly rebuild only when the primary scheduled run
           # has failed. This repeats the same parity checks; it never bypasses
           # them or publishes a partially validated result.
@@ -131,11 +143,7 @@ jobs:
           echo "run=true" >> "$GITHUB_OUTPUT"
           echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
           echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT_SCHEDULE" = "17 23 * * 5" ]; then
-            echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
-          else
-            echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
-          fi
+          echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: steps.time_gate.outputs.run == 'true'
