@@ -380,6 +380,7 @@ def audit_rolling_window_and_modes() -> None:
     weekly_cron = 'cron: "47 03 * * 6"'
     retry_cron = 'cron: "47 07 * * 6"'
     assert all(cron in workflow for cron in (daily_cron, weekly_cron, retry_cron))
+    assert "run-name: Daily Watchlist Pages (${{ github.event.schedule" in workflow
     assert 'cron: "17 23 * * 1-4"' not in workflow
     assert 'cron: "17 23 * * 5"' not in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
@@ -398,11 +399,13 @@ def audit_rolling_window_and_modes() -> None:
     default_gate = workflow[default_gate_start:workflow.index("      - name: Set up Python", default_gate_start)]
     assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in weekly_gate
     assert 'echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"' in weekly_gate
+    assert 'echo "stored_ohlcv_arg=--stored-ohlcv-only" >> "$GITHUB_OUTPUT"' in weekly_gate
     assert "scripts/weekly_retry_gate.py" in retry_gate
     assert 'if [ "$retry_decision" != "retry" ]' in retry_gate
     assert 'echo "run=false" >> "$GITHUB_OUTPUT"' in retry_gate
     assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in retry_gate
     assert 'echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"' in retry_gate
+    assert 'echo "stored_ohlcv_arg=--stored-ohlcv-only" >> "$GITHUB_OUTPUT"' in retry_gate
     assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in default_gate
     assert 'echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"' in default_gate
     assert "github.run_id || 'publication'" in workflow
@@ -414,7 +417,8 @@ def audit_weekly_retry_selector() -> None:
         "event": "schedule",
         "status": "in_progress",
         "conclusion": None,
-        "created_at": "2026-08-29T07:47:00Z",
+        "created_at": "2026-08-29T13:21:14Z",
+        "display_title": "Daily Watchlist Pages (47 07 * * 6)",
     }
     daily = {
         "id": 100,
@@ -422,13 +426,15 @@ def audit_weekly_retry_selector() -> None:
         "status": "completed",
         "conclusion": "failure",
         "created_at": "2026-08-28T23:17:00Z",
+        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
     }
     delayed_same_day_daily = {
         "id": 101,
         "event": "schedule",
         "status": "completed",
-        "conclusion": "failure",
-        "created_at": "2026-08-29T00:17:00Z",
+        "conclusion": "success",
+        "created_at": "2026-08-29T04:09:04Z",
+        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
     }
 
     def decide(status: str, conclusion) -> str:
@@ -437,7 +443,8 @@ def audit_weekly_retry_selector() -> None:
             "event": "schedule",
             "status": status,
             "conclusion": conclusion,
-            "created_at": "2026-08-29T03:48:00Z",
+            "created_at": "2026-08-29T10:25:44Z",
+            "display_title": "Daily Watchlist Pages (47 03 * * 6)",
         }
         return retry_decision(
             {"workflow_runs": [current, daily, delayed_same_day_daily, primary]}, "200"
@@ -451,6 +458,27 @@ def audit_weekly_retry_selector() -> None:
     assert retry_decision(
         {"workflow_runs": [current, daily, delayed_same_day_daily]}, "200"
     )[0] == "retry"
+
+    # Before run-name tagging, choose the most recently started run. This is
+    # the exact delayed-schedule ordering from the 2026-08-29 incident.
+    legacy_primary = {
+        "id": 151,
+        "event": "schedule",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-08-29T10:25:44Z",
+    }
+    legacy_daily = {
+        key: value
+        for key, value in delayed_same_day_daily.items()
+        if key != "display_title"
+    }
+    legacy_current = {key: value for key, value in current.items() if key != "display_title"}
+    decision, reason = retry_decision(
+        {"workflow_runs": [legacy_current, legacy_daily, legacy_primary]}, "200"
+    )
+    assert decision == "retry"
+    assert "151" in reason
 
 
 def audit_artifact_integrity() -> None:

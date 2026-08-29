@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Decide whether Saturday's weekly rebuild retry should run.
 
-The GitHub workflow-runs API does not expose the cron expression that created a
-scheduled run.  The retry therefore identifies the primary rebuild by the
-workflow event and the window from Saturday's 03:47 UTC primary schedule to
-the current retry run. This deliberately excludes Friday's daily publication.
+The workflow's dynamic run name includes the triggering cron expression, so a
+delayed Friday daily run cannot be mistaken for Saturday's weekly primary. For
+older untagged runs, use the latest scheduled run in the primary window; GitHub
+Actions can delay a nominally earlier cron for many hours.
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ RETRY_CONCLUSIONS = {
 }
 ACTIVE_STATUSES = {"queued", "in_progress"}
 PRIMARY_SCHEDULE_UTC = time(3, 47)
+PRIMARY_SCHEDULE_MARKER = "47 03 * * 6"
+RETRY_SCHEDULE_MARKER = "47 07 * * 6"
 
 
 def parse_github_time(value: Any) -> datetime | None:
@@ -67,7 +69,17 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
     if not candidates:
         return "retry", "same-day weekly primary is missing; running recovery"
 
-    _, primary = min(candidates, key=lambda item: item[0])
+    tagged_candidates = [
+        item
+        for item in candidates
+        if PRIMARY_SCHEDULE_MARKER in str(item[1].get("display_title") or "")
+    ]
+    current_is_tagged = RETRY_SCHEDULE_MARKER in str(current.get("display_title") or "")
+    if current_is_tagged and not tagged_candidates:
+        return "retry", "same-day tagged weekly primary is missing; running recovery"
+    # Tagged run names are authoritative. The latest-run fallback is only for
+    # deployments created before run-name included the cron expression.
+    _, primary = max(tagged_candidates or candidates, key=lambda item: item[0])
     status = str(primary.get("status") or "unknown")
     conclusion = str(primary.get("conclusion") or "unknown")
     primary_id = primary.get("id", "unknown")

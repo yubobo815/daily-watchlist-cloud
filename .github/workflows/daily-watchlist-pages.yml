@@ -1,4 +1,5 @@
 name: Daily Watchlist Pages
+run-name: Daily Watchlist Pages (${{ github.event.schedule || inputs.refresh_mode || github.event_name }})
 
 on:
   push:
@@ -115,7 +116,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
             echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
-            echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
+            echo "stored_ohlcv_arg=--stored-ohlcv-only" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -139,7 +140,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
             echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
-            echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
+            echo "stored_ohlcv_arg=--stored-ohlcv-only" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
