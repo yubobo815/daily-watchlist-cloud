@@ -113,6 +113,29 @@ def audit_incremental_settlement() -> None:
     assert len(rebuilt) == 1 and rebuilt.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
     assert rebuilt.iloc[0]["prior_take_profit_1"] == 107
 
+    # A weekly replay can regenerate a different advisory action/operator state
+    # for an old future bar. Frozen-plan calibration must remain an OHLC-only
+    # experiment, or settled identities disappear and appear across parity.
+    drifted_replay = [
+        {
+            **bar,
+            "date": str(pd.Timestamp(bar["date"]).date()),
+            "action": "EXIT PRESSURE",
+            "operator_state": "DISTRIBUTION",
+        }
+        for bar in bars.to_dict(orient="records")
+    ]
+    drifted_rebuild = scanner.rebuild_canonical_signal_outcomes(
+        outcome,
+        {"TEST": bars},
+        drifted_replay,
+    )
+    assert scanner.calibration_parity_report(
+        outcome,
+        drifted_rebuild,
+        {"TEST": "2026-06-01"},
+    )["passed"] is True
+
     # The raised stop after TP1 is part of the frozen execution plan. Losing it
     # makes a later rebuild settle the same signal on a different date.
     managed_signal = {
