@@ -3605,9 +3605,17 @@ def build_incremental_signal_outcomes(
     replay_rows: Optional[list[dict]] = None,
 ) -> pd.DataFrame:
     """Settle only canonical signals whose five-session path is now available."""
+    existing_rows = [
+        merge_payload_row(row)
+        for row in (existing_outcomes.to_dict(orient="records") if not existing_outcomes.empty else [])
+    ]
     existing_ids = {
         signal_outcome_identity(row)
-        for row in (existing_outcomes.to_dict(orient="records") if not existing_outcomes.empty else [])
+        for row in existing_rows
+        # A four-session outcome is intentionally PENDING. It must remain
+        # eligible for settlement when the fifth canonical market bar arrives.
+        if str(row.get("path_status") or "").upper() != "PENDING"
+        and str(row.get("outcome_label") or "").upper() != "PENDING"
     }
     candidates = behavior_history_by_ticker(behavior_rows)
     replay_by_ticker = behavior_history_by_ticker(replay_rows or behavior_rows)

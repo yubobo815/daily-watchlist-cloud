@@ -104,6 +104,40 @@ def audit_incremental_settlement() -> None:
     assert outcome.iloc[0]["signal_run_date"] == "2026-07-01"
     assert outcome.iloc[0]["evaluation_run_date"] == "2026-07-06", "learning must continue from TP1 through the frozen further target"
     assert scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, outcome).empty
+
+    # A signal stored after only four future sessions is PENDING, not final.
+    # When the fifth session arrives, incremental settlement must replace that
+    # identity instead of skipping it forever and diverging from weekly replay.
+    boundary_signal = {**sample_signal(), "ticker": "GS", "date": "2026-08-25"}
+    boundary_bars = pd.DataFrame([
+        {"date": day, "open": 102, "high": 106, "low": 100, "close": 104, "volume": 1000}
+        for day in ("2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01")
+    ])
+    pending = scanner.score_signal_horizon(
+        boundary_signal,
+        boundary_bars.iloc[:4].to_dict(orient="records"),
+    )
+    assert pending["path_status"] == "PENDING"
+    resumed = scanner.build_incremental_signal_outcomes(
+        [boundary_signal],
+        {"GS": boundary_bars},
+        pd.DataFrame([pending]),
+    )
+    assert len(resumed) == 1 and resumed.iloc[0]["path_status"] == "SETTLED"
+    assert resumed.iloc[0]["evaluation_run_date"] == "2026-09-01"
+    assert scanner.signal_outcome_identity(resumed.iloc[0].to_dict()) == scanner.signal_outcome_identity(pending)
+    resumed_canonical = scanner.combine_signal_outcomes(pd.DataFrame([pending]), resumed)
+    resumed_rebuild = scanner.rebuild_canonical_signal_outcomes(
+        resumed_canonical,
+        {"GS": boundary_bars},
+    )
+    resumed_parity = scanner.calibration_parity_report(
+        resumed_canonical,
+        resumed_rebuild,
+        {"GS": "2026-08-25"},
+    )
+    assert resumed_parity["passed"] is True
+    assert resumed_parity["missing_from_incremental"] == 0
     frozen = scanner.freeze_final_signal_history(
         [{**sample_signal(), "action": "BUY CANDIDATE"}],
         [{**sample_signal(), "action": "SETUP FORMING", "prediction_state": "FINAL"}],
