@@ -3612,10 +3612,9 @@ def build_incremental_signal_outcomes(
     existing_ids = {
         signal_outcome_identity(row)
         for row in existing_rows
-        # A four-session outcome is intentionally PENDING. It must remain
-        # eligible for settlement when the fifth canonical market bar arrives.
-        if str(row.get("path_status") or "").upper() != "PENDING"
-        and str(row.get("outcome_label") or "").upper() != "PENDING"
+        # Only a settled path is immutable. NOT_FILLED, UNUSABLE, and PENDING
+        # can change when canonical OHLCV is corrected or backfilled.
+        if str(row.get("path_status") or "").upper() == "SETTLED"
     }
     candidates = behavior_history_by_ticker(behavior_rows)
     replay_by_ticker = behavior_history_by_ticker(replay_rows or behavior_rows)
@@ -3660,23 +3659,20 @@ def build_incremental_signal_outcomes(
             settled.append(outcome)
             existing_ids.add(identity)
 
-    # A pending identity can outlive the bounded behavior-history window that
-    # originally created it. Re-score those frozen plans directly from their
-    # persisted outcome payload so late/backfilled OHLCV can still settle them.
-    pending_rows = [
+    # A non-settled identity can outlive the bounded behavior-history window
+    # that originally created it. Re-score those frozen plans directly from
+    # their persisted payload so corrected/backfilled OHLCV can settle them.
+    unsettled_rows = [
         row
         for row in existing_rows
         if is_current_learning_outcome(row)
-        and (
-            str(row.get("path_status") or "").upper() == "PENDING"
-            or str(row.get("outcome_label") or "").upper() == "PENDING"
-        )
+        and str(row.get("path_status") or "").upper() != "SETTLED"
         and signal_outcome_identity(row) not in existing_ids
     ]
-    pending_reconciled = rebuild_canonical_signal_outcomes(
-        pd.DataFrame(pending_rows), raw_frames, replay_rows or behavior_rows
+    unsettled_reconciled = rebuild_canonical_signal_outcomes(
+        pd.DataFrame(unsettled_rows), raw_frames, replay_rows or behavior_rows
     )
-    return combine_signal_outcomes(pd.DataFrame(settled), pending_reconciled)
+    return combine_signal_outcomes(pd.DataFrame(settled), unsettled_reconciled)
 
 
 def raw_frame_for_ticker(

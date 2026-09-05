@@ -137,6 +137,23 @@ def audit_incremental_settlement() -> None:
     assert scanner.signal_outcome_identity(
         resumed_without_history.iloc[0].to_dict()
     ) == scanner.signal_outcome_identity(pending)
+    no_fill_bars = boundary_bars.copy()
+    no_fill_bars[["open", "high", "low", "close"]] = [120, 122, 118, 121]
+    not_filled = scanner.score_signal_horizon(
+        boundary_signal,
+        no_fill_bars.to_dict(orient="records"),
+    )
+    assert not_filled["path_status"] == "NOT_FILLED"
+    corrected_without_history = scanner.build_incremental_signal_outcomes(
+        [],
+        {"GS": boundary_bars},
+        pd.DataFrame([not_filled]),
+    )
+    assert len(corrected_without_history) == 1
+    assert corrected_without_history.iloc[0]["path_status"] == "SETTLED"
+    assert scanner.signal_outcome_identity(
+        corrected_without_history.iloc[0].to_dict()
+    ) == scanner.signal_outcome_identity(not_filled)
     resumed_canonical = scanner.combine_signal_outcomes(pd.DataFrame([pending]), resumed)
     resumed_rebuild = scanner.rebuild_canonical_signal_outcomes(
         resumed_canonical,
