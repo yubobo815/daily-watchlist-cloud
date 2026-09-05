@@ -31,6 +31,9 @@ on:
     # Avoid the top-of-hour Actions scheduling peak; GitHub may otherwise
     # delay scheduled runs substantially under load.
     - cron: "17 23 * * 1-5"
+    # One guarded retry for a failed or missing weekday publication. Friday's
+    # retry runs on Saturday UTC, before the independent weekly rebuild.
+    - cron: "17 02 * * 2-6"
     # Run the bounded weekly rebuild and parity gate separately on Saturday.
     - cron: "47 03 * * 6"
     # One guarded retry after the Saturday weekly rebuild has time to finish.
@@ -106,6 +109,29 @@ jobs:
             else
               echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
             fi
+            exit 0
+          fi
+
+          # Retry the preceding tagged daily run once. The cron marker, not
+          # the delayed runner start date, identifies Friday's publication.
+          if [ "$EVENT_SCHEDULE" = "17 02 * * 2-6" ]; then
+            retry_decision="$(
+              curl --fail --silent --show-error \
+                --header "Authorization: Bearer $GITHUB_TOKEN" \
+                --header "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/daily-watchlist-pages.yml/runs?event=schedule&per_page=25" \
+                | python3 scripts/daily_retry_gate.py --current-run-id "$GITHUB_RUN_ID"
+            )"
+            if [ "$retry_decision" != "retry" ]; then
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "Daily retry skipped by preceding-primary selector."
+              exit 0
+            fi
+            echo "Retrying failed or missing weekday daily publication."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"
+            echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
+            echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import daily_watchlist_overview as scanner
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from weekly_retry_gate import retry_decision
+from daily_retry_gate import retry_decision as daily_retry_decision
 
 
 def frame(start: str, periods: int, base: float = 100.0) -> pd.DataFrame:
@@ -400,9 +401,10 @@ def audit_rolling_window_and_modes() -> None:
     assert "position_value_1k_risk = required_position_value" in scanner_source
     assert "actual_risk_dollars = suggested_position_value" in scanner_source
     daily_cron = 'cron: "17 23 * * 1-5"'
+    daily_retry_cron = 'cron: "17 02 * * 2-6"'
     weekly_cron = 'cron: "47 03 * * 6"'
     retry_cron = 'cron: "47 07 * * 6"'
-    assert all(cron in workflow for cron in (daily_cron, weekly_cron, retry_cron))
+    assert all(cron in workflow for cron in (daily_cron, daily_retry_cron, weekly_cron, retry_cron))
     assert "run-name: Daily Watchlist Pages (${{ github.event.schedule" in workflow
     assert 'cron: "17 23 * * 1-4"' not in workflow
     assert 'cron: "17 23 * * 5"' not in workflow
@@ -414,12 +416,17 @@ def audit_rolling_window_and_modes() -> None:
     assert "build-publication:" in workflow and "deploy-pages:" in workflow and "verify-and-activate:" in workflow
     assert "restore-pages-after-failed-activation:" in workflow
     assert 'EVENT_SCHEDULE: ${{ github.event.schedule }}' in workflow
+    daily_retry_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "17 02 * * 2-6" ]')
     weekly_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "47 03 * * 6" ]')
     retry_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "47 07 * * 6" ]')
     default_gate_start = workflow.index("# Scheduled jobs can start well after", retry_gate_start)
     weekly_gate = workflow[weekly_gate_start:retry_gate_start]
     retry_gate = workflow[retry_gate_start:default_gate_start]
     default_gate = workflow[default_gate_start:workflow.index("      - name: Set up Python", default_gate_start)]
+    daily_retry_gate = workflow[daily_retry_gate_start:weekly_gate_start]
+    assert "scripts/daily_retry_gate.py" in daily_retry_gate
+    assert 'echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"' in daily_retry_gate
+    assert 'echo "stored_ohlcv_arg=" >> "$GITHUB_OUTPUT"' in daily_retry_gate
     assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in weekly_gate
     assert 'echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"' in weekly_gate
     assert 'echo "stored_ohlcv_arg=--stored-ohlcv-only" >> "$GITHUB_OUTPUT"' in weekly_gate
@@ -432,6 +439,68 @@ def audit_rolling_window_and_modes() -> None:
     assert 'echo "run=true" >> "$GITHUB_OUTPUT"' in default_gate
     assert 'echo "refresh_mode=daily" >> "$GITHUB_OUTPUT"' in default_gate
     assert "github.run_id || 'publication'" in workflow
+
+
+def audit_daily_retry_selector() -> None:
+    current = {
+        "id": 300,
+        "event": "schedule",
+        "status": "in_progress",
+        "conclusion": None,
+        "created_at": "2026-09-05T02:17:00Z",
+        "display_title": "Daily Watchlist Pages (17 02 * * 2-6)",
+    }
+    weekly = {
+        "id": 250,
+        "event": "schedule",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-09-05T01:30:00Z",
+        "display_title": "Daily Watchlist Pages (47 03 * * 6)",
+    }
+
+    def decide(status: str, conclusion) -> str:
+        delayed_friday_primary = {
+            "id": 275,
+            "event": "schedule",
+            "status": status,
+            "conclusion": conclusion,
+            "created_at": "2026-09-05T00:56:14Z",
+            "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+        }
+        return daily_retry_decision(
+            {"workflow_runs": [current, weekly, delayed_friday_primary]}, "300"
+        )[0]
+
+    assert decide("completed", "success") == "skip"
+    assert decide("queued", None) == "skip"
+    assert decide("in_progress", None) == "skip"
+    for conclusion in ("failure", "cancelled", "timed_out", "startup_failure", "stale", "action_required"):
+        assert decide("completed", conclusion) == "retry"
+    assert daily_retry_decision({"workflow_runs": [current, weekly]}, "300")[0] == "retry"
+
+    prior_day = {
+        "id": 200,
+        "event": "schedule",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-09-04T02:00:00Z",
+        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+    }
+    assert daily_retry_decision({"workflow_runs": [current, weekly, prior_day]}, "300")[0] == "retry"
+
+    delayed_retry = {**current, "id": 301, "created_at": "2026-09-05T20:17:00Z"}
+    successful_primary = {
+        "id": 276,
+        "event": "schedule",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-09-05T00:56:14Z",
+        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+    }
+    assert daily_retry_decision(
+        {"workflow_runs": [delayed_retry, weekly, successful_primary]}, "301"
+    )[0] == "skip"
 
 
 def audit_weekly_retry_selector() -> None:
@@ -564,16 +633,74 @@ def audit_provider_circuit() -> None:
     assert circuit.is_open("polygon")
 
 
+def audit_market_data_freshness_contract() -> None:
+    after_friday_close = datetime(2026, 9, 5, 0, 56, tzinfo=ZoneInfo("UTC"))
+    assert scanner.nyse_session_age("2026-09-04", after_friday_close) == 0
+    assert scanner.nyse_session_age("2026-09-03", after_friday_close) == 1
+    original_age = scanner.nyse_session_age
+    original_providers = scanner.configured_data_providers
+    original_fetch = scanner.fetch_live_chart_from_provider
+    original_cache_path = scanner.cache_path_for
+    scanner.nyse_session_age = lambda value: {
+        "2026-09-04": 0,
+        "2026-09-03": 1,
+    }.get(str(value))
+    try:
+        fresh = pd.DataFrame({"date": ["2026-09-04"], "freshness_block": ["NO"]})
+        stale = pd.DataFrame({"date": ["2026-09-03"], "freshness_block": ["YES"]})
+        assert scanner.should_sync_supabase_snapshot(fresh, "2026-09-05")[0]
+        allowed, reason = scanner.should_sync_supabase_snapshot(stale, "2026-09-05")
+        assert not allowed and "1 NYSE session(s) old" in reason
+        invalid = pd.DataFrame({"date": ["invalid"], "freshness_block": ["YES"]})
+        assert not scanner.should_sync_supabase_snapshot(invalid, "2026-09-05")[0]
+        all_blocked = pd.DataFrame({"date": ["2026-09-04"], "freshness_block": ["YES"]})
+        assert not scanner.should_sync_supabase_snapshot(all_blocked, "2026-09-05")[0]
+
+        scanner.configured_data_providers = lambda: ["polygon", "yahoo"]
+        provider_calls = []
+
+        def fetch(provider, _ticker, years=1):
+            del years
+            provider_calls.append(provider)
+            date_value = "2026-09-03" if provider == "polygon" else "2026-09-04"
+            return pd.DataFrame({"date": [date_value]})
+
+        scanner.fetch_live_chart_from_provider = fetch
+        circuit = scanner.MarketDataProviderCircuit()
+        live_ok, message = scanner.check_live_data_access(circuit)
+        assert live_ok and "yahoo" in message
+        assert circuit.is_open("polygon")
+
+        with tempfile.TemporaryDirectory() as directory:
+            scanner.cache_path_for = lambda *_args, **_kwargs: Path(directory) / "unit.csv"
+            provider_calls.clear()
+            scanner.fetch_chart("UNIT", years=1, refresh=True, provider_circuit=circuit)
+            assert provider_calls == ["yahoo"]
+
+        scanner.fetch_live_chart_from_provider = lambda *_args, **_kwargs: pd.DataFrame(
+            {"date": ["2026-09-03"]}
+        )
+        all_stale_ok, all_stale_message = scanner.check_live_data_access(scanner.MarketDataProviderCircuit())
+        assert not all_stale_ok and "stale data" in all_stale_message
+    finally:
+        scanner.nyse_session_age = original_age
+        scanner.configured_data_providers = original_providers
+        scanner.fetch_live_chart_from_provider = original_fetch
+        scanner.cache_path_for = original_cache_path
+
+
 def main() -> None:
     audit_ohlcv_modes()
     audit_incremental_settlement()
     audit_supabase_history_pagination()
     audit_daily_history_inherits_full_publication()
     audit_rolling_window_and_modes()
+    audit_daily_retry_selector()
     audit_weekly_retry_selector()
     audit_artifact_integrity()
     audit_provider_circuit()
-    print({"incrementalPipelineUAT": "ok", "cases": 8})
+    audit_market_data_freshness_contract()
+    print({"incrementalPipelineUAT": "ok", "cases": 10})
 
 
 if __name__ == "__main__":

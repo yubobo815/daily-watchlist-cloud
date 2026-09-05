@@ -668,6 +668,13 @@ class MarketDataProviderCircuit:
     def is_open(self, provider: str) -> bool:
         return provider in self.open_providers
 
+    def open_for_run(self, provider: str, reason: str) -> None:
+        """Skip a provider after a market-wide preflight proves it unusable."""
+        if provider in self.open_providers:
+            return
+        self.open_providers.add(provider)
+        print(f"Provider circuit opened for {provider}: {reason}.")
+
     def record_failure(self, provider: str, exc: Exception) -> None:
         if not provider_failure_is_systemic(exc):
             return
@@ -721,14 +728,24 @@ def cached_chart(ticker: str, years: int = 3) -> pd.DataFrame:
     return attach_data_provider(pd.read_csv(cache_path, parse_dates=["date"]), "cache", "CACHE_READ")
 
 
-def check_live_data_access() -> tuple[bool, str]:
+def check_live_data_access(
+    provider_circuit: Optional[MarketDataProviderCircuit] = None,
+) -> tuple[bool, str]:
     errors: list[str] = []
     for provider in configured_data_providers():
         try:
             df = fetch_live_chart_from_provider(provider, "AAPL", years=1)
             latest = str(pd.to_datetime(df["date"]).dt.date.max())
+            try:
+                reject_stale_live_frame(df, "AAPL", provider)
+            except RuntimeError as exc:
+                if provider_circuit:
+                    provider_circuit.open_for_run(provider, str(exc))
+                raise exc
             return True, f"Live {provider} access available; AAPL latest bar {latest}."
         except Exception as exc:
+            if provider_circuit:
+                provider_circuit.record_failure(provider, exc)
             errors.append(f"{provider}: {exc}")
     return False, "Live market data unavailable from configured providers: " + " | ".join(errors)
 
@@ -8301,10 +8318,11 @@ def main() -> None:
     today = local_run_date()
 
     tickers = read_watchlist(Path(args.watchlist))
+    provider_circuit = MarketDataProviderCircuit()
     live_access_ok = True
     live_access_message = "Live market data access available."
     if args.refresh:
-        live_access_ok, live_access_message = check_live_data_access()
+        live_access_ok, live_access_message = check_live_data_access(provider_circuit)
 
     rows = []
     history_rows = []
@@ -8338,7 +8356,6 @@ def main() -> None:
     effective_mode = "weekly_rebuild" if needs_bootstrap else refresh_mode
     if needs_bootstrap:
         print("Explicit calibration bootstrap enabled; rebuilding the bounded learning state.")
-    provider_circuit = MarketDataProviderCircuit()
     benchmark_frames: dict[str, pd.DataFrame] = {}
     for benchmark in ("SPY", "QQQ", "SMH"):
         try:
@@ -8638,6 +8655,11 @@ def main() -> None:
         run_status = "degraded"
     if failures and not rows:
         run_status = "failed"
+    supabase_sync_required = not args.no_supabase
+    if supabase_sync_required:
+        supabase_sync_ok, supabase_sync_reason = should_sync_supabase_snapshot(report, today)
+    else:
+        supabase_sync_ok, supabase_sync_reason = False, "Supabase sync disabled by --no-supabase."
     run_metadata = {
         "publication_id": publication_id,
         "run_date": today,
@@ -8691,6 +8713,12 @@ def main() -> None:
             "directional_model_validated_personalities": directional_metrics.get("validated_personalities", []),
             "directional_model_validated": directional_metrics.get("passed", False),
             "max_execution_data_age_days": MAX_EXECUTION_DATA_AGE_DAYS,
+            "supabase_sync_required": supabase_sync_required,
+            "supabase_sync_eligible": supabase_sync_ok,
+            "supabase_sync_state": (
+                "eligible" if supabase_sync_ok else "blocked" if supabase_sync_required else "disabled"
+            ),
+            "supabase_sync_reason": supabase_sync_reason,
         },
     }
 
@@ -8728,9 +8756,8 @@ def main() -> None:
     elif Path("daily_watchlist_overview_stale_cache.csv").exists():
         Path("daily_watchlist_overview_stale_cache.csv").unlink()
 
-    if not args.no_supabase:
-        sync_ok, sync_reason = should_sync_supabase_snapshot(report, today)
-        if sync_ok:
+    if supabase_sync_required:
+        if supabase_sync_ok:
             sync_supabase(
                 report,
                 history,
@@ -8741,7 +8768,9 @@ def main() -> None:
                 learning_stats=learning_stats,
             )
         else:
-            print(f"Supabase sync skipped: {sync_reason}")
+            message = f"Supabase publication blocked before staging: {supabase_sync_reason}"
+            print(message)
+            raise SystemExit(1)
 
     columns = [
         "ticker", "action", "setup", "adaptive_mode", "psychology", "score", "close", "day_change_pct",
