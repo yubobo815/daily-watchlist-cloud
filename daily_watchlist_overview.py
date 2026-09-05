@@ -8321,8 +8321,12 @@ def main() -> None:
     provider_circuit = MarketDataProviderCircuit()
     live_access_ok = True
     live_access_message = "Live market data access available."
-    if args.refresh:
+    live_preflight_required = args.refresh and not args.cache_only and not args.stored_ohlcv_only
+    if live_preflight_required:
         live_access_ok, live_access_message = check_live_data_access(provider_circuit)
+        if not live_access_ok:
+            print(f"Market data freshness preflight failed: {live_access_message}")
+            raise SystemExit(1)
 
     rows = []
     history_rows = []

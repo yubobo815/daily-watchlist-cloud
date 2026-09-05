@@ -512,6 +512,7 @@ function auditAtomicPublicationContract() {
   assert(scanner.includes('final_metadata["status"] = "pending_audit"'), "scanner must keep a synced run hidden until database audit passes");
   assert(scanner.includes('"eligible" if supabase_sync_ok else "blocked" if supabase_sync_required else "disabled"'), "scanner metadata must expose a machine-readable pre-staging sync decision");
   assert(scanner.includes("Supabase publication blocked before staging") && scanner.includes("raise SystemExit(1)"), "a stale pre-staging decision must fail the run before health or Pages publication");
+  assert(scanner.includes("Market data freshness preflight failed") && scanner.includes("not args.stored_ohlcv_only"), "daily live refresh must fail early when every provider is stale without blocking stored weekly replay");
   assert(workflow.includes("scripts/daily_retry_gate.py") && workflow.includes('cron: "17 02 * * 2-6"'), "failed daily publications must receive one tagged guarded retry");
   assert(workflow.indexOf("Audit Supabase learning health") < workflow.indexOf("Enforce staged database ceiling"), "database health audit must precede staged capacity enforcement");
   assert(workflow.indexOf("Enforce staged database ceiling") < workflow.indexOf("Deploy immutable Pages artifact"), "an oversized staged publication must roll back before deployment");
