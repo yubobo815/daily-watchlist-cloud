@@ -3659,7 +3659,24 @@ def build_incremental_signal_outcomes(
             outcome = score_signal_horizon(prior, future.to_dict(orient="records"))
             settled.append(outcome)
             existing_ids.add(identity)
-    return pd.DataFrame(settled)
+
+    # A pending identity can outlive the bounded behavior-history window that
+    # originally created it. Re-score those frozen plans directly from their
+    # persisted outcome payload so late/backfilled OHLCV can still settle them.
+    pending_rows = [
+        row
+        for row in existing_rows
+        if is_current_learning_outcome(row)
+        and (
+            str(row.get("path_status") or "").upper() == "PENDING"
+            or str(row.get("outcome_label") or "").upper() == "PENDING"
+        )
+        and signal_outcome_identity(row) not in existing_ids
+    ]
+    pending_reconciled = rebuild_canonical_signal_outcomes(
+        pd.DataFrame(pending_rows), raw_frames, replay_rows or behavior_rows
+    )
+    return combine_signal_outcomes(pd.DataFrame(settled), pending_reconciled)
 
 
 def raw_frame_for_ticker(

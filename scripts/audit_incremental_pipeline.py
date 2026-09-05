@@ -126,6 +126,17 @@ def audit_incremental_settlement() -> None:
     assert len(resumed) == 1 and resumed.iloc[0]["path_status"] == "SETTLED"
     assert resumed.iloc[0]["evaluation_run_date"] == "2026-09-01"
     assert scanner.signal_outcome_identity(resumed.iloc[0].to_dict()) == scanner.signal_outcome_identity(pending)
+    resumed_without_history = scanner.build_incremental_signal_outcomes(
+        [],
+        {"GS": boundary_bars},
+        pd.DataFrame([pending]),
+    )
+    assert len(resumed_without_history) == 1
+    assert resumed_without_history.iloc[0]["path_status"] == "SETTLED"
+    assert resumed_without_history.iloc[0]["evaluation_run_date"] == "2026-09-01"
+    assert scanner.signal_outcome_identity(
+        resumed_without_history.iloc[0].to_dict()
+    ) == scanner.signal_outcome_identity(pending)
     resumed_canonical = scanner.combine_signal_outcomes(pd.DataFrame([pending]), resumed)
     resumed_rebuild = scanner.rebuild_canonical_signal_outcomes(
         resumed_canonical,
