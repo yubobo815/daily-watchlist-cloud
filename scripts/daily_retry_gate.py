@@ -2,7 +2,7 @@
 """Run one daily recovery only when the preceding scheduled daily refresh failed.
 
 The workflow run name contains the triggering cron expression. That marker is
-authoritative even when GitHub starts Friday's daily refresh on Saturday UTC.
+authoritative even when GitHub starts a schedule hours late or after midnight.
 Weekly runs and untagged scheduled runs are deliberately ignored.
 """
 
@@ -17,9 +17,9 @@ from typing import Any
 from weekly_retry_gate import ACTIVE_STATUSES, RETRY_CONCLUSIONS, parse_github_time
 
 
-PRIMARY_SCHEDULE_MARKER = "17 23 * * 1-5"
-RETRY_SCHEDULE_MARKER = "17 02 * * 2-6"
-PRIMARY_SCHEDULE_UTC = time(23, 17)
+PRIMARY_SCHEDULE_MARKER = "17 07 * * 2-6"
+RETRY_SCHEDULE_MARKER = "17 10 * * 2-6"
+PRIMARY_SCHEDULE_UTC = time(7, 17)
 
 
 def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, str]:
@@ -35,12 +35,14 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
         raise ValueError("current workflow run has no valid created_at")
     if RETRY_SCHEDULE_MARKER not in str(current.get("display_title") or ""):
         raise ValueError("daily retry gate must run from the tagged daily retry schedule")
-    if current_created.weekday() not in {1, 2, 3, 4, 5}:
-        raise ValueError("daily retry gate must run Tuesday through Saturday UTC")
+    if current_created.weekday() not in {1, 2, 3, 4, 5, 6}:
+        raise ValueError("daily retry gate must run Tuesday through Sunday UTC")
 
-    primary_date = current_created.date() - timedelta(days=1)
+    primary_date = current_created.date()
+    if current_created.time() < PRIMARY_SCHEDULE_UTC:
+        primary_date -= timedelta(days=1)
     window_start = datetime.combine(primary_date, PRIMARY_SCHEDULE_UTC, tzinfo=timezone.utc)
-    next_primary_start = datetime.combine(current_created.date(), PRIMARY_SCHEDULE_UTC, tzinfo=timezone.utc)
+    next_primary_start = window_start + timedelta(days=1)
     window_end = min(current_created, next_primary_start)
     candidates = []
     for run in runs:

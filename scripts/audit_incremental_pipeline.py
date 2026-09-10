@@ -462,14 +462,14 @@ def audit_rolling_window_and_modes() -> None:
     assert "if previous_incremental_metadata and not needs_bootstrap:" in scanner_source
     assert "position_value_1k_risk = required_position_value" in scanner_source
     assert "actual_risk_dollars = suggested_position_value" in scanner_source
-    daily_cron = 'cron: "17 23 * * 1-5"'
-    daily_retry_cron = 'cron: "17 02 * * 2-6"'
+    daily_cron = 'cron: "17 07 * * 2-6"'
+    daily_retry_cron = 'cron: "17 10 * * 2-6"'
     weekly_cron = 'cron: "47 03 * * 6"'
     retry_cron = 'cron: "47 07 * * 6"'
     assert all(cron in workflow for cron in (daily_cron, daily_retry_cron, weekly_cron, retry_cron))
     assert "run-name: Daily Watchlist Pages (${{ github.event.schedule" in workflow
-    assert 'cron: "17 23 * * 1-4"' not in workflow
-    assert 'cron: "17 23 * * 5"' not in workflow
+    assert 'cron: "17 23 * * 1-5"' not in workflow
+    assert 'cron: "17 02 * * 2-6"' not in workflow
     assert '--refresh-mode "${{ steps.time_gate.outputs.refresh_mode }}"' in workflow
     assert '${{ steps.time_gate.outputs.stored_ohlcv_arg }}' in workflow
     assert "parity must never be bypassed implicitly" in scanner_source
@@ -478,7 +478,7 @@ def audit_rolling_window_and_modes() -> None:
     assert "build-publication:" in workflow and "deploy-pages:" in workflow and "verify-and-activate:" in workflow
     assert "restore-pages-after-failed-activation:" in workflow
     assert 'EVENT_SCHEDULE: ${{ github.event.schedule }}' in workflow
-    daily_retry_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "17 02 * * 2-6" ]')
+    daily_retry_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "17 10 * * 2-6" ]')
     weekly_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "47 03 * * 6" ]')
     retry_gate_start = workflow.index('if [ "$EVENT_SCHEDULE" = "47 07 * * 6" ]')
     default_gate_start = workflow.index("# Scheduled jobs can start well after", retry_gate_start)
@@ -509,8 +509,8 @@ def audit_daily_retry_selector() -> None:
         "event": "schedule",
         "status": "in_progress",
         "conclusion": None,
-        "created_at": "2026-09-05T02:17:00Z",
-        "display_title": "Daily Watchlist Pages (17 02 * * 2-6)",
+        "created_at": "2026-09-05T10:17:00Z",
+        "display_title": "Daily Watchlist Pages (17 10 * * 2-6)",
     }
     weekly = {
         "id": 250,
@@ -522,16 +522,16 @@ def audit_daily_retry_selector() -> None:
     }
 
     def decide(status: str, conclusion) -> str:
-        delayed_friday_primary = {
+        daily_primary = {
             "id": 275,
             "event": "schedule",
             "status": status,
             "conclusion": conclusion,
-            "created_at": "2026-09-05T00:56:14Z",
-            "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+            "created_at": "2026-09-05T07:22:14Z",
+            "display_title": "Daily Watchlist Pages (17 07 * * 2-6)",
         }
         return daily_retry_decision(
-            {"workflow_runs": [current, weekly, delayed_friday_primary]}, "300"
+            {"workflow_runs": [current, weekly, daily_primary]}, "300"
         )[0]
 
     assert decide("completed", "success") == "skip"
@@ -546,8 +546,8 @@ def audit_daily_retry_selector() -> None:
         "event": "schedule",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-09-04T02:00:00Z",
-        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+        "created_at": "2026-09-04T07:20:00Z",
+        "display_title": "Daily Watchlist Pages (17 07 * * 2-6)",
     }
     assert daily_retry_decision({"workflow_runs": [current, weekly, prior_day]}, "300")[0] == "retry"
 
@@ -557,11 +557,20 @@ def audit_daily_retry_selector() -> None:
         "event": "schedule",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-09-05T00:56:14Z",
-        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+        "created_at": "2026-09-05T07:22:14Z",
+        "display_title": "Daily Watchlist Pages (17 07 * * 2-6)",
     }
     assert daily_retry_decision(
         {"workflow_runs": [delayed_retry, weekly, successful_primary]}, "301"
+    )[0] == "skip"
+
+    after_midnight_retry = {
+        **current,
+        "id": 302,
+        "created_at": "2026-09-06T01:17:00Z",
+    }
+    assert daily_retry_decision(
+        {"workflow_runs": [after_midnight_retry, weekly, successful_primary]}, "302"
     )[0] == "skip"
 
 
@@ -579,16 +588,16 @@ def audit_weekly_retry_selector() -> None:
         "event": "schedule",
         "status": "completed",
         "conclusion": "failure",
-        "created_at": "2026-08-28T23:17:00Z",
-        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+        "created_at": "2026-08-29T07:17:00Z",
+        "display_title": "Daily Watchlist Pages (17 07 * * 2-6)",
     }
     delayed_same_day_daily = {
         "id": 101,
         "event": "schedule",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-08-29T04:09:04Z",
-        "display_title": "Daily Watchlist Pages (17 23 * * 1-5)",
+        "created_at": "2026-08-29T09:09:04Z",
+        "display_title": "Daily Watchlist Pages (17 07 * * 2-6)",
     }
 
     def decide(status: str, conclusion) -> str:

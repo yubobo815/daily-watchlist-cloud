@@ -28,12 +28,12 @@ on:
   schedule:
     # Publish a fresh daily report after every US weekday, including Friday.
     # This path must remain independent of the slower weekly calibration.
-    # Avoid the top-of-hour Actions scheduling peak; GitHub may otherwise
-    # delay scheduled runs substantially under load.
-    - cron: "17 23 * * 1-5"
+    # Run after the US EOD feeds have repeatedly shown the completed session.
+    # 07:17 UTC is 17:17 AEST / 18:17 AEDT and remains before the next US open.
+    - cron: "17 07 * * 2-6"
     # One guarded retry for a failed or missing weekday publication. Friday's
-    # retry runs on Saturday UTC, before the independent weekly rebuild.
-    - cron: "17 02 * * 2-6"
+    # publication still runs on Saturday UTC before the next US market open.
+    - cron: "17 10 * * 2-6"
     # Run the bounded weekly rebuild and parity gate separately on Saturday.
     - cron: "47 03 * * 6"
     # One guarded retry after the Saturday weekly rebuild has time to finish.
@@ -113,8 +113,8 @@ jobs:
           fi
 
           # Retry the preceding tagged daily run once. The cron marker, not
-          # the delayed runner start date, identifies Friday's publication.
-          if [ "$EVENT_SCHEDULE" = "17 02 * * 2-6" ]; then
+          # the delayed runner start time, identifies the intended publication.
+          if [ "$EVENT_SCHEDULE" = "17 10 * * 2-6" ]; then
             retry_decision="$(
               curl --fail --silent --show-error \
                 --header "Authorization: Bearer $GITHUB_TOKEN" \
