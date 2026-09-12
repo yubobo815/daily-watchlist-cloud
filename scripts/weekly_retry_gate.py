@@ -10,7 +10,7 @@ Actions can delay a nominally earlier cron for many hours.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 import json
 import sys
 from typing import Any
@@ -25,9 +25,9 @@ RETRY_CONCLUSIONS = {
     "action_required",
 }
 ACTIVE_STATUSES = {"queued", "in_progress"}
-PRIMARY_SCHEDULE_UTC = time(3, 47)
-PRIMARY_SCHEDULE_MARKER = "47 03 * * 6"
-RETRY_SCHEDULE_MARKER = "47 07 * * 6"
+PRIMARY_SCHEDULE_UTC = time(15, 47)
+PRIMARY_SCHEDULE_MARKER = "47 15 * * 6"
+RETRY_SCHEDULE_MARKER = "47 22 * * 6"
 
 
 def parse_github_time(value: Any) -> datetime | None:
@@ -50,11 +50,15 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
     current_created = parse_github_time(current.get("created_at"))
     if current_created is None:
         raise ValueError("current workflow run has no valid created_at")
-    if current_created.weekday() != 5:
-        raise ValueError("weekly retry gate must run on Saturday UTC")
+    if current_created.weekday() not in {5, 6}:
+        raise ValueError("weekly retry gate must run on Saturday or delayed Sunday UTC")
+    primary_date = current_created.date()
+    if current_created.time() < PRIMARY_SCHEDULE_UTC:
+        primary_date -= timedelta(days=1)
     primary_window_start = datetime.combine(
-        current_created.date(), PRIMARY_SCHEDULE_UTC, tzinfo=timezone.utc
+        primary_date, PRIMARY_SCHEDULE_UTC, tzinfo=timezone.utc
     )
+    primary_window_end = min(current_created, primary_window_start + timedelta(days=1))
 
     candidates = []
     for run in runs:
@@ -63,7 +67,7 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
         created = parse_github_time(run.get("created_at"))
         if created is None:
             continue
-        if primary_window_start <= created < current_created:
+        if primary_window_start <= created < primary_window_end:
             candidates.append((created, run))
 
     if not candidates:

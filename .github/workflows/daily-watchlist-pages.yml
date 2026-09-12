@@ -34,11 +34,12 @@ on:
     # One guarded retry for a failed or missing weekday publication. Friday's
     # publication still runs on Saturday UTC before the next US market open.
     - cron: "17 10 * * 2-6"
-    # Run the bounded weekly rebuild and parity gate separately on Saturday.
-    - cron: "47 03 * * 6"
-    # One guarded retry after the Saturday weekly rebuild has time to finish.
+    # Run the bounded weekly rebuild after Friday's daily primary and retry
+    # have had time to persist the completed Friday session.
+    - cron: "47 15 * * 6"
+    # One guarded retry after the Saturday UTC rebuild has time to finish.
     # It runs only when that primary scheduled rebuild failed.
-    - cron: "47 07 * * 6"
+    - cron: "47 22 * * 6"
 
 permissions:
   actions: read
@@ -138,7 +139,7 @@ jobs:
           # Saturday's weekly calibration is intentionally separate from the
           # Friday daily publication. A parity failure must not withhold a
           # valid daily market report.
-          if [ "$EVENT_SCHEDULE" = "47 03 * * 6" ]; then
+          if [ "$EVENT_SCHEDULE" = "47 15 * * 6" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "refresh_mode=weekly_rebuild" >> "$GITHUB_OUTPUT"
             echo "bootstrap_arg=" >> "$GITHUB_OUTPUT"
@@ -149,7 +150,7 @@ jobs:
           # Retry Saturday's weekly rebuild only when that same UTC-day primary
           # failed. This repeats the same parity checks; it never bypasses them
           # or mistakes Friday's daily publication for the weekly primary.
-          if [ "$EVENT_SCHEDULE" = "47 07 * * 6" ]; then
+          if [ "$EVENT_SCHEDULE" = "47 22 * * 6" ]; then
             retry_decision="$(
               curl --fail --silent --show-error \
                 --header "Authorization: Bearer $GITHUB_TOKEN" \
