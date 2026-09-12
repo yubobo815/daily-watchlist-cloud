@@ -2,11 +2,13 @@
 """Offline UAT for daily incremental state and weekly rebuild contracts."""
 
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 import sys
 import tempfile
 import hashlib
 import json
+from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -16,6 +18,47 @@ import daily_watchlist_overview as scanner
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from weekly_retry_gate import retry_decision
 from daily_retry_gate import retry_decision as daily_retry_decision
+
+
+def audit_supabase_select_retries_transient_failures() -> None:
+    calls = []
+    original_credentials = scanner.supabase_credentials
+    original_urlopen = scanner.urllib.request.urlopen
+    original_attempts = scanner.SUPABASE_SELECT_MAX_ATTEMPTS
+    original_delay = scanner.SUPABASE_SELECT_RETRY_BASE_SECONDS
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'[{"ticker":"TEST"}]'
+
+    def flaky_urlopen(request, timeout):
+        calls.append((request.full_url, timeout))
+        if len(calls) < 3:
+            raise HTTPError(request.full_url, 504, "Gateway Timeout", {}, BytesIO(b'{"message":"Gateway Timeout"}'))
+        return Response()
+
+    scanner.supabase_credentials = lambda: ("https://example.supabase.co", "sb_secret_test")
+    scanner.urllib.request.urlopen = flaky_urlopen
+    scanner.SUPABASE_SELECT_MAX_ATTEMPTS = 4
+    scanner.SUPABASE_SELECT_RETRY_BASE_SECONDS = 0
+    try:
+        rows = scanner.supabase_select("watchlist_ohlcv?select=ticker")
+    finally:
+        scanner.supabase_credentials = original_credentials
+        scanner.urllib.request.urlopen = original_urlopen
+        scanner.SUPABASE_SELECT_MAX_ATTEMPTS = original_attempts
+        scanner.SUPABASE_SELECT_RETRY_BASE_SECONDS = original_delay
+
+    assert rows == [{"ticker": "TEST"}]
+    assert len(calls) == 3
 
 
 def frame(start: str, periods: int, base: float = 100.0) -> pd.DataFrame:
@@ -785,6 +828,7 @@ def audit_market_data_freshness_contract() -> None:
 
 
 def main() -> None:
+    audit_supabase_select_retries_transient_failures()
     audit_ohlcv_modes()
     audit_incremental_settlement()
     audit_supabase_history_pagination()
@@ -795,7 +839,7 @@ def main() -> None:
     audit_artifact_integrity()
     audit_provider_circuit()
     audit_market_data_freshness_contract()
-    print({"incrementalPipelineUAT": "ok", "cases": 10})
+    print({"incrementalPipelineUAT": "ok", "cases": 11})
 
 
 if __name__ == "__main__":
