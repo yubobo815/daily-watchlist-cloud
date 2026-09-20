@@ -3267,6 +3267,7 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
     than invented into wins or losses.
     """
     horizon = max(1, int(horizon_sessions))
+    settlement_window_hash = signal_settlement_window_hash(future_rows, horizon)
     prior_action = str(prior.get("action") or "")
     final_row = future_rows[min(len(future_rows), horizon) - 1] if future_rows else {}
     evaluation_date = canonical_date(final_row.get("date") or final_row.get("history_date"))
@@ -3368,6 +3369,8 @@ def score_signal_horizon(prior: dict, future_rows: list[dict], horizon_sessions:
         "prior_close": prior_close or "",
         "entry_model_version": LEARNING_MODEL_VERSION,
         "label_horizon_sessions": horizon,
+        "settlement_window_hash": settlement_window_hash,
+        "settlement_replay_status": "FROZEN_WINDOW",
         "path_status": "PENDING",
         "entry_eligible": False,
         "entry_filled": False,
@@ -3603,6 +3606,30 @@ def signal_outcome_identity(row: dict) -> tuple[str, str, str, int]:
     )
 
 
+def signal_settlement_window_hash(future_rows: list[dict], horizon_sessions: int) -> str:
+    """Fingerprint the exact market bars used to settle an immutable outcome."""
+    canonical_rows = []
+    for row in future_rows[: max(1, int(horizon_sessions))]:
+        canonical_rows.append({
+            "date": canonical_date(row.get("date") or row.get("history_date") or row.get("data_date")),
+            **{
+                field: numeric_or_none(row.get(field))
+                for field in ("open", "high", "low", "close")
+            },
+        })
+    if len(canonical_rows) < max(1, int(horizon_sessions)):
+        return ""
+    payload = json.dumps(clean_json_value(canonical_rows), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def settled_outcome_signature(row: dict) -> tuple[str, str]:
+    return (
+        str(row.get("outcome_label") or "").upper(),
+        canonical_date(row.get("evaluation_run_date")),
+    )
+
+
 def is_current_learning_outcome(row: dict) -> bool:
     """Exclude legacy or unversioned samples from current-model reconciliation."""
     return (
@@ -3703,7 +3730,13 @@ def rebuild_canonical_signal_outcomes(
     raw_frames: dict[str, pd.DataFrame],
     replay_rows: Optional[list[dict]] = None,
 ) -> pd.DataFrame:
-    """Re-score frozen production plans against the canonical OHLCV path."""
+    """Re-score frozen production plans without rewriting settled history.
+
+    A settled outcome is immutable. When a provider later revises one of its
+    source bars, the current OHLCV window no longer proves the original path.
+    Preserve that outcome and surface the revision separately. With an
+    unchanged frozen-window hash, a logic regression still fails parity.
+    """
     rebuilt: list[dict] = []
     if canonical_outcomes is None or canonical_outcomes.empty:
         return pd.DataFrame()
@@ -3769,7 +3802,29 @@ def rebuild_canonical_signal_outcomes(
             "learning_key_used": outcome.get("prior_prediction_key"),
             "learning_scope": outcome.get("prior_prediction_scope"),
         }
-        rebuilt.append(score_signal_horizon(prior, future.to_dict(orient="records")))
+        future_rows = future.to_dict(orient="records")
+        rescored = score_signal_horizon(prior, future_rows)
+        if str(outcome.get("path_status") or "").upper() != "SETTLED":
+            rebuilt.append(rescored)
+            continue
+
+        stored_hash = str(outcome.get("settlement_window_hash") or "")
+        current_hash = str(rescored.get("settlement_window_hash") or "")
+        if stored_hash and stored_hash != current_hash:
+            preserved = dict(outcome)
+            preserved["settlement_replay_status"] = "SOURCE_REVISION_PRESERVED"
+            preserved["observed_settlement_window_hash"] = current_hash
+            rebuilt.append(preserved)
+            continue
+        if not stored_hash and settled_outcome_signature(outcome) != settled_outcome_signature(rescored):
+            preserved = dict(outcome)
+            preserved["settlement_replay_status"] = "LEGACY_SOURCE_REVISION_PRESERVED"
+            preserved["observed_settlement_window_hash"] = current_hash
+            rebuilt.append(preserved)
+            continue
+        if not stored_hash:
+            rescored["settlement_replay_status"] = "LEGACY_HASH_BACKFILLED"
+        rebuilt.append(rescored)
     return pd.DataFrame(rebuilt)
 
 
@@ -3807,6 +3862,13 @@ def calibration_parity_report(
 
     incremental_map = settled_map(incremental)
     rebuilt_map = settled_map(rebuilt)
+    replay_status_counts: dict[str, int] = {}
+    if rebuilt is not None and not rebuilt.empty:
+        for raw in rebuilt.to_dict(orient="records"):
+            row = merge_payload_row(raw)
+            status = str(row.get("settlement_replay_status") or "")
+            if status:
+                replay_status_counts[status] = replay_status_counts.get(status, 0) + 1
     shared = set(incremental_map) & set(rebuilt_map)
     mismatched = sorted(key for key in shared if incremental_map[key] != rebuilt_map[key])
     incremental_cutoff = max((value[1] for value in incremental_map.values()), default="")
@@ -3852,6 +3914,7 @@ def calibration_parity_report(
         "missing_from_rebuild": len(missing_from_rebuild),
         "older_outside_rebuild": len(older_outside_rebuild),
         "newly_available": len(newly_available),
+        "settlement_replay_status_counts": replay_status_counts,
         "sample_mismatches": [list(item) for item in mismatched[:10]],
         "sample_missing_from_incremental": [list(item) for item in missing_from_incremental[:10]],
         "sample_missing_from_rebuild": [list(item) for item in missing_from_rebuild[:10]],

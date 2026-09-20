@@ -144,6 +144,7 @@ def audit_incremental_settlement() -> None:
     )
     outcome = scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, pd.DataFrame())
     assert len(outcome) == 1 and outcome.iloc[0]["outcome_label"] == "WORKING"
+    assert len(outcome.iloc[0]["settlement_window_hash"]) == 64
     assert outcome.iloc[0]["signal_run_date"] == "2026-07-01"
     assert outcome.iloc[0]["evaluation_run_date"] == "2026-07-06", "learning must continue from TP1 through the frozen further target"
     assert scanner.build_incremental_signal_outcomes([sample_signal()], {"TEST": bars}, outcome).empty
@@ -241,6 +242,46 @@ def audit_incremental_settlement() -> None:
         drifted_rebuild,
         {"TEST": "2026-06-01"},
     )["passed"] is True
+
+    # Provider revisions must not rewrite an already-settled result. The
+    # frozen-window hash distinguishes source drift from a logic regression.
+    revised_bars = bars.copy()
+    revised_bars.loc[revised_bars.index[0], ["low", "close"]] = [94, 96]
+    revised_rebuild = scanner.rebuild_canonical_signal_outcomes(
+        outcome, {"TEST": revised_bars}
+    )
+    revised_report = scanner.calibration_parity_report(
+        outcome, revised_rebuild, {"TEST": "2026-06-01"}
+    )
+    assert revised_report["passed"] is True
+    assert revised_rebuild.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
+    assert revised_rebuild.iloc[0]["settlement_replay_status"] == "SOURCE_REVISION_PRESERVED"
+    assert revised_report["settlement_replay_status_counts"]["SOURCE_REVISION_PRESERVED"] == 1
+
+    # With the same frozen bars, an altered stored label remains a genuine
+    # parity failure rather than being hidden by the immutability guard.
+    tampered = outcome.copy()
+    tampered.loc[tampered.index[0], "outcome_label"] = "FAILED"
+    tampered_rebuild = scanner.rebuild_canonical_signal_outcomes(
+        tampered, {"TEST": bars}
+    )
+    assert scanner.calibration_parity_report(
+        tampered, tampered_rebuild, {"TEST": "2026-06-01"}
+    )["passed"] is False
+
+    # Legacy settled rows did not have a frozen-window hash. Backfill it only
+    # when replay agrees; otherwise preserve the immutable historical result.
+    legacy_unfrozen = outcome.drop(columns=["settlement_window_hash", "settlement_replay_status"])
+    legacy_matching = scanner.rebuild_canonical_signal_outcomes(
+        legacy_unfrozen, {"TEST": bars}
+    )
+    assert len(legacy_matching.iloc[0]["settlement_window_hash"]) == 64
+    assert legacy_matching.iloc[0]["settlement_replay_status"] == "LEGACY_HASH_BACKFILLED"
+    legacy_revised = scanner.rebuild_canonical_signal_outcomes(
+        legacy_unfrozen, {"TEST": revised_bars}
+    )
+    assert legacy_revised.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
+    assert legacy_revised.iloc[0]["settlement_replay_status"] == "LEGACY_SOURCE_REVISION_PRESERVED"
 
     # The raised stop after TP1 is part of the frozen execution plan. Losing it
     # makes a later rebuild settle the same signal on a different date.
