@@ -282,6 +282,12 @@ def audit_incremental_settlement() -> None:
     )
     assert legacy_revised.iloc[0]["outcome_label"] == outcome.iloc[0]["outcome_label"]
     assert legacy_revised.iloc[0]["settlement_replay_status"] == "LEGACY_SOURCE_REVISION_PRESERVED"
+    legacy_nan = legacy_unfrozen.copy()
+    legacy_nan["settlement_window_hash"] = float("nan")
+    legacy_nan_matching = scanner.rebuild_canonical_signal_outcomes(
+        legacy_nan, {"TEST": bars}
+    )
+    assert legacy_nan_matching.iloc[0]["settlement_replay_status"] == "LEGACY_HASH_BACKFILLED"
 
     # The raised stop after TP1 is part of the frozen execution plan. Losing it
     # makes a later rebuild settle the same signal on a different date.

@@ -3630,6 +3630,12 @@ def settled_outcome_signature(row: dict) -> tuple[str, str]:
     )
 
 
+def canonical_settlement_window_hash(value: object) -> str:
+    """Return only a persisted SHA-256 hash; pandas NaN means no hash."""
+    text = str(value or "").strip().lower()
+    return text if len(text) == 64 and all(char in "0123456789abcdef" for char in text) else ""
+
+
 def is_current_learning_outcome(row: dict) -> bool:
     """Exclude legacy or unversioned samples from current-model reconciliation."""
     return (
@@ -3808,8 +3814,8 @@ def rebuild_canonical_signal_outcomes(
             rebuilt.append(rescored)
             continue
 
-        stored_hash = str(outcome.get("settlement_window_hash") or "")
-        current_hash = str(rescored.get("settlement_window_hash") or "")
+        stored_hash = canonical_settlement_window_hash(outcome.get("settlement_window_hash"))
+        current_hash = canonical_settlement_window_hash(rescored.get("settlement_window_hash"))
         if stored_hash and stored_hash != current_hash:
             preserved = dict(outcome)
             preserved["settlement_replay_status"] = "SOURCE_REVISION_PRESERVED"
