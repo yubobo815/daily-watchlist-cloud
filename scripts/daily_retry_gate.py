@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one daily recovery only when the preceding scheduled daily refresh failed.
+"""Run guarded daily recoveries only when earlier scheduled attempts failed.
 
 The workflow run name contains the triggering cron expression. That marker is
 authoritative even when GitHub starts a schedule hours late or after midnight.
@@ -27,9 +27,16 @@ PRIMARY_SCHEDULES = {
 }
 RETRY_TO_PRIMARY = {
     # 14:00 Melbourne during daylight-saving time.
-    "00 03 * * 2-6": ("00 00 * * 2-6", time(0, 0)),
+    "00 03 * * 2-6": ("00 00 * * 2-6", time(0, 0), ("00 00 * * 2-6",)),
     # 14:00 Melbourne during standard time.
-    "00 04 * * 2-6": ("00 01 * * 2-6", time(1, 0)),
+    "00 04 * * 2-6": ("00 01 * * 2-6", time(1, 0), ("00 01 * * 2-6",)),
+    # 17:00 final recovery checks both earlier attempts.
+    "00 06 * * 2-6": (
+        "00 00 * * 2-6", time(0, 0), ("00 00 * * 2-6", "00 03 * * 2-6")
+    ),
+    "00 07 * * 2-6": (
+        "00 01 * * 2-6", time(1, 0), ("00 01 * * 2-6", "00 04 * * 2-6")
+    ),
 }
 
 
@@ -41,10 +48,14 @@ def melbourne_schedule_kind(schedule: str, reference_time: datetime | None = Non
     offset = reference.astimezone(MELBOURNE_TZ).utcoffset()
     offset_hours = int(offset.total_seconds() // 3600) if offset is not None else 0
     active_primary = "00 00 * * 2-6" if offset_hours == 11 else "00 01 * * 2-6"
-    active_retry = "00 03 * * 2-6" if offset_hours == 11 else "00 04 * * 2-6"
+    active_retries = (
+        ("00 03 * * 2-6", "00 06 * * 2-6")
+        if offset_hours == 11
+        else ("00 04 * * 2-6", "00 07 * * 2-6")
+    )
     if schedule == active_primary:
         return "primary"
-    if schedule == active_retry:
+    if schedule in active_retries:
         return "retry"
     if schedule in PRIMARY_SCHEDULES or schedule in RETRY_TO_PRIMARY:
         return "skip"
@@ -69,7 +80,7 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
     if current_created.weekday() not in {1, 2, 3, 4, 5, 6}:
         raise ValueError("daily retry gate must run Tuesday through Sunday UTC")
 
-    primary_marker, primary_schedule_utc = RETRY_TO_PRIMARY[retry_marker]
+    primary_marker, primary_schedule_utc, preceding_markers = RETRY_TO_PRIMARY[retry_marker]
     primary_date = current_created.date()
     if current_created.time() < primary_schedule_utc:
         primary_date -= timedelta(days=1)
@@ -80,7 +91,7 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
     for run in runs:
         if str(run.get("id")) == str(current_run_id) or run.get("event") != "schedule":
             continue
-        if primary_marker not in str(run.get("display_title") or ""):
+        if not any(marker in str(run.get("display_title") or "") for marker in preceding_markers):
             continue
         created = parse_github_time(run.get("created_at"))
         if created is None or not window_start <= created < window_end:
@@ -88,19 +99,23 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
         candidates.append((created, run))
 
     if not candidates:
-        return "retry", "preceding tagged daily primary is missing; running recovery"
+        return "retry", "preceding tagged daily attempts are missing; running recovery"
 
-    _, primary = max(candidates, key=lambda item: item[0])
-    status = str(primary.get("status") or "unknown")
-    conclusion = str(primary.get("conclusion") or "unknown")
-    primary_id = primary.get("id", "unknown")
-    if status in ACTIVE_STATUSES:
-        return "skip", f"daily primary {primary_id} is {status}"
-    if conclusion == "success":
-        return "skip", f"daily primary {primary_id} succeeded"
+    active = [item for item in candidates if str(item[1].get("status") or "") in ACTIVE_STATUSES]
+    if active:
+        _, attempt = max(active, key=lambda item: item[0])
+        return "skip", f"daily attempt {attempt.get('id', 'unknown')} is {attempt.get('status', 'unknown')}"
+    successful = [item for item in candidates if str(item[1].get("conclusion") or "") == "success"]
+    if successful:
+        _, attempt = max(successful, key=lambda item: item[0])
+        return "skip", f"daily attempt {attempt.get('id', 'unknown')} succeeded"
+    _, attempt = max(candidates, key=lambda item: item[0])
+    status = str(attempt.get("status") or "unknown")
+    conclusion = str(attempt.get("conclusion") or "unknown")
+    attempt_id = attempt.get("id", "unknown")
     if conclusion in RETRY_CONCLUSIONS:
-        return "retry", f"daily primary {primary_id} concluded {conclusion}"
-    return "skip", f"daily primary {primary_id} has unrecognized state {status}/{conclusion}"
+        return "retry", f"daily attempt {attempt_id} concluded {conclusion}"
+    return "skip", f"daily attempt {attempt_id} has unrecognized state {status}/{conclusion}"
 
 
 def main() -> int:

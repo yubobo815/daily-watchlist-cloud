@@ -36,6 +36,10 @@ on:
     # marker proceeds to the retry selector.
     - cron: "00 03 * * 2-6" # 14:00 AEDT
     - cron: "00 04 * * 2-6" # 14:00 AEST
+    # Final guarded recovery at 17:00 when both earlier attempts failed or
+    # were missing. This preserves freshness when market feeds settle late.
+    - cron: "00 06 * * 2-6" # 17:00 AEDT
+    - cron: "00 07 * * 2-6" # 17:00 AEST
     # Run the bounded weekly rebuild after Friday's daily primary and retry
     # have had time to persist the completed Friday session.
     - cron: "47 15 * * 6"
@@ -119,7 +123,7 @@ jobs:
           # 11:00/14:00 Melbourne under the current AEST/AEDT offset; the
           # inactive seasonal marker exits without publishing.
           case "$EVENT_SCHEDULE" in
-            "00 00 * * 2-6"|"00 01 * * 2-6"|"00 03 * * 2-6"|"00 04 * * 2-6")
+            "00 00 * * 2-6"|"00 01 * * 2-6"|"00 03 * * 2-6"|"00 04 * * 2-6"|"00 06 * * 2-6"|"00 07 * * 2-6")
               daily_schedule_kind="$(python3 scripts/daily_retry_gate.py --schedule-kind "$EVENT_SCHEDULE")"
               if [ "$daily_schedule_kind" = "skip" ]; then
                 echo "run=false" >> "$GITHUB_OUTPUT"

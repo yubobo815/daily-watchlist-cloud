@@ -559,6 +559,8 @@ def audit_rolling_window_and_modes() -> None:
     daily_retry_crons = (
         'cron: "00 03 * * 2-6"',
         'cron: "00 04 * * 2-6"',
+        'cron: "00 06 * * 2-6"',
+        'cron: "00 07 * * 2-6"',
     )
     weekly_cron = 'cron: "47 15 * * 6"'
     retry_cron = 'cron: "47 22 * * 6"'
@@ -604,9 +606,11 @@ def audit_daily_retry_selector() -> None:
     aedt = datetime.fromisoformat("2026-12-02T00:00:00+00:00")
     assert melbourne_schedule_kind("00 01 * * 2-6", aest) == "primary"
     assert melbourne_schedule_kind("00 04 * * 2-6", aest) == "retry"
+    assert melbourne_schedule_kind("00 07 * * 2-6", aest) == "retry"
     assert melbourne_schedule_kind("00 00 * * 2-6", aest) == "skip"
     assert melbourne_schedule_kind("00 00 * * 2-6", aedt) == "primary"
     assert melbourne_schedule_kind("00 03 * * 2-6", aedt) == "retry"
+    assert melbourne_schedule_kind("00 06 * * 2-6", aedt) == "retry"
     assert melbourne_schedule_kind("00 01 * * 2-6", aedt) == "skip"
 
     current = {
@@ -677,6 +681,28 @@ def audit_daily_retry_selector() -> None:
     assert daily_retry_decision(
         {"workflow_runs": [after_midnight_retry, weekly, successful_primary]}, "302"
     )[0] == "skip"
+
+    final_retry = {
+        **current,
+        "id": 303,
+        "created_at": "2026-09-05T07:00:00Z",
+        "display_title": "Daily Watchlist Pages (00 07 * * 2-6)",
+    }
+    failed_primary = {**successful_primary, "conclusion": "failure"}
+    failed_first_retry = {
+        **current,
+        "id": 277,
+        "status": "completed",
+        "conclusion": "failure",
+    }
+    successful_first_retry = {**failed_first_retry, "conclusion": "success"}
+    assert daily_retry_decision(
+        {"workflow_runs": [final_retry, weekly, failed_primary, failed_first_retry]}, "303"
+    )[0] == "retry"
+    assert daily_retry_decision(
+        {"workflow_runs": [final_retry, weekly, failed_primary, successful_first_retry]}, "303"
+    )[0] == "skip"
+    assert daily_retry_decision({"workflow_runs": [final_retry, weekly]}, "303")[0] == "retry"
 
 
 def audit_weekly_retry_selector() -> None:
