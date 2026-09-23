@@ -28,18 +28,19 @@ on:
   schedule:
     # Publish a fresh daily report after every US weekday, including Friday.
     # This path must remain independent of the slower weekly calibration.
-    # Publish at 11:00 Australia/Melbourne all year. GitHub cron is UTC-only,
-    # so both seasonal UTC times are registered and the inactive one skips.
-    - cron: "00 00 * * 2-6" # 11:00 AEDT
-    - cron: "00 01 * * 2-6" # 11:00 AEST
-    # One guarded retry at 14:00 Melbourne; again only the active seasonal
+    # Publish shortly after 11:00 Australia/Melbourne all year. GitHub cron is
+    # UTC-only, so both seasonal UTC times are registered and the inactive one
+    # skips. Minute 17 avoids GitHub's documented top-of-hour congestion.
+    - cron: "17 00 * * 2-6" # 11:17 AEDT
+    - cron: "17 01 * * 2-6" # 11:17 AEST
+    # One guarded retry shortly after 14:00 Melbourne; again only the active seasonal
     # marker proceeds to the retry selector.
-    - cron: "00 03 * * 2-6" # 14:00 AEDT
-    - cron: "00 04 * * 2-6" # 14:00 AEST
-    # Final guarded recovery at 17:00 when both earlier attempts failed or
+    - cron: "17 03 * * 2-6" # 14:17 AEDT
+    - cron: "17 04 * * 2-6" # 14:17 AEST
+    # Final guarded recovery shortly after 17:00 when both earlier attempts failed or
     # were missing. This preserves freshness when market feeds settle late.
-    - cron: "00 06 * * 2-6" # 17:00 AEDT
-    - cron: "00 07 * * 2-6" # 17:00 AEST
+    - cron: "17 06 * * 2-6" # 17:17 AEDT
+    - cron: "17 07 * * 2-6" # 17:17 AEST
     # Run the bounded weekly rebuild after Friday's daily primary and retry
     # have had time to persist the completed Friday session.
     - cron: "47 15 * * 6"
@@ -120,10 +121,10 @@ jobs:
           fi
 
           # GitHub cron has no timezone support. Select the marker that maps to
-          # 11:00/14:00 Melbourne under the current AEST/AEDT offset; the
+          # 11:17/14:17/17:17 Melbourne under the current AEST/AEDT offset; the
           # inactive seasonal marker exits without publishing.
           case "$EVENT_SCHEDULE" in
-            "00 00 * * 2-6"|"00 01 * * 2-6"|"00 03 * * 2-6"|"00 04 * * 2-6"|"00 06 * * 2-6"|"00 07 * * 2-6")
+            "17 00 * * 2-6"|"17 01 * * 2-6"|"17 03 * * 2-6"|"17 04 * * 2-6"|"17 06 * * 2-6"|"17 07 * * 2-6")
               daily_schedule_kind="$(python3 scripts/daily_retry_gate.py --schedule-kind "$EVENT_SCHEDULE")"
               if [ "$daily_schedule_kind" = "skip" ]; then
                 echo "run=false" >> "$GITHUB_OUTPUT"

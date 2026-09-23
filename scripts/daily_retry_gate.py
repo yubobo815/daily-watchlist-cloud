@@ -20,38 +20,38 @@ from weekly_retry_gate import ACTIVE_STATUSES, RETRY_CONCLUSIONS, parse_github_t
 
 MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
 PRIMARY_SCHEDULES = {
-    # 11:00 Melbourne during daylight-saving time (UTC+11).
-    "00 00 * * 2-6": time(0, 0),
-    # 11:00 Melbourne during standard time (UTC+10).
-    "00 01 * * 2-6": time(1, 0),
+    # 11:17 Melbourne during daylight-saving time (UTC+11).
+    "17 00 * * 2-6": time(0, 17),
+    # 11:17 Melbourne during standard time (UTC+10).
+    "17 01 * * 2-6": time(1, 17),
 }
 RETRY_TO_PRIMARY = {
-    # 14:00 Melbourne during daylight-saving time.
-    "00 03 * * 2-6": ("00 00 * * 2-6", time(0, 0), ("00 00 * * 2-6",)),
-    # 14:00 Melbourne during standard time.
-    "00 04 * * 2-6": ("00 01 * * 2-6", time(1, 0), ("00 01 * * 2-6",)),
-    # 17:00 final recovery checks both earlier attempts.
-    "00 06 * * 2-6": (
-        "00 00 * * 2-6", time(0, 0), ("00 00 * * 2-6", "00 03 * * 2-6")
+    # 14:17 Melbourne during daylight-saving time.
+    "17 03 * * 2-6": ("17 00 * * 2-6", time(0, 17), ("17 00 * * 2-6",)),
+    # 14:17 Melbourne during standard time.
+    "17 04 * * 2-6": ("17 01 * * 2-6", time(1, 17), ("17 01 * * 2-6",)),
+    # 17:17 final recovery checks both earlier attempts.
+    "17 06 * * 2-6": (
+        "17 00 * * 2-6", time(0, 17), ("17 00 * * 2-6", "17 03 * * 2-6")
     ),
-    "00 07 * * 2-6": (
-        "00 01 * * 2-6", time(1, 0), ("00 01 * * 2-6", "00 04 * * 2-6")
+    "17 07 * * 2-6": (
+        "17 01 * * 2-6", time(1, 17), ("17 01 * * 2-6", "17 04 * * 2-6")
     ),
 }
 
 
 def melbourne_schedule_kind(schedule: str, reference_time: datetime | None = None) -> str:
-    """Select the UTC cron that represents 11:00/14:00 Melbourne today."""
+    """Select the UTC cron that represents Melbourne's active daily slots."""
     reference = reference_time or datetime.now(timezone.utc)
     if reference.tzinfo is None:
         reference = reference.replace(tzinfo=timezone.utc)
     offset = reference.astimezone(MELBOURNE_TZ).utcoffset()
     offset_hours = int(offset.total_seconds() // 3600) if offset is not None else 0
-    active_primary = "00 00 * * 2-6" if offset_hours == 11 else "00 01 * * 2-6"
+    active_primary = "17 00 * * 2-6" if offset_hours == 11 else "17 01 * * 2-6"
     active_retries = (
-        ("00 03 * * 2-6", "00 06 * * 2-6")
+        ("17 03 * * 2-6", "17 06 * * 2-6")
         if offset_hours == 11
-        else ("00 04 * * 2-6", "00 07 * * 2-6")
+        else ("17 04 * * 2-6", "17 07 * * 2-6")
     )
     if schedule == active_primary:
         return "primary"

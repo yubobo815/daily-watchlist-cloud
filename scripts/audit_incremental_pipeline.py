@@ -553,14 +553,14 @@ def audit_rolling_window_and_modes() -> None:
     assert "position_value_1k_risk = required_position_value" in scanner_source
     assert "actual_risk_dollars = suggested_position_value" in scanner_source
     daily_crons = (
-        'cron: "00 00 * * 2-6"',
-        'cron: "00 01 * * 2-6"',
+        'cron: "17 00 * * 2-6"',
+        'cron: "17 01 * * 2-6"',
     )
     daily_retry_crons = (
-        'cron: "00 03 * * 2-6"',
-        'cron: "00 04 * * 2-6"',
-        'cron: "00 06 * * 2-6"',
-        'cron: "00 07 * * 2-6"',
+        'cron: "17 03 * * 2-6"',
+        'cron: "17 04 * * 2-6"',
+        'cron: "17 06 * * 2-6"',
+        'cron: "17 07 * * 2-6"',
     )
     weekly_cron = 'cron: "47 15 * * 6"'
     retry_cron = 'cron: "47 22 * * 6"'
@@ -604,22 +604,22 @@ def audit_rolling_window_and_modes() -> None:
 def audit_daily_retry_selector() -> None:
     aest = datetime.fromisoformat("2026-09-23T01:00:00+00:00")
     aedt = datetime.fromisoformat("2026-12-02T00:00:00+00:00")
-    assert melbourne_schedule_kind("00 01 * * 2-6", aest) == "primary"
-    assert melbourne_schedule_kind("00 04 * * 2-6", aest) == "retry"
-    assert melbourne_schedule_kind("00 07 * * 2-6", aest) == "retry"
-    assert melbourne_schedule_kind("00 00 * * 2-6", aest) == "skip"
-    assert melbourne_schedule_kind("00 00 * * 2-6", aedt) == "primary"
-    assert melbourne_schedule_kind("00 03 * * 2-6", aedt) == "retry"
-    assert melbourne_schedule_kind("00 06 * * 2-6", aedt) == "retry"
-    assert melbourne_schedule_kind("00 01 * * 2-6", aedt) == "skip"
+    assert melbourne_schedule_kind("17 01 * * 2-6", aest) == "primary"
+    assert melbourne_schedule_kind("17 04 * * 2-6", aest) == "retry"
+    assert melbourne_schedule_kind("17 07 * * 2-6", aest) == "retry"
+    assert melbourne_schedule_kind("17 00 * * 2-6", aest) == "skip"
+    assert melbourne_schedule_kind("17 00 * * 2-6", aedt) == "primary"
+    assert melbourne_schedule_kind("17 03 * * 2-6", aedt) == "retry"
+    assert melbourne_schedule_kind("17 06 * * 2-6", aedt) == "retry"
+    assert melbourne_schedule_kind("17 01 * * 2-6", aedt) == "skip"
 
     current = {
         "id": 300,
         "event": "schedule",
         "status": "in_progress",
         "conclusion": None,
-        "created_at": "2026-09-05T04:00:00Z",
-        "display_title": "Daily Watchlist Pages (00 04 * * 2-6)",
+        "created_at": "2026-09-05T04:17:00Z",
+        "display_title": "Daily Watchlist Pages (17 04 * * 2-6)",
     }
     weekly = {
         "id": 250,
@@ -636,8 +636,8 @@ def audit_daily_retry_selector() -> None:
             "event": "schedule",
             "status": status,
             "conclusion": conclusion,
-            "created_at": "2026-09-05T01:05:14Z",
-            "display_title": "Daily Watchlist Pages (00 01 * * 2-6)",
+            "created_at": "2026-09-05T01:25:14Z",
+            "display_title": "Daily Watchlist Pages (17 01 * * 2-6)",
         }
         return daily_retry_decision(
             {"workflow_runs": [current, weekly, daily_primary]}, "300"
@@ -655,8 +655,8 @@ def audit_daily_retry_selector() -> None:
         "event": "schedule",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-09-04T01:05:00Z",
-        "display_title": "Daily Watchlist Pages (00 01 * * 2-6)",
+        "created_at": "2026-09-04T01:25:00Z",
+        "display_title": "Daily Watchlist Pages (17 01 * * 2-6)",
     }
     assert daily_retry_decision({"workflow_runs": [current, weekly, prior_day]}, "300")[0] == "retry"
 
@@ -666,8 +666,8 @@ def audit_daily_retry_selector() -> None:
         "event": "schedule",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-09-05T01:05:14Z",
-        "display_title": "Daily Watchlist Pages (00 01 * * 2-6)",
+        "created_at": "2026-09-05T01:25:14Z",
+        "display_title": "Daily Watchlist Pages (17 01 * * 2-6)",
     }
     assert daily_retry_decision(
         {"workflow_runs": [delayed_retry, weekly, successful_primary]}, "301"
@@ -686,7 +686,7 @@ def audit_daily_retry_selector() -> None:
         **current,
         "id": 303,
         "created_at": "2026-09-05T07:00:00Z",
-        "display_title": "Daily Watchlist Pages (00 07 * * 2-6)",
+        "display_title": "Daily Watchlist Pages (17 07 * * 2-6)",
     }
     failed_primary = {**successful_primary, "conclusion": "failure"}
     failed_first_retry = {
@@ -720,7 +720,7 @@ def audit_weekly_retry_selector() -> None:
         "status": "completed",
         "conclusion": "failure",
         "created_at": "2026-08-29T01:00:00Z",
-        "display_title": "Daily Watchlist Pages (00 01 * * 2-6)",
+        "display_title": "Daily Watchlist Pages (17 01 * * 2-6)",
     }
     delayed_same_day_daily = {
         "id": 101,
@@ -728,7 +728,7 @@ def audit_weekly_retry_selector() -> None:
         "status": "completed",
         "conclusion": "success",
         "created_at": "2026-08-29T02:09:04Z",
-        "display_title": "Daily Watchlist Pages (00 01 * * 2-6)",
+        "display_title": "Daily Watchlist Pages (17 01 * * 2-6)",
     }
 
     def decide(status: str, conclusion) -> str:
