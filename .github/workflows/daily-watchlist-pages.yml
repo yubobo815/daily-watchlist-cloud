@@ -28,12 +28,14 @@ on:
   schedule:
     # Publish a fresh daily report after every US weekday, including Friday.
     # This path must remain independent of the slower weekly calibration.
-    # Run after the US EOD feeds have repeatedly shown the completed session.
-    # 07:17 UTC is 17:17 AEST / 18:17 AEDT and remains before the next US open.
-    - cron: "17 07 * * 2-6"
-    # One guarded retry for a failed or missing weekday publication. Friday's
-    # publication still runs on Saturday UTC before the next US market open.
-    - cron: "17 10 * * 2-6"
+    # Publish at 11:00 Australia/Melbourne all year. GitHub cron is UTC-only,
+    # so both seasonal UTC times are registered and the inactive one skips.
+    - cron: "00 00 * * 2-6" # 11:00 AEDT
+    - cron: "00 01 * * 2-6" # 11:00 AEST
+    # One guarded retry at 14:00 Melbourne; again only the active seasonal
+    # marker proceeds to the retry selector.
+    - cron: "00 03 * * 2-6" # 14:00 AEDT
+    - cron: "00 04 * * 2-6" # 14:00 AEST
     # Run the bounded weekly rebuild after Friday's daily primary and retry
     # have had time to persist the completed Friday session.
     - cron: "47 15 * * 6"
@@ -113,9 +115,23 @@ jobs:
             exit 0
           fi
 
+          # GitHub cron has no timezone support. Select the marker that maps to
+          # 11:00/14:00 Melbourne under the current AEST/AEDT offset; the
+          # inactive seasonal marker exits without publishing.
+          case "$EVENT_SCHEDULE" in
+            "00 00 * * 2-6"|"00 01 * * 2-6"|"00 03 * * 2-6"|"00 04 * * 2-6")
+              daily_schedule_kind="$(python3 scripts/daily_retry_gate.py --schedule-kind "$EVENT_SCHEDULE")"
+              if [ "$daily_schedule_kind" = "skip" ]; then
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                echo "Inactive Melbourne seasonal schedule skipped."
+                exit 0
+              fi
+              ;;
+          esac
+
           # Retry the preceding tagged daily run once. The cron marker, not
           # the delayed runner start time, identifies the intended publication.
-          if [ "$EVENT_SCHEDULE" = "17 10 * * 2-6" ]; then
+          if [ "${daily_schedule_kind:-}" = "retry" ]; then
             retry_decision="$(
               curl --fail --silent --show-error \
                 --header "Authorization: Bearer $GITHUB_TOKEN" \

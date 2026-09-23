@@ -13,13 +13,42 @@ from datetime import datetime, time, timedelta, timezone
 import json
 import sys
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from weekly_retry_gate import ACTIVE_STATUSES, RETRY_CONCLUSIONS, parse_github_time
 
 
-PRIMARY_SCHEDULE_MARKER = "17 07 * * 2-6"
-RETRY_SCHEDULE_MARKER = "17 10 * * 2-6"
-PRIMARY_SCHEDULE_UTC = time(7, 17)
+MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
+PRIMARY_SCHEDULES = {
+    # 11:00 Melbourne during daylight-saving time (UTC+11).
+    "00 00 * * 2-6": time(0, 0),
+    # 11:00 Melbourne during standard time (UTC+10).
+    "00 01 * * 2-6": time(1, 0),
+}
+RETRY_TO_PRIMARY = {
+    # 14:00 Melbourne during daylight-saving time.
+    "00 03 * * 2-6": ("00 00 * * 2-6", time(0, 0)),
+    # 14:00 Melbourne during standard time.
+    "00 04 * * 2-6": ("00 01 * * 2-6", time(1, 0)),
+}
+
+
+def melbourne_schedule_kind(schedule: str, reference_time: datetime | None = None) -> str:
+    """Select the UTC cron that represents 11:00/14:00 Melbourne today."""
+    reference = reference_time or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    offset = reference.astimezone(MELBOURNE_TZ).utcoffset()
+    offset_hours = int(offset.total_seconds() // 3600) if offset is not None else 0
+    active_primary = "00 00 * * 2-6" if offset_hours == 11 else "00 01 * * 2-6"
+    active_retry = "00 03 * * 2-6" if offset_hours == 11 else "00 04 * * 2-6"
+    if schedule == active_primary:
+        return "primary"
+    if schedule == active_retry:
+        return "retry"
+    if schedule in PRIMARY_SCHEDULES or schedule in RETRY_TO_PRIMARY:
+        return "skip"
+    raise ValueError(f"unrecognized daily schedule: {schedule}")
 
 
 def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, str]:
@@ -33,22 +62,25 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
     current_created = parse_github_time(current.get("created_at"))
     if current_created is None:
         raise ValueError("current workflow run has no valid created_at")
-    if RETRY_SCHEDULE_MARKER not in str(current.get("display_title") or ""):
+    current_title = str(current.get("display_title") or "")
+    retry_marker = next((marker for marker in RETRY_TO_PRIMARY if marker in current_title), None)
+    if retry_marker is None:
         raise ValueError("daily retry gate must run from the tagged daily retry schedule")
     if current_created.weekday() not in {1, 2, 3, 4, 5, 6}:
         raise ValueError("daily retry gate must run Tuesday through Sunday UTC")
 
+    primary_marker, primary_schedule_utc = RETRY_TO_PRIMARY[retry_marker]
     primary_date = current_created.date()
-    if current_created.time() < PRIMARY_SCHEDULE_UTC:
+    if current_created.time() < primary_schedule_utc:
         primary_date -= timedelta(days=1)
-    window_start = datetime.combine(primary_date, PRIMARY_SCHEDULE_UTC, tzinfo=timezone.utc)
+    window_start = datetime.combine(primary_date, primary_schedule_utc, tzinfo=timezone.utc)
     next_primary_start = window_start + timedelta(days=1)
     window_end = min(current_created, next_primary_start)
     candidates = []
     for run in runs:
         if str(run.get("id")) == str(current_run_id) or run.get("event") != "schedule":
             continue
-        if PRIMARY_SCHEDULE_MARKER not in str(run.get("display_title") or ""):
+        if primary_marker not in str(run.get("display_title") or ""):
             continue
         created = parse_github_time(run.get("created_at"))
         if created is None or not window_start <= created < window_end:
@@ -73,8 +105,21 @@ def retry_decision(payload: dict[str, Any], current_run_id: str) -> tuple[str, s
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--current-run-id", required=True)
+    selector = parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--current-run-id")
+    selector.add_argument("--schedule-kind")
+    parser.add_argument("--reference-time")
     args = parser.parse_args()
+    if args.schedule_kind:
+        try:
+            reference_time = parse_github_time(args.reference_time) if args.reference_time else None
+            if args.reference_time and reference_time is None:
+                raise ValueError("reference time must be an ISO-8601 timestamp")
+            print(melbourne_schedule_kind(args.schedule_kind, reference_time))
+        except ValueError as exc:
+            print(f"Daily schedule selector error: {exc}", file=sys.stderr)
+            return 2
+        return 0
     try:
         payload = json.load(sys.stdin)
         decision, reason = retry_decision(payload, args.current_run_id)
