@@ -1109,6 +1109,9 @@ COMPACT_NARRATIVE_DUPLICATE_RULES = (
 # learning model evolves. These are presentation-only fallbacks; evict them
 # in order rather than letting a single verbose row abort the daily publish.
 COMPACT_PAYLOAD_EVICTION_ORDER = (
+    # Persisted independently on watchlist_indicator_state; snapshot readers
+    # use the publication's indicator version, while raw_window_hash must stay.
+    "indicator_state_version",
     "data_provider_error",
     "feedback_plan",
     "learning_plan",
@@ -1337,7 +1340,9 @@ def compact_payload(row: dict, typed_record: dict, *, aliases: tuple[str, ...] =
         payload.pop(key, None)
         payload_bytes = payload_size()
     if payload_bytes > max_bytes:
-        raise ValueError(f"Compact Supabase payload is {payload_bytes} bytes; limit is {max_bytes} bytes.")
+        ticker = typed_record.get("ticker") or row.get("ticker")
+        identity = f" for {ticker}" if ticker else ""
+        raise ValueError(f"Compact Supabase payload{identity} is {payload_bytes} bytes; limit is {max_bytes} bytes.")
     return payload
 
 

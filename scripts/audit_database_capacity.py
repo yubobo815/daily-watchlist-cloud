@@ -138,6 +138,30 @@ def assert_payload_compaction() -> None:
     })
     assert set(distinct_plans) == {"operator_plan", "operator_state_plan"}
 
+    # A production snapshot reached 8,202 bytes after prose eviction. Its
+    # duplicated indicator version may be removed without losing the hash or
+    # frozen execution state used by publication-health checks.
+    snapshot = {
+        "ticker": "AUDIT",
+        "indicator_state_version": scanner.INDICATOR_STATE_VERSION,
+        "raw_window_hash": "a" * 64,
+        "close": 125.1234567,
+        "execution_plan_id": "audit-frozen-plan",
+        "execution_plan_status": "ARMED",
+        "core_evidence": "",
+    }
+    snapshot_bytes = len(json.dumps(snapshot, separators=(",", ":")).encode("utf-8"))
+    snapshot["core_evidence"] = "x" * (8202 - snapshot_bytes)
+    assert len(json.dumps(snapshot, separators=(",", ":")).encode("utf-8")) == 8202
+    bounded_snapshot = scanner.compact_payload(snapshot, {}, max_bytes=8192)
+    assert "indicator_state_version" not in bounded_snapshot
+    assert bounded_snapshot == {
+        key: value for key, value in snapshot.items() if key != "indicator_state_version"
+    }
+    assert len(json.dumps(bounded_snapshot, separators=(",", ":")).encode("utf-8")) <= 8192
+    small_snapshot = {key: value for key, value in snapshot.items() if key != "core_evidence"}
+    assert scanner.compact_payload(small_snapshot, {}, max_bytes=8192) == small_snapshot
+
     try:
         scanner.compact_payload({"large": "x" * 20}, {}, max_bytes=10)
     except ValueError:
