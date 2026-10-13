@@ -17,14 +17,26 @@ function requestPin(request, body = {}) {
   return String(request.headers["x-focus-pin"] || body.pin || "").trim();
 }
 
+function badRequest(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
 function parseBody(request) {
   if (!request.body) return {};
-  if (typeof request.body === "object") return request.body;
-  try {
-    return JSON.parse(request.body);
-  } catch {
-    return {};
+  let body = request.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      throw badRequest("Request body must be valid JSON.");
+    }
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw badRequest("Request body must be a JSON object.");
+  }
+  return body;
 }
 
 function assertPin(request, body) {
@@ -42,11 +54,16 @@ function assertPin(request, body) {
 }
 
 function cleanTickers(values) {
-  return [...new Set((Array.isArray(values) ? values : [])
-    .map(normalizeTicker)
-    .filter((ticker) => ticker && isValidTicker(ticker)))]
-    .sort()
-    .slice(0, MAX_FOCUS_TICKERS);
+  if (!Array.isArray(values)) {
+    throw badRequest("tickers must be an array; use an empty array to clear the list.");
+  }
+  if (values.length > MAX_FOCUS_TICKERS) {
+    throw badRequest(`Focus List supports at most ${MAX_FOCUS_TICKERS} tickers.`);
+  }
+  if (values.some((value) => typeof value !== "string" || !isValidTicker(normalizeTicker(value)))) {
+    throw badRequest("Every ticker must be a valid ticker string.");
+  }
+  return [...new Set(values.map(normalizeTicker))].sort();
 }
 
 async function readFocusTickers() {
@@ -61,18 +78,7 @@ async function replaceFocusTickers(nextTickers) {
   const toAdd = nextTickers.filter((ticker) => !currentSet.has(ticker));
   const toDelete = currentTickers.filter((ticker) => !nextSet.has(ticker));
 
-  await Promise.all(toDelete.map(async (ticker) => {
-    const response = await supabaseRequest(
-      `focus_tickers?list_id=eq.${encodeFilterValue(LIST_ID)}&ticker=eq.${encodeFilterValue(ticker)}`,
-      { method: "DELETE" }
-    );
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(`Focus List delete failed (${response.status}): ${text.slice(0, 500)}`);
-      throw new Error("Could not save Focus List.");
-    }
-  }));
-
+  // Keep existing entries if saving the replacement additions fails.
   if (toAdd.length) {
     const response = await supabaseRequest("focus_tickers?on_conflict=list_id,ticker", {
       method: "POST",
@@ -87,6 +93,18 @@ async function replaceFocusTickers(nextTickers) {
       throw new Error("Could not save Focus List.");
     }
   }
+
+  await Promise.all(toDelete.map(async (ticker) => {
+    const response = await supabaseRequest(
+      `focus_tickers?list_id=eq.${encodeFilterValue(LIST_ID)}&ticker=eq.${encodeFilterValue(ticker)}`,
+      { method: "DELETE" }
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`Focus List delete failed (${response.status}): ${text.slice(0, 500)}`);
+      throw new Error("Could not save Focus List.");
+    }
+  }));
 
   return readFocusTickers();
 }

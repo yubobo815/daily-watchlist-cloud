@@ -1,62 +1,35 @@
 # Cloud deployment
 
-This project is ready to publish the daily watchlist report with GitHub Actions and GitHub Pages.
+GitHub Actions refreshes the scanner, stages data in Supabase and publishes an immutable GitHub Pages bundle. This repository is the production source of truth; see [README.md](README.md) for the overview and [SOURCE_OF_TRUTH.md](SOURCE_OF_TRUTH.md) for ownership rules.
 
-This repository is the production source of truth for scanner logic, app UI, Supabase schema, and workflow automation. See `SOURCE_OF_TRUTH.md`.
+## Setup
 
-## What it does
+1. Enable GitHub Actions for the repository.
+2. In **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**.
+3. In **Settings → Secrets and variables → Actions**, configure `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `SUPABASE_DB_URL`. The production workflow requires the database URL and applies `supabase_schema.sql` before refreshing.
+4. Configure `MASSIVE_API_KEY` or `POLYGON_API_KEY` for the primary provider. `TWELVE_DATA_API_KEY` is an optional additional provider. The configured fallback order is `polygon,twelvedata,stooq,yahoo`.
+5. In **Actions → Daily Watchlist Pages → Run workflow**, initialise a new database with `refresh_mode=weekly_rebuild` and `allow_calibration_bootstrap=true`. For an existing compatible installation, use `refresh_mode=daily` and leave bootstrap disabled.
 
-- Runs `python daily_watchlist_overview.py --refresh --skip-profiles`.
-- Publishes the app shell (`index.html`) as the site homepage.
-- Publishes the latest CSV beside the HTML report.
-- Saves each refresh into Supabase when the Supabase secrets are configured.
-- Runs at 8:00am Australia/Melbourne time, including daylight saving changes.
-- Can also be run manually from the GitHub Actions tab.
+An explicit bootstrap replaces calibration state; use it for initialisation or an intentional migration, rather than as a generic retry switch.
 
-## One-time setup
+## Schedule and manual recovery
 
-1. Create a GitHub repository for this folder.
-2. Push this project to that repository.
-3. In GitHub, open `Settings -> Pages`.
-4. Set `Build and deployment -> Source` to `GitHub Actions`.
-5. Open the `Actions` tab and run `Daily Watchlist Pages` manually once.
+Daily refreshes are registered for Tuesday–Saturday at 11:17 Australia/Melbourne, with guarded recovery attempts at 14:17 and 17:17. The inactive AEST/AEDT UTC marker skips. GitHub may delay starts; the schedule is not a completion-time guarantee.
 
-## Optional Supabase history database
+The weekly rebuild is Saturday 15:47 UTC, with a guarded retry at Saturday 22:47 UTC. Both are Sunday morning in Melbourne. It reuses stored OHLCV and retains parity validation.
 
-1. Open Supabase SQL Editor.
-2. Run the SQL in `supabase_schema.sql`.
-3. In GitHub, open `Settings -> Secrets and variables -> Actions`.
-4. Add `SUPABASE_URL`.
-5. Add `SUPABASE_SECRET_KEY` with a Supabase `sb_secret_...` key.
-6. Add `SUPABASE_DB_URL` if you want GitHub Actions to apply `supabase_schema.sql` automatically before each refresh. Use the percent-encoded Postgres connection string expected by Supabase CLI v2 `db query --db-url`.
-7. In Vercel, add `FOCUS_LIST_PIN` to protect the personal cloud Focus List.
+For manual recovery, choose `daily`. Set `use_stored_ohlcv=true` only after checking that the stored market-data date is current. The authoritative schedule and inputs are in [the workflow](.github/workflows/daily-watchlist-pages.yml).
 
-After that, every cloud refresh writes:
+## Publication and health
 
-- `watchlist_snapshots`: one row per ticker per run date.
-- `watchlist_behavior_history`: one row per ticker per replayed history date.
-- `focus_tickers`: your private PIN-protected Focus List, read and written only through Vercel API routes.
+The workflow stages a new publication, checks database health and capacity, uploads the Pages bundle, verifies the deployed publication identifier, then activates the matching Supabase publication. Failed builds or activation retain rollback protection. Final cleanup bounds persistent storage.
 
-Scanner tables keep the most recent 180 days by default. Set `SUPABASE_RETENTION_DAYS` in GitHub Actions if you want a different retention window.
+Published files include the dashboard pages, latest CSV, `data/manifest.json`, run metadata and publication-specific latest/ticker JSON. Read the manifest to identify the active immutable bundle.
 
-If `SUPABASE_DB_URL` is not set, the workflow skips automatic schema application. Refreshes can still write payload-backed rows, but new top-level columns should be applied manually through Supabase SQL Editor.
+Check the report date, market-data date, failed symbols and stale execution blocks after each refresh. A successful run can publish a `degraded` report when some symbols are unavailable.
 
-The secret key is only for GitHub Actions and server-side Vercel API routes. Do not put it into browser JavaScript.
-The published app should use Vercel API routes or static fallback JSON rather than exposing Supabase query config in browser JavaScript.
+Retention is table-specific: scanner defaults are 14 days for snapshots, 120 days for outcomes and 60 days for run metadata; the workflow's capacity guard also bounds active/rollback publications and row counts. OHLCV retains 400 bars per ticker and display history retains 30 trading days. The obsolete `SUPABASE_RETENTION_DAYS` setting is not used.
 
-After the first successful run, GitHub will show the public Pages URL in the workflow summary.
+Monitor organisation egress separately from database size. Storage checks do not impose a monthly bandwidth budget, and repeated historical reads still consume egress when publication fails.
 
-## Published files
-
-- `index.html`: the main report page.
-- `daily_watchlist_overview_latest.csv`: latest signal data.
-- `history.html`: ticker behavior history viewer.
-- `watchlist_behavior_history_latest.csv`: latest 30-trading-day behavior history.
-- `data/latest.json`: static fallback latest watchlist data.
-- `data/history.json`: static fallback ticker history data.
-- `daily_watchlist_overview_failures.csv`: failed symbols, when present.
-- `daily_watchlist_overview_stale_cache.csv`: cache fallback details, when present.
-
-## Notes
-
-GitHub Actions runners have normal outbound internet access, so Yahoo refreshes should work there even when a local Codex session has restricted network access.
+Keep secret keys and encoded database connection strings in server-side secrets. Never put them in browser code, committed environment files or container build contexts.

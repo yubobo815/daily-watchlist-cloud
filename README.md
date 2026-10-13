@@ -1,5 +1,7 @@
 # Daily Trade Copilot
 
+[![Quality](https://github.com/yubobo815/daily-watchlist-cloud/actions/workflows/quality.yml/badge.svg)](https://github.com/yubobo815/daily-watchlist-cloud/actions/workflows/quality.yml)
+
 A stock and ETF watchlist scanner with an interactive dashboard, ticker history and daily market-data refreshes. Python produces the reports, Supabase stores publication-bound data, and Vercel and GitHub Pages serve the dashboard.
 
 - [Live dashboard](https://dailytradingcopilot.vercel.app/)
@@ -133,3 +135,7 @@ Storage is bounded with table-specific retention, a 400-bar OHLCV store and comp
 | `data/` | Committed static fallback assets; not a guarantee of current market data. |
 
 This repository is the production source of truth. See [SOURCE_OF_TRUTH.md](SOURCE_OF_TRUTH.md). Before changing production logic, run `npm run audit:watchlist` and syntax checks for the Python or JavaScript files you change.
+
+The Quality workflow runs syntax checks and regression audits on Python 3.11/3.12, followed by Docker desktop/mobile browser UAT, for every pull request and push to `main`. It does not require production secrets or refresh market data. Dependencies are pinned, and Dependabot proposes Python and GitHub Actions updates weekly.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development checklist and [SECURITY.md](SECURITY.md) for vulnerability reporting.

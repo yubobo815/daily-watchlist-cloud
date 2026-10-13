@@ -33,6 +33,7 @@ def main() -> None:
     FIXTURES.mkdir()
     shutil.copy2(ROOT / "index.html", SITE / "index.html")
     shutil.copy2(ROOT / "ticker.html", SITE / "ticker.html")
+    shutil.copy2(ROOT / "manifest.webmanifest", SITE / "manifest.webmanifest")
     shutil.copytree(ROOT / "assets", SITE / "assets")
 
     plan = {

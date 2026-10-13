@@ -25,3 +25,19 @@ __pycache__/
 .DS_Store
 .vercel
 supabase/.temp/
+
+# Local credentials, dependencies and QA artefacts
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.venv/
+.venv-*/
+venv/
+.pycache/
+node_modules/
+.playwright-cli/
+output/
+test-results/
+playwright-report/
