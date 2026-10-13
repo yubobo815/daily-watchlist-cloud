@@ -11,13 +11,7 @@ Production-owned code lives here:
 - Scheduled refresh workflow: `.github/workflows/daily-watchlist-pages.yml`
 - App and logic audits: `scripts/`
 
-The older local scanner folder:
-
-```text
-/Users/williamyu/Documents/Codex/2026-05-28/i-have-another-pine-script-please
-```
-
-is an archive/lab workspace only. Do not make new production logic there. If useful logic is found there, migrate it into this repository first, then test and commit it here.
+Older local scanner checkouts are archive/lab workspaces only. Do not make new production logic there. If useful logic is found there, migrate it into this repository first, then test and commit it here.
 
 ## Operating rules
 

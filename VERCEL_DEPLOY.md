@@ -6,7 +6,7 @@ This repository is the production source of truth for the app, API routes, scann
 
 ## Data flow
 
-- GitHub Actions still refreshes the scanner each day around 8:00am Australia/Melbourne.
+- GitHub Actions schedules daily refreshes Tuesday–Saturday at 11:17 Australia/Melbourne, with guarded recovery attempts at 14:17 and 17:17. See the workflow for the current schedule.
 - The refresh writes current watchlist rows and 30-day behavior history to Supabase.
 - Vercel serves the interactive app and reads Supabase through app API routes.
 - `/api/watchlist/latest` returns latest rows, previous rows, and run health in one response.
