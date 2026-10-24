@@ -39,8 +39,10 @@ test("daily brief moves are green up, red down and neutral when unchanged", asyn
     await page.setViewportSize({ width, height: 1000 });
     for (const scheme of ["light", "dark"]) {
       await page.emulateMedia({ colorScheme: scheme });
-      await expect(section.locator(".brief-change-up")).toHaveCSS("color", scheme === "light" ? "rgb(20, 115, 68)" : "rgb(110, 231, 166)");
-      await expect(section.locator(".brief-change-down")).toHaveCSS("color", scheme === "light" ? "rgb(180, 35, 24)" : "rgb(255, 146, 137)");
+      await expect(page.locator("html")).toHaveCSS("color-scheme", "light");
+      await expect(section).toHaveCSS("background-color", "rgb(251, 250, 246)");
+      await expect(section.locator(".brief-change-up")).toHaveCSS("color", "rgb(20, 115, 68)");
+      await expect(section.locator(".brief-change-down")).toHaveCSS("color", "rgb(180, 35, 24)");
       await expect(section.locator(".brief-metrics > div").last().locator("small")).toHaveText("+0.00% · US close");
       await expect(section.locator(".brief-metrics > div").last().locator("small span")).toHaveCount(0);
     }
@@ -83,8 +85,11 @@ test("mobile ticker plan is readable without page overflow", async ({ page }) =>
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   await useLocalPublishedData(page);
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(`${baseUrl}/ticker.html?ticker=TEST`);
   await expect(page.getByText("Frozen execution plan")).toBeVisible();
+  await expect(page.locator("html")).toHaveCSS("color-scheme", "light");
+  await expect(page.locator(".shell")).toHaveCSS("background-color", "rgb(238, 240, 235)");
   const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
   expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
   expect(runtimeErrors).toEqual([]);
