@@ -337,9 +337,13 @@ function auditDecisionFunnelUi() {
   const pageBundleVersion = pageSource.match(/assets\/app\.js\?v=([^"']+)/)?.[1];
   const tickerBundleVersion = tickerSource.match(/assets\/app\.js\?v=([^"']+)/)?.[1];
   assert(pageBundleVersion && pageBundleVersion === tickerBundleVersion, "both app surfaces must load the current shared application bundle");
-  assert(stylesSource.includes("@media (prefers-color-scheme: dark)") && stylesSource.includes("html { color-scheme: dark; }"), "shared app surfaces must follow the device dark-mode preference");
-  assert(pageSource.includes('media="(prefers-color-scheme: light)"') && pageSource.includes('media="(prefers-color-scheme: dark)"'), "watchlist browser chrome must follow the device theme");
-  assert(tickerSource.includes('media="(prefers-color-scheme: light)"') && tickerSource.includes('media="(prefers-color-scheme: dark)"'), "ticker browser chrome must follow the device theme");
+  assert(!stylesSource.includes("prefers-color-scheme: dark") && !stylesSource.includes("color-scheme: dark"), "shared app surfaces must remain light regardless of device preference");
+  assert(pageSource.includes('<meta name="color-scheme" content="light">') && !pageSource.includes("prefers-color-scheme"), "watchlist browser chrome must stay light");
+  assert(tickerSource.includes('<meta name="color-scheme" content="light">') && !tickerSource.includes("prefers-color-scheme"), "ticker browser chrome must stay light");
+  const scannerSource = fs.readFileSync("daily_watchlist_overview.py", "utf8");
+  assert(!scannerSource.includes("prefers-color-scheme: dark"), "generated history must not reintroduce dark mode");
+  const manifest = JSON.parse(fs.readFileSync("manifest.webmanifest", "utf8"));
+  assert(manifest.theme_color === "#eef0eb" && manifest.background_color === "#eef0eb", "installed app chrome must match the light theme");
   assert(!appSource.includes("Optional chart"), "ticker detail must remove the optional scanner chart");
   assert(!appSource.includes("Daily scanner bars"), "ticker detail must remove scanner-chart jargon");
   assert(!stylesSource.includes(".chart-details") && !stylesSource.includes(".history-chart"), "removed chart styles must not remain as dead UI code");
