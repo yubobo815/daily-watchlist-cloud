@@ -4,6 +4,8 @@ The visible homepage section reads `data/market-brief.json` independently of the
 
 The homepage does not render a forecast-conditions/source disclosure or the method/calibration-sample paragraph. Keep underlying provenance, forecast conditions, method and calibration sample in the validated JSON for syncing and auditability; do not add the removed text back during daily updates. Dates, expiry and the research-outlook/not-a-trade-signal label remain visible.
 
+Show scenario names, percentages and final-close ranges as text only. Probability progress bars were removed at the user's request; daily updates must not restore them.
+
 ## Daily Codex sync contract
 
 Use only the private **US Market & AI Daily Reports** folder, ID `1vFVQbX-xmbVrOSO4OXDGb1ACwZF3-oXw`, through the existing connected Drive account. Find the latest final dated daily report and its matching, separately issued forecast card. Do not mistake `forecast-log.md`, a prior forecast or an unfinished report for the current outlook.

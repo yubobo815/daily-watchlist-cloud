@@ -39,4 +39,8 @@ assert.ok(!brief.render(fixture).includes("drive.google.com"));
 assert.ok(!brief.render(fixture).includes("Completed forecast sample"), "Do not render the removed method/sample note");
 assert.ok(!brief.render(fixture).includes("Subjective research probabilities"));
 assert.ok(brief.render(fixture).includes("NOT A TRADE SIGNAL"), "Keep the research outlook label");
+assert.ok(!brief.render(fixture).includes("<progress"), "Do not render probability bars");
+for (const key of ["bull", "base", "bear"]) {
+  assert.ok(brief.render(fixture).includes(`<strong>${fixture.forecast.probabilities[key]}%</strong>`), "Preserve each scenario percentage");
+}
 console.log("Market brief: schema, probability boundaries, freshness, expiry and escaping passed.");

@@ -12,7 +12,11 @@ test("market research is readable on desktop and mobile without the source discl
     await page.goto(`${baseUrl}/index.html`);
     const section = page.locator("#market-brief");
     await expect(section.getByRole("heading", { name: marketBrief.headline })).toBeVisible();
-    await expect(section.getByRole("progressbar", { name: "Base probability" })).toHaveAttribute("value", String(marketBrief.forecast.probabilities.base));
+    await expect(section.getByRole("progressbar")).toHaveCount(0);
+    for (const [index, key] of ["bull", "base", "bear"].entries()) {
+      await expect(section.locator(".brief-scenario strong").nth(index)).toHaveText(`${marketBrief.forecast.probabilities[key]}%`);
+      await expect(section.locator(".brief-scenario small").nth(index)).toBeVisible();
+    }
     await expect(section.locator("details, summary")).toHaveCount(0);
     await expect(section.getByRole("link")).toHaveCount(0);
     await expect(section.locator(".brief-date")).toContainText(marketBrief.session_date);
