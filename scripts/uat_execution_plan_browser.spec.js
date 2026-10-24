@@ -23,6 +23,29 @@ test("market research is readable on desktop and mobile, with accessible sources
   expect(errors).toEqual([]);
 });
 
+test("daily brief moves are green up, red down and neutral when unchanged", async ({ page }) => {
+  await useLocalPublishedData(page);
+  const fixture = structuredClone(marketBrief);
+  fixture.metrics = [
+    { label: "Positive test", value: "100", detail: "+1.20% · US close" },
+    { label: "Negative test", value: "100", detail: "−0.52% · US close" },
+    { label: "Unchanged test", value: "100", detail: "+0.00% · US close" },
+  ];
+  await page.route("**/data/market-brief.json", (route) => route.fulfill({ json: fixture }));
+  await page.goto(`${baseUrl}/index.html`);
+  const section = page.locator("#market-brief");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const scheme of ["light", "dark"]) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(section.locator(".brief-change-up")).toHaveCSS("color", scheme === "light" ? "rgb(20, 115, 68)" : "rgb(110, 231, 166)");
+      await expect(section.locator(".brief-change-down")).toHaveCSS("color", scheme === "light" ? "rgb(180, 35, 24)" : "rgb(255, 146, 137)");
+      await expect(section.locator(".brief-metrics > div").last().locator("small")).toHaveText("+0.00% · US close");
+      await expect(section.locator(".brief-metrics > div").last().locator("small span")).toHaveCount(0);
+    }
+  }
+});
+
 test("market research fails safely without hiding the watchlist", async ({ page }) => {
   await useLocalPublishedData(page);
   await page.route("**/data/market-brief.json", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"schema_version":99}' }));

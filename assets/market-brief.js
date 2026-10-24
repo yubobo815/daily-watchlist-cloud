@@ -60,6 +60,14 @@
     const age = sessions.marketSessionAge(data.session_date, now);
     return { dated: age === null || age > 0 || Date.parse(data.issued_at) > now.getTime(), expired: now.getTime() >= Date.parse(data.forecast.evaluates_at) };
   }
+  function renderChange(detail) {
+    // Colour the reported signed move only, not its neutral source/context label.
+    // Both the ASCII hyphen and the typographic minus occur in daily reports.
+    const match = /^([+\-−])\s*(\d[\d,]*(?:\.\d+)?)(\s*(?:%|bps?\b|pp\b|points?\b))?/i.exec(detail);
+    if (!match || Number(match[2].replace(/,/g, "")) === 0) return escape(detail);
+    const direction = match[1] === "+" ? "up" : "down";
+    return `<span class="brief-change-${direction}">${escape(match[0])}</span>${escape(detail.slice(match[0].length))}`;
+  }
   function render(input, now = new Date()) {
     const data = validate(input); const f = data.forecast; const state = status(data, now);
     const stamp = (value) => escape(new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Melbourne", dateStyle: "medium", timeStyle: "short" }).format(new Date(value)));
@@ -71,12 +79,12 @@
     return `<div class="brief-heading"><div><p class="brief-eyebrow">INDEPENDENT RESEARCH · DAILY BRIEF</p><h2>Market overview</h2></div><span class="brief-state">${state.dated ? "Dated report — awaiting a newer session" : "Latest completed US session"}</span></div>
       <p class="brief-date">US session ${escape(data.session_date)} · Published ${stamp(data.issued_at)} Melbourne</p>
       <h3 class="brief-headline">${escape(data.headline)}</h3><p>${escape(data.summary)}</p>
-      <div class="brief-metrics">${data.metrics.map((m) => `<div><span>${escape(m.label)}</span><strong>${escape(m.value)}</strong><small>${escape(m.detail)}</small></div>`).join("")}</div>
+      <div class="brief-metrics">${data.metrics.map((m) => `<div><span>${escape(m.label)}</span><strong>${escape(m.value)}</strong><small>${renderChange(m.detail)}</small></div>`).join("")}</div>
       <div class="brief-columns"><div class="brief-developments">${data.highlights.map((h) => `<article><h4>${escape(h.title)}</h4><p>${escape(h.text)}</p></article>`).join("")}</div>
       <div class="brief-outlook"><p class="brief-eyebrow">${state.expired ? "FORECAST WINDOW ENDED · ARCHIVED OUTLOOK" : "RESEARCH OUTLOOK · NOT A TRADE SIGNAL"}</p><h3>${escape(f.outlook)}</h3><p>${escape(f.horizon)}</p>
       <div class="brief-scenarios">${probabilities.map(([key, label, boundary]) => `<div class="brief-scenario"><span>${label}</span><strong>${f.probabilities[key]}%</strong><small>${escape(boundary)}</small><progress max="100" value="${f.probabilities[key]}" aria-label="${label} probability">${f.probabilities[key]}%</progress></div>`).join("")}</div>
       <p class="brief-note">${escape(f.method)} Completed forecast sample: ${f.completed_sample}.</p></div></div>
       <details class="brief-details"><summary>Forecast conditions &amp; sources</summary><p>${escape(f.watch_next)}</p><p>Reference S&amp;P 500: ${f.reference_close.toLocaleString("en-AU")}. Evaluate at ${stamp(f.evaluates_at)} Melbourne. Forecast ID: ${escape(f.id)}. Original forecasts are not revised retrospectively.</p><p>${escape(data.limitations)}</p><ul>${data.sources.map((s) => `<li><a href="${escape(s.url)}" target="_blank" rel="noopener noreferrer">${escape(s.label)}</a></li>`).join("")}</ul></details>`;
   }
-  return Object.freeze({ validate, status, render });
+  return Object.freeze({ validate, status, render, renderChange });
 }));
