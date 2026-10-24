@@ -36,5 +36,7 @@ assert.ok(!brief.render(unsafe).includes("<img"));
 assert.ok(brief.render(fixture, new Date("2026-10-29T01:00:00Z")).includes("ARCHIVED OUTLOOK"));
 assert.ok(!brief.render(fixture).includes("<details"), "Homepage should not show forecast conditions or sources");
 assert.ok(!brief.render(fixture).includes("drive.google.com"));
-assert.ok(brief.render(fixture).includes("Completed forecast sample"), "Keep uncertainty context visible");
+assert.ok(!brief.render(fixture).includes("Completed forecast sample"), "Do not render the removed method/sample note");
+assert.ok(!brief.render(fixture).includes("Subjective research probabilities"));
+assert.ok(brief.render(fixture).includes("NOT A TRADE SIGNAL"), "Keep the research outlook label");
 console.log("Market brief: schema, probability boundaries, freshness, expiry and escaping passed.");

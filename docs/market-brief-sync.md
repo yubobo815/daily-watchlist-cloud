@@ -2,7 +2,7 @@
 
 The visible homepage section reads `data/market-brief.json` independently of the scanner and Supabase. It is a curated public summary, not a copy of the private reports. Drive permissions stay unchanged; report links require the visitor's existing access.
 
-The homepage does not render a forecast-conditions/source disclosure. Keep the underlying provenance and forecast conditions in the validated JSON for syncing and auditability; do not add the removed disclosure back during daily updates. Dates, expiry and the uncertainty note remain visible.
+The homepage does not render a forecast-conditions/source disclosure or the method/calibration-sample paragraph. Keep underlying provenance, forecast conditions, method and calibration sample in the validated JSON for syncing and auditability; do not add the removed text back during daily updates. Dates, expiry and the research-outlook/not-a-trade-signal label remain visible.
 
 ## Daily Codex sync contract
 

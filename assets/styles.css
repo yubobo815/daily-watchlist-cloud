@@ -4,7 +4,7 @@
 .market-brief p { line-height: 1.6; }
 .brief-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--muted); margin: 0 0 8px; }
 .brief-state { border: 1px solid var(--line-soft); border-radius: 20px; padding: 6px 10px; font-size: 11px; color: var(--muted); }
-.brief-date, .brief-note { font-size: 12px; color: var(--muted); }
+.brief-date { font-size: 12px; color: var(--muted); }
 .brief-headline { font-size: clamp(21px, 2.6vw, 30px); letter-spacing: -.03em; }
 .brief-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--line-soft); margin: 22px 0; }
 .brief-metrics > div { padding: 16px 12px; }

@@ -16,7 +16,10 @@ test("market research is readable on desktop and mobile without the source discl
     await expect(section.locator("details, summary")).toHaveCount(0);
     await expect(section.getByRole("link")).toHaveCount(0);
     await expect(section.locator(".brief-date")).toContainText(marketBrief.session_date);
-    await expect(section.locator(".brief-note")).toBeVisible();
+    await expect(section.locator(".brief-note")).toHaveCount(0);
+    await expect(section).not.toContainText("Completed forecast sample");
+    await expect(section).not.toContainText("Subjective research probabilities");
+    await expect(section.locator(".brief-outlook .brief-eyebrow")).toContainText(/NOT A TRADE SIGNAL|ARCHIVED OUTLOOK/);
     const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth }));
     expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
     await section.screenshot({ path: `${process.env.SCREENSHOT_DIR || "/tmp"}/market-brief-${width}.png` });
