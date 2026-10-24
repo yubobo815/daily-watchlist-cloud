@@ -73,6 +73,40 @@ async function useLocalPublishedData(page) {
   });
 }
 
+test("readability: larger research text, unclipped tools and complete mobile conditions", async ({ page }) => {
+  await useLocalPublishedData(page);
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${baseUrl}/index.html`);
+    await expect(page.locator(".brief-developments p").first()).toHaveCSS("font-size", "15px");
+    await expect(page.locator(".brief-headline")).toHaveCSS("text-transform", "none");
+    await expect(page.locator(".brief-metrics small").first()).toHaveCSS("font-size", "12px");
+    if (width < 961) {
+      await expect(page.locator(".mobile-execution").first()).toHaveCSS("white-space", "normal");
+      await expect(page.locator(".mobile-execution").first()).toHaveCSS("text-overflow", "clip");
+      for (const selector of [".notification-center > summary", "#market-activity > summary"]) {
+        const box = await page.locator(selector).evaluate(e => ({ width: e.clientWidth, content: e.scrollWidth, height: e.getBoundingClientRect().height }));
+        expect(box.content).toBeLessThanOrEqual(box.width + 1);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      if (width > 360) {
+        const notification = await page.locator(".notification-center > summary").boundingBox();
+        const activity = await page.locator("#market-activity > summary").boundingBox();
+        expect(Math.abs(notification.y - activity.y)).toBeLessThanOrEqual(1);
+      }
+      await page.locator("#market-activity > summary").click();
+      await expect(page.locator("#market-activity")).toHaveAttribute("open", "");
+      await page.locator("#market-activity > summary").click();
+      await page.locator("#mobile-search").fill("NO_MATCH_READABILITY");
+      await expect(page.locator("#watchlist-body tr")).toHaveCount(0);
+      await page.locator("#mobile-clear-search").click();
+      await expect(page.locator("#watchlist-body tr")).toHaveCount(1);
+    }
+    const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth }));
+    expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
+  }
+});
+
 test("watchlist and ticker page preserve the frozen plan", async ({ page }) => {
   const runtimeErrors = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
