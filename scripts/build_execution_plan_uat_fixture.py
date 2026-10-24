@@ -35,6 +35,8 @@ def main() -> None:
     shutil.copy2(ROOT / "ticker.html", SITE / "ticker.html")
     shutil.copy2(ROOT / "manifest.webmanifest", SITE / "manifest.webmanifest")
     shutil.copytree(ROOT / "assets", SITE / "assets")
+    (SITE / "data").mkdir()
+    shutil.copy2(ROOT / "data" / "market-brief.json", SITE / "data" / "market-brief.json")
 
     plan = {
         "execution_plan_id": "uat-plan-2026-08-03",

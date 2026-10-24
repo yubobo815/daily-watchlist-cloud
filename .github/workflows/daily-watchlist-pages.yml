@@ -286,6 +286,7 @@ jobs:
           cp ticker.html public/ticker.html
           cp manifest.webmanifest public/manifest.webmanifest
           cp -R assets public/assets
+          cp data/market-brief.json public/data/market-brief.json
           cp daily_watchlist_overview_latest.csv public/daily_watchlist_overview_latest.csv
           cp daily_watchlist_run_metadata_latest.json public/data/run_metadata.json
           cp daily_watchlist_overview_failures.csv public/daily_watchlist_overview_failures.csv 2>/dev/null || true
