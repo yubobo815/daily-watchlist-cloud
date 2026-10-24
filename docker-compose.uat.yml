@@ -28,9 +28,12 @@ services:
         condition: service_started
     environment:
       BASE_URL: http://web:4178
+      MARKET_BRIEF_FILE: /work/data/market-brief.json
+      SCREENSHOT_DIR: /screenshots
     working_dir: /work
     volumes:
       - ./:/work:ro
+      - ./output/browser-screenshots:/screenshots
     command: >-
       sh -lc "cd /tmp && npm init -y >/dev/null && npm install --silent @playwright/test@1.58.2 &&
       cp /work/scripts/uat_execution_plan_browser.spec.js /tmp/uat_execution_plan_browser.spec.js &&

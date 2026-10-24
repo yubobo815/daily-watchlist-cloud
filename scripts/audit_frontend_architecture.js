@@ -155,3 +155,4 @@ function main() {
 }
 
 main();
+require("./audit_market_brief.js");

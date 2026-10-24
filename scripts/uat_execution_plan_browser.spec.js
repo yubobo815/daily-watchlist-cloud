@@ -1,6 +1,35 @@
 const { test, expect } = require("@playwright/test");
 
 const baseUrl = process.env.BASE_URL || "http://web:4178";
+const marketBrief = require(process.env.MARKET_BRIEF_FILE || "../data/market-brief.json");
+
+test("market research is readable on desktop and mobile, with accessible sources", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await useLocalPublishedData(page);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`${baseUrl}/index.html`);
+    const section = page.locator("#market-brief");
+    await expect(section.getByRole("heading", { name: marketBrief.headline })).toBeVisible();
+    await expect(section.getByRole("progressbar", { name: "Base probability" })).toHaveAttribute("value", String(marketBrief.forecast.probabilities.base));
+    await section.locator("summary").click();
+    await expect(section.getByText(`Forecast ID: ${marketBrief.forecast.id}`, { exact: false })).toBeVisible();
+    await expect(section.getByRole("link").first()).toHaveAttribute("href", marketBrief.sources[0].url);
+    const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth }));
+    expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
+    await section.screenshot({ path: `${process.env.SCREENSHOT_DIR || "/tmp"}/market-brief-${width}.png` });
+  }
+  expect(errors).toEqual([]);
+});
+
+test("market research fails safely without hiding the watchlist", async ({ page }) => {
+  await useLocalPublishedData(page);
+  await page.route("**/data/market-brief.json", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"schema_version":99}' }));
+  await page.goto(`${baseUrl}/index.html`);
+  await expect(page.locator("#market-brief")).toContainText("Daily research is unavailable");
+  await expect(page.getByText("Waiting for price to reach 100.00-105.00", { exact: false }).first()).toBeVisible();
+});
 
 async function useLocalPublishedData(page) {
   await page.route("https://yubobo815.github.io/daily-watchlist-cloud/data/**", async (route) => {
