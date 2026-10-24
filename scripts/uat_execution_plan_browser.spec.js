@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 const baseUrl = process.env.BASE_URL || "http://web:4178";
 const marketBrief = require(process.env.MARKET_BRIEF_FILE || "../data/market-brief.json");
 
-test("market research is readable on desktop and mobile, with accessible sources", async ({ page }) => {
+test("market research is readable on desktop and mobile without the source disclosure", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await useLocalPublishedData(page);
@@ -13,9 +13,10 @@ test("market research is readable on desktop and mobile, with accessible sources
     const section = page.locator("#market-brief");
     await expect(section.getByRole("heading", { name: marketBrief.headline })).toBeVisible();
     await expect(section.getByRole("progressbar", { name: "Base probability" })).toHaveAttribute("value", String(marketBrief.forecast.probabilities.base));
-    await section.locator("summary").click();
-    await expect(section.getByText(`Forecast ID: ${marketBrief.forecast.id}`, { exact: false })).toBeVisible();
-    await expect(section.getByRole("link").first()).toHaveAttribute("href", marketBrief.sources[0].url);
+    await expect(section.locator("details, summary")).toHaveCount(0);
+    await expect(section.getByRole("link")).toHaveCount(0);
+    await expect(section.locator(".brief-date")).toContainText(marketBrief.session_date);
+    await expect(section.locator(".brief-note")).toBeVisible();
     const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth }));
     expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
     await section.screenshot({ path: `${process.env.SCREENSHOT_DIR || "/tmp"}/market-brief-${width}.png` });
