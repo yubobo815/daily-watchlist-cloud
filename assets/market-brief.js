@@ -82,8 +82,7 @@
       <div class="brief-metrics">${data.metrics.map((m) => `<div><span>${escape(m.label)}</span><strong>${escape(m.value)}</strong><small>${renderChange(m.detail)}</small></div>`).join("")}</div>
       <div class="brief-columns"><div class="brief-developments">${data.highlights.map((h) => `<article><h4>${escape(h.title)}</h4><p>${escape(h.text)}</p></article>`).join("")}</div>
       <div class="brief-outlook"><p class="brief-eyebrow">${state.expired ? "FORECAST WINDOW ENDED · ARCHIVED OUTLOOK" : "RESEARCH OUTLOOK · NOT A TRADE SIGNAL"}</p><h3>${escape(f.outlook)}</h3><p>${escape(f.horizon)}</p>
-      <div class="brief-scenarios">${probabilities.map(([key, label, boundary]) => `<div class="brief-scenario"><span>${label}</span><strong>${f.probabilities[key]}%</strong><small>${escape(boundary)}</small><progress max="100" value="${f.probabilities[key]}" aria-label="${label} probability">${f.probabilities[key]}%</progress></div>`).join("")}</div>
-      <p class="brief-note">${escape(f.method)} Completed forecast sample: ${f.completed_sample}.</p></div></div>`;
+      <div class="brief-scenarios">${probabilities.map(([key, label, boundary]) => `<div class="brief-scenario"><span>${label}</span><strong>${f.probabilities[key]}%</strong><small>${escape(boundary)}</small><progress max="100" value="${f.probabilities[key]}" aria-label="${label} probability">${f.probabilities[key]}%</progress></div>`).join("")}</div></div></div>`;
   }
   return Object.freeze({ validate, status, render, renderChange });
 }));
