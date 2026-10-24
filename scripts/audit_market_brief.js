@@ -34,5 +34,7 @@ const unsafe = structuredClone(fixture);
 unsafe.headline = '<img src=x onerror="alert(1)">';
 assert.ok(!brief.render(unsafe).includes("<img"));
 assert.ok(brief.render(fixture, new Date("2026-10-29T01:00:00Z")).includes("ARCHIVED OUTLOOK"));
-assert.ok(brief.render(fixture).includes('rel="noopener noreferrer"'));
+assert.ok(!brief.render(fixture).includes("<details"), "Homepage should not show forecast conditions or sources");
+assert.ok(!brief.render(fixture).includes("drive.google.com"));
+assert.ok(brief.render(fixture).includes("Completed forecast sample"), "Keep uncertainty context visible");
 console.log("Market brief: schema, probability boundaries, freshness, expiry and escaping passed.");

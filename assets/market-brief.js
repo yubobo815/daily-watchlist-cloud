@@ -12,7 +12,7 @@
         .then((response) => { if (!response.ok) throw new Error("Brief unavailable"); return response.json(); })
         .then((data) => {
           target.innerHTML = api.render(data);
-          // Re-evaluate time-sensitive labels without collapsing an open source disclosure.
+          // Re-evaluate time-sensitive labels without fetching the report again.
           setInterval(() => {
             const next = api.status(data);
             target.querySelector(".brief-state").textContent = next.dated ? "Dated report — awaiting a newer session" : "Latest completed US session";
@@ -83,8 +83,7 @@
       <div class="brief-columns"><div class="brief-developments">${data.highlights.map((h) => `<article><h4>${escape(h.title)}</h4><p>${escape(h.text)}</p></article>`).join("")}</div>
       <div class="brief-outlook"><p class="brief-eyebrow">${state.expired ? "FORECAST WINDOW ENDED · ARCHIVED OUTLOOK" : "RESEARCH OUTLOOK · NOT A TRADE SIGNAL"}</p><h3>${escape(f.outlook)}</h3><p>${escape(f.horizon)}</p>
       <div class="brief-scenarios">${probabilities.map(([key, label, boundary]) => `<div class="brief-scenario"><span>${label}</span><strong>${f.probabilities[key]}%</strong><small>${escape(boundary)}</small><progress max="100" value="${f.probabilities[key]}" aria-label="${label} probability">${f.probabilities[key]}%</progress></div>`).join("")}</div>
-      <p class="brief-note">${escape(f.method)} Completed forecast sample: ${f.completed_sample}.</p></div></div>
-      <details class="brief-details"><summary>Forecast conditions &amp; sources</summary><p>${escape(f.watch_next)}</p><p>Reference S&amp;P 500: ${f.reference_close.toLocaleString("en-AU")}. Evaluate at ${stamp(f.evaluates_at)} Melbourne. Forecast ID: ${escape(f.id)}. Original forecasts are not revised retrospectively.</p><p>${escape(data.limitations)}</p><ul>${data.sources.map((s) => `<li><a href="${escape(s.url)}" target="_blank" rel="noopener noreferrer">${escape(s.label)}</a></li>`).join("")}</ul></details>`;
+      <p class="brief-note">${escape(f.method)} Completed forecast sample: ${f.completed_sample}.</p></div></div>`;
   }
   return Object.freeze({ validate, status, render, renderChange });
 }));

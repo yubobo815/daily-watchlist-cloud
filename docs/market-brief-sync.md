@@ -2,6 +2,8 @@
 
 The visible homepage section reads `data/market-brief.json` independently of the scanner and Supabase. It is a curated public summary, not a copy of the private reports. Drive permissions stay unchanged; report links require the visitor's existing access.
 
+The homepage does not render a forecast-conditions/source disclosure. Keep the underlying provenance and forecast conditions in the validated JSON for syncing and auditability; do not add the removed disclosure back during daily updates. Dates, expiry and the uncertainty note remain visible.
+
 ## Daily Codex sync contract
 
 Use only the private **US Market & AI Daily Reports** folder, ID `1vFVQbX-xmbVrOSO4OXDGb1ACwZF3-oXw`, through the existing connected Drive account. Find the latest final dated daily report and its matching, separately issued forecast card. Do not mistake `forecast-log.md`, a prior forecast or an unfinished report for the current outlook.
