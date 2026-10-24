@@ -4,6 +4,14 @@ const path = require("node:path");
 const brief = require("../assets/market-brief.js");
 const data = JSON.parse(fs.readFileSync(process.argv[2] || path.join(__dirname, "../data/market-brief.json"), "utf8"));
 brief.validate(data);
+assert.equal(brief.renderChange("+3.14% · settlement"), '<span class="brief-change-up">+3.14%</span> · settlement');
+assert.equal(brief.renderChange("−0.52% · US close"), '<span class="brief-change-down">−0.52%</span> · US close');
+assert.equal(brief.renderChange("-0.21% · US close"), '<span class="brief-change-down">-0.21%</span> · US close');
+assert.equal(brief.renderChange("+4 bp · Treasury par yield"), '<span class="brief-change-up">+4 bp</span> · Treasury par yield');
+for (const neutral of ["0.00% · unchanged", "+0.00%", "−0.00%", "Not available", "26–28 October"]) {
+  assert.equal(brief.renderChange(neutral), neutral);
+}
+assert.ok(!brief.renderChange('+1% <img src=x onerror="alert(1)">').includes("<img"));
 const fixture = structuredClone(data);
 fixture.session_date = "2026-10-23";
 fixture.issued_at = "2026-10-23T23:12:41.730Z";
