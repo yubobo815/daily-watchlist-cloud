@@ -47,8 +47,10 @@ test("WAIT remains distinct from AVOID on the watchlist and stock page", async (
   await expect(page.locator("#ticker-detail-panel h2")).toHaveText("V000");
   await page.locator("#ticker-detail-panel .full-detail-link").click();
   await expect(page.locator("#latest-panel .latest-head > .badge")).toHaveText("WAIT");
+  await expect(page.locator("#history-visual")).toContainText("current view remains Wait.");
   await page.goto(`${baseUrl}/ticker.html?ticker=V060`);
   await expect(page.locator("#latest-panel .latest-head > .badge")).toHaveText("AVOID");
+  await expect(page.locator("#history-visual")).toContainText("current view remains Avoid.");
   expect(errors).toEqual([]);
 });
 
