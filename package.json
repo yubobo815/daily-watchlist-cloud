@@ -1,10 +1,10 @@
 {
   "name": "daily-watchlist-cloud",
-  "version": "5.1.0",
+  "version": "5.1.1",
   "private": true,
   "scripts": {
     "audit:market-brief": "node scripts/audit_market_brief.js",
-    "audit:market-brief-drive": "python3 -m unittest discover -s scripts -p 'test_market_brief_*.py' && node scripts/audit_market_brief_publisher.cjs",
+    "audit:market-brief-drive": "python3 -m unittest discover -s scripts -p 'test_market_brief_*.py' && node scripts/audit_market_brief_publisher.cjs && node scripts/audit_market_brief_alignment.cjs",
     "audit:watchlist": "node scripts/audit_frontend_architecture.js && node scripts/audit_watchlist_app.js && node scripts/audit_focus_list.js && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_context_overlays.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_shadow_policy.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_supabase_learning_health.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_database_capacity.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_incremental_pipeline.py && PYTHONPYCACHEPREFIX=.pycache python3 scripts/audit_execution_plans.py && npm run audit:market-brief-drive",
     "uat:docker": "bash scripts/run_docker_uat.sh",
     "vercel-build": "echo Static watchlist app ready"

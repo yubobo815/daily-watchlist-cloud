@@ -48,12 +48,12 @@ assert.equal(coverage.missing[0].ticker, "MISS");
 assert.equal(coverage.stale[0].ticker, "OLD");
 assert.equal(coverage.staleCount, 2);
 const packageVersion = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
-assert.equal(packageVersion, "5.1.0");
+assert.equal(packageVersion, "5.1.1");
 for (const file of ["index.html", "ticker.html"]) {
   const source = fs.readFileSync(file, "utf8");
-  assert.ok(source.includes('data-ui-version="5.1.0"'));
-  assert.ok(source.includes("research-ui.js?v=v5.1.0"));
-  assert.ok(source.includes("research-workspace.css?v=v5.1.0"));
+  assert.ok(source.includes('data-ui-version="5.1.1"'));
+  assert.ok(source.includes("research-ui.js?v=v5.1.1"));
+  assert.ok(source.includes("research-workspace.css?v=v5.1.1"));
   assert.ok(!source.includes('class="app-version"'), "Version belongs in release metadata, not the visible brand");
 }
 assert.ok(!fs.readFileSync("index.html", "utf8").includes("Scanner rank first"));

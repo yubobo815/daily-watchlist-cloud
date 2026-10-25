@@ -105,7 +105,7 @@ test("v5 research workspace: coverage, distance order, selected reasons, filters
   await page.goto(baseUrl);
   await expect(page.locator("#sort")).toHaveValue("distance-asc");
   await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
-  await expect(page.locator("body")).not.toContainText("v5.1.0");
+  await expect(page.locator("body")).not.toContainText("v5.1.1");
   await expect(page.locator("#watchlist-body tr")).toHaveCount(40);
   await expect(page.locator("#watchlist-body tr").first().locator(".ticker-link")).toHaveText("V000");
   await expect(page.locator("#watchlist-head")).not.toContainText("Protection");
@@ -168,7 +168,7 @@ test("v5 stock page: price ruler, source readiness and previous/next navigation"
   await page.goto(`${baseUrl}/ticker.html?ticker=V002`);
   await expect(page.locator(".price-ruler")).toHaveAttribute("aria-label", /planned zone 100.00 to 105.00/);
   await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
-  await expect(page.locator("body")).not.toContainText("v5.1.0");
+  await expect(page.locator("body")).not.toContainText("v5.1.1");
   await expect(page.locator(".readiness-meter > strong")).toContainText("57.1");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "57.1");
   await expect(page.locator("#timeline .state-timeline li")).toHaveCount(5);

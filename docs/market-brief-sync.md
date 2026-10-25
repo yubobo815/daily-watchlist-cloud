@@ -8,6 +8,48 @@ v5 shows the report probabilities as one segmented Bull/Base/Bear strip, with th
 
 ## Daily Codex sync contract
 
+This is the active publisher. GitHub scheduled publishing stays disabled
+(`MARKET_BRIEF_SYNC_ENABLED=false`); do not create a publishing App, approve
+workflow runs automatically, or bypass protected checks.
+
+Publication order is completion-gated: final morning US-close report and matching
+immutable forecast card saved/read back in Drive; scanner has activated its live
+publication for the same US session; publish the concise summary through a tested
+PR; verify production JSON and rendering. A scheduled start is not proof that
+either upstream task has finished. Never use the evening AU/Asia preview as a
+replacement for the morning US-close report.
+
+The existing morning producer is scheduled at 10:00 Melbourne, Monday through
+Saturday. Tuesday–Saturday normally cover the preceding completed US session,
+including Friday's US close on Saturday. The ASX calendar gates only the AU
+opening-preview section, never the US-close report. Monday retains the AU
+weekend/next-open analysis and reuses Friday's already archived US sources;
+do not duplicate reports, relabel a session or manufacture another forecast.
+
+The existing local heartbeat checks hourly from 11:45 through 19:45 Melbourne.
+At each check use the latest completed US session from `assets/market-session.js`,
+not the Melbourne run date. Run
+`node scripts/check_market_brief_alignment.cjs --candidate path/to/candidate.json`
+before creating a publishing PR, and again immediately before merging its exact
+tested head. Exit 2 means wait for a later check; exit 1 means an invalid or
+unavailable input. Preserve the last valid summary in either case. Partial
+coverage is allowed when honestly disclosed; never turn it into claimed full
+coverage. A mixed publication identity is not allowed.
+
+Normal upstream waiting stays quiet. At the final 19:45 check, surface an
+actionable failure if the newest completed session is still blocked, including
+the expected/report/watchlist dates and which input is missing. An already
+published unchanged snapshot is always a no-op. Repeated daily failures should
+be deduplicated unless their cause or required action changes. This is bounded
+polling, not an event-driven dependency or an availability guarantee; the host
+and connected accounts must be available.
+
+Avoid repeated full-watchlist reads: check the small published brief and Drive
+metadata first. If the latest completed session is already published with the
+same source IDs/modification times, return immediately without full report or
+watchlist downloads, audits or PR creation. Fetch the watchlist only for a new
+or changed candidate awaiting publication.
+
 Use only the private **US Market & AI Daily Reports** folder, ID `1vFVQbX-xmbVrOSO4OXDGb1ACwZF3-oXw`, through the existing connected Drive account. Find the latest final dated daily report and its matching, separately issued forecast card. Do not mistake `forecast-log.md`, a prior forecast or an unfinished report for the current outlook.
 
 Update only `data/market-brief.json`. Preserve the report's actual US session date, publication timestamp, source file IDs and modified timestamps. Whitelist market facts, concise interpretation, public citations and the original forecast ID, probabilities, final-close boundaries, horizon, limitations and completed calibration sample. Never publish private account details, personal positions, credentials or entire source documents. Do not add unsupported data or invent a model forecast. A changed judgement requires a new forecast ID from the source, never retrospective edits.
@@ -18,7 +60,15 @@ Validate with `npm run audit:market-brief` (an optional file path can be passed 
 
 The Codex sync uses this chat's existing Drive and GitHub connections. This is a local scheduled task: the host must be available and connections must remain authorised. A schedule is not a guarantee of successful publication; source dates remain visible if a run cannot finish.
 
-## GitHub scheduled publisher
+## Disabled GitHub publisher prototype
+
+This prototype is retained for audit/history, not used for daily publishing.
+Its live test failed closed: `workflow_dispatch` Quality checks do not satisfy
+GitHub PR required-check rules, even when the jobs pass. Do not enable the
+schedule or treat successful manually dispatched CI as merge eligibility.
+The user chose to retain the ChatGPT/Codex publisher; no new GitHub App or
+automatic approval is authorised. The description below records the prototype,
+not a verified operational publishing path.
 
 `market-brief-sync.yml` supports manual `verify` and `sync` modes. Scheduled sync
 is gated by repository variable `MARKET_BRIEF_SYNC_ENABLED=true`. The schedule
