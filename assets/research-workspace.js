@@ -42,7 +42,7 @@
     const total = Number(runInfo?.symbols_total ?? rows.length);
     const date = runInfo?.latest_data_date || rows[0]?.data_date || rows[0]?.history_date || rows[0]?.date || "Unavailable";
     const partial = health.label.toLowerCase().includes("partial") || analyzed < total || ui.coverage(runInfo, rows).staleCount > 0;
-    rail.innerHTML = `<a class="rail-home" href="./">Daily Trade Copilot <span>v5.0.0</span></a>
+    rail.innerHTML = `<a class="rail-home" href="./">Daily Trade Copilot</a>
       <span>US close <strong>${escaped(date)}</strong></span><span>Coverage <strong>${analyzed}/${total}</strong></span>
       <details class="coverage-disclosure" ${wasOpen ? "open" : ""}><summary class="${partial ? "coverage-partial" : ""}">${escaped(partial ? "Partial coverage" : health.label)}</summary>${coverageMarkup(runInfo, coverageRows.length ? coverageRows : rows)}</details>`;
     const hero = document.querySelector("#hero-brief");
@@ -57,7 +57,7 @@
   function distanceMarkup(row) {
     const distance = ui.distance(row);
     const near = distance !== null && Math.abs(distance) <= 1 && !["exit", "avoid"].includes(actionKind(row.action)) && !freshnessBlocked(row);
-    return `<span class="zone-distance ${near ? "near-zone" : ""}" title="Signed distance to nearest zone boundary; zero inside. Proximity is not entry permission.">${escaped(ui.formatDistance(row))}</span>`;
+    return `<span class="zone-distance ${near ? "near-zone" : ""}" title="Inside means the close is within the planned zone. Outside values show signed distance to the nearest boundary. Proximity is not entry permission.">${escaped(ui.formatDistance(row))}</span>`;
   }
 
   function freshnessBlocked(row) {
@@ -75,12 +75,9 @@
     return executionChecksClear(row) && ["buy", "continue"].includes(actionKind(row.action)) ? ui.number(payloadValue(row, "risk_pct_to_stop")) : null;
   }
 
-  function columns(rows) {
+  function columns() {
     return [
       ["ticker", "Ticker / company"], ["action", "Signal"], ["readiness", "Signal readiness"], ["zone", "Planned entry zone"], ["distance", "Distance to zone"],
-      ...(rows.some(row => protection(row) > 0) ? [["protection", "Protection"]] : []),
-      ...(rows.some(row => loss(row) > 0) ? [["loss", "Loss if stopped"]] : []),
-      ["meaning", "What it means"],
     ];
   }
 
@@ -94,17 +91,14 @@
     if (key === "readiness") return readiness(row);
     if (key === "zone") return `<span class="zone-values">${escaped(zoneMarkup(row))}</span>`;
     if (key === "distance") return distanceMarkup(row);
-    if (key === "protection") return protection(row) > 0 ? fmt(protection(row)) : "—";
-    if (key === "loss") return loss(row) > 0 ? `−${Math.abs(loss(row)).toFixed(1)}%` : "—";
-    return `<span class="meaning-sentence" title="${escaped(decisionNarrative(row))}">${escaped(decisionHeadline(row))}</span>`;
+    return "";
   }
 
   function mobileCard(row) {
     return `<div class="v5-stock-card"><button type="button" data-mobile-ticker="${escaped(row.ticker)}" aria-expanded="${mobileExpandedTicker === row.ticker}" aria-controls="mobile-detail-${escaped(row.ticker)}" class="v5-stock-link">
       <span class="v5-card-identity"><strong>${escaped(row.ticker)}</strong><span>${escaped(displaySecurityName(row.name, row.ticker) || row.ticker)}</span></span>
       <span class="v5-card-badges">${badge(row)}${readiness(row)}</span>
-      <span class="v5-card-distance"><small>Distance to planned zone</small>${distanceMarkup(row)}</span>
-      <span class="mobile-execution">${escaped(decisionHeadline(row))}</span></button>${favourite(row)}</div>${mobileExpandedTicker === row.ticker ? `<section id="mobile-detail-${escaped(row.ticker)}" class="mobile-inline-detail" aria-label="${escaped(row.ticker)} supporting evidence"></section>` : ""}`;
+      <span class="v5-card-distance"><small>Distance to planned zone</small>${distanceMarkup(row)}</span></button></div>${mobileExpandedTicker === row.ticker ? `<section id="mobile-detail-${escaped(row.ticker)}" class="mobile-inline-detail" aria-label="${escaped(row.ticker)} supporting evidence"></section>` : ""}`;
   }
 
   function resetPaginationIfNeeded() {
@@ -202,16 +196,20 @@
     const row = state.visibleRows.find(item => item.ticker === state.selectedTicker);
     if (!row) { panel.innerHTML = '<p class="subtle">Choose a stock to read its supporting evidence.</p>'; return; }
     const history = historyCache.get(row.ticker) || { loading: true, rows: [] };
-    const contents = `<div class="detail-panel-head"><div><h2>${escaped(row.ticker)}</h2><p>${escaped(displaySecurityName(row.name, row.ticker) || row.ticker)}</p></div>${favourite(row)}</div>
-      <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
-      <section class="state-changes"><h3>State changes</h3>${transitionsMarkup(history.rows, history.loading, history.failed, true)}</section><a class="full-detail-link" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">Open full detail →</a>`;
-    panel.innerHTML = contents;
+    const index = state.visibleRows.findIndex(item => item.ticker === row.ticker);
+    const plan = protection(row) > 0 || loss(row) > 0 ? `<section class="recorded-plan"><h3>${activeExecutionPlan(row) ? "Existing frozen plan" : "Qualified plan"}</h3><dl class="plan-facts">${protection(row) > 0 ? `<div><dt>Protection</dt><dd>${fmt(protection(row))}</dd></div>` : ""}${loss(row) > 0 ? `<div><dt>Loss if stopped</dt><dd>−${Math.abs(loss(row)).toFixed(1)}%</dd></div>` : ""}</dl></section>` : "";
+    const evidence = `<section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
+      <section class="state-changes"><h3>State changes</h3>${transitionsMarkup(history.rows, history.loading, history.failed, true)}</section>${plan}`;
+    const fullLink = `<a class="full-detail-link" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">Open full detail →</a>`;
+    panel.innerHTML = `<div class="detail-panel-head"><div><h2>${escaped(row.ticker)}</h2><p>${escaped(displaySecurityName(row.name, row.ticker) || row.ticker)}</p></div>${favourite(row)}</div>${evidence}<nav class="detail-neighbours" aria-label="Selected stock navigation"><button type="button" data-research-step="-1" ${index <= 0 ? "disabled" : ""}>Previous stock</button><button type="button" data-research-step="1" ${index >= state.visibleRows.length - 1 ? "disabled" : ""}>Next stock</button></nav>${fullLink}`;
     const inline = document.querySelector(".mobile-inline-detail");
-    if (inline) inline.innerHTML = contents;
+    if (inline) inline.innerHTML = `<div class="mobile-detail-tools">${favourite(row)}</div>${evidence}${fullLink}`;
     loadPanelHistory(row.ticker);
   };
 
   window.selectTicker = function selectResearchTicker(ticker) {
+    const index = state.visibleRows.findIndex(row => row.ticker === ticker);
+    if (index >= 0) pageNumber = Math.floor(index / INITIAL_WATCHLIST_ROWS) + 1;
     originalSelectTicker(ticker);
     renderWatchlist({ refreshOverview: false });
   };
@@ -315,6 +313,12 @@
     document.querySelector("#ticker-detail-panel")?.addEventListener("click", event => {
       const star = event.target.closest("[data-focus-ticker]");
       if (star) toggleFocusTicker(star.dataset.focusTicker);
+      const step = event.target.closest("[data-research-step]");
+      if (step && !step.disabled) {
+        const index = state.visibleRows.findIndex(row => row.ticker === state.selectedTicker);
+        const next = state.visibleRows[index + Number(step.dataset.researchStep)];
+        if (next) selectTicker(next.ticker);
+      }
     });
     document.querySelector("#mobile-sort")?.addEventListener("change", event => {
       state.sort = event.target.value; document.querySelector("#sort").value = state.sort; renderWatchlist({ refreshOverview: false });

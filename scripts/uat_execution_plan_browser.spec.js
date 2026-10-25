@@ -42,10 +42,18 @@ test("v5 research workspace: coverage, distance order, selected reasons, filters
   await useResearchDataset(page);
   await page.goto(baseUrl);
   await expect(page.locator("#sort")).toHaveValue("distance-asc");
+  await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
+  await expect(page.locator("body")).not.toContainText("v5.1.0");
   await expect(page.locator("#watchlist-body tr")).toHaveCount(40);
   await expect(page.locator("#watchlist-body tr").first().locator(".ticker-link")).toHaveText("V000");
   await expect(page.locator("#watchlist-head")).not.toContainText("Protection");
   await expect(page.locator("#watchlist-head")).not.toContainText("Loss if stopped");
+  await expect(page.locator("#watchlist-head")).not.toContainText("What it means");
+  await expect(page.locator("#watchlist-head th")).toHaveCount(5);
+  await expect(page.locator("#watchlist-body tr").first().locator(".col-distance")).toHaveText("Inside");
+  await expect(page.locator("#watchlist-body tr").first().locator(".col-distance")).toHaveCSS("text-align", "right");
+  const topAlignment = await page.evaluate(() => ({ brief: document.querySelector('#market-brief').getBoundingClientRect().top, detail: document.querySelector('#ticker-detail-panel').getBoundingClientRect().top }));
+  expect(Math.abs(topAlignment.brief - topAlignment.detail)).toBeLessThanOrEqual(1);
   await page.locator(".controls .near-zone-control input").check();
   await expect(page.locator("#count")).toContainText("21 of 21");
   await expect(page.locator("#watchlist-body tr")).toHaveCount(21);
@@ -63,6 +71,10 @@ test("v5 research workspace: coverage, distance order, selected reasons, filters
   await page.locator("#ticker-detail-panel .earlier-changes summary").click();
   await expect(page.locator("#ticker-detail-panel .state-timeline li:visible")).toHaveCount(5);
   await expect(page.locator("#ticker-detail-panel")).not.toContainText("Wait for stronger confirmation");
+  await page.locator('#ticker-detail-panel [data-research-step="1"]').click();
+  await expect(page.locator("#ticker-detail-panel h2")).toHaveText("V003");
+  await page.locator('#ticker-detail-panel [data-research-step="-1"]').click();
+  await expect(page.locator("#ticker-detail-panel h2")).toHaveText("V002");
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"]')).toHaveAttribute("aria-selected", "true");
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V003"]')).toHaveCSS("box-shadow", "none");
   const marker = await page.locator('#watchlist-body tr[data-select-ticker="V002"] td').first().evaluate(e => getComputedStyle(e).boxShadow);
@@ -93,6 +105,8 @@ test("v5 stock page: price ruler, source readiness and previous/next navigation"
   await useResearchDataset(page);
   await page.goto(`${baseUrl}/ticker.html?ticker=V002`);
   await expect(page.locator(".price-ruler")).toHaveAttribute("aria-label", /planned zone 100.00 to 105.00/);
+  await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
+  await expect(page.locator("body")).not.toContainText("v5.1.0");
   await expect(page.locator(".readiness-meter > strong")).toContainText("57.1");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "57.1");
   await expect(page.locator("#timeline .state-timeline li")).toHaveCount(5);
@@ -109,14 +123,17 @@ test("v5 mobile cards: no wide table, intact percentages and inline evidence", a
     await page.setViewportSize({ width, height: 844 });
     await page.goto(baseUrl);
     await expect(page.locator(".v5-stock-card").first()).toBeVisible();
-    await expect(page.locator(".v5-stock-card").first().locator(".zone-distance")).toHaveText("0.00%");
+    await expect(page.locator(".v5-stock-card").first().locator(".zone-distance")).toHaveText("Inside");
     const size = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth }));
     expect(size.width).toBeLessThanOrEqual(size.viewport + 1);
     await page.locator(".v5-stock-link").first().click();
     await expect(page).toHaveURL(/ticker=V000$/);
     await expect(page.locator(".mobile-inline-detail")).toBeVisible();
     await expect(page.locator(".mobile-inline-detail")).toContainText("Why we see it this way");
+    await expect(page.locator(".mobile-inline-detail .detail-panel-head")).toHaveCount(0);
+    await expect(page.locator(".app-tabbar")).toBeHidden();
     await expect(page.locator(".mobile-inline-detail .score-factors > div").first()).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(page.locator(".mobile-inline-detail .score-factors > div").first()).toHaveCSS("text-align", "left");
     await expect(page.locator("#watchlist-body tr").first().locator(".mobile-inline-detail")).toHaveCount(1);
     await expect(page.locator(".v5-stock-link").first()).toHaveAttribute("aria-expanded", "true");
     await page.locator(".v5-stock-link").first().click();
@@ -128,11 +145,13 @@ test("v5 mobile cards: no wide table, intact percentages and inline evidence", a
   }
 });
 
-test("v5 conditional columns and missing position data are honest", async ({ page }) => {
+test("v5.1 moves genuine plan risk into evidence without table clutter", async ({ page }) => {
   await useResearchDataset(page, { optionalPlan: true });
   await page.goto(baseUrl);
-  await expect(page.locator("#watchlist-head")).toContainText("Protection");
-  await expect(page.locator("#watchlist-head")).toContainText("Loss if stopped");
+  await expect(page.locator("#watchlist-head")).not.toContainText("Protection");
+  await expect(page.locator("#watchlist-head")).not.toContainText("Loss if stopped");
+  await expect(page.locator("#ticker-detail-panel .recorded-plan")).toContainText("95.00");
+  await expect(page.locator("#ticker-detail-panel .recorded-plan")).toContainText("−7.0%");
 });
 
 test("v5 omits a price ruler when the planned zone is absent", async ({ page }) => {
@@ -152,6 +171,9 @@ test("market research is readable on desktop and mobile without the source discl
     const section = page.locator("#market-brief");
     await expect(section.getByRole("heading", { name: marketBrief.headline })).toBeVisible();
     await expect(section.getByRole("progressbar")).toHaveCount(0);
+    await expect(section.locator('.full-brief')).not.toHaveAttribute('open', '');
+    await section.locator('.full-brief > summary').click();
+    await expect(section.locator('.brief-developments p')).toHaveCount(marketBrief.highlights.length);
     for (const [index, key] of ["bull", "base", "bear"].entries()) {
       await expect(section.locator(".probability-segment strong").nth(index)).toHaveText(`${marketBrief.forecast.probabilities[key]}%`);
       await expect(section.locator(".scenario-ranges small").nth(index)).toBeVisible();
@@ -194,7 +216,8 @@ test("daily brief moves are green up, red down and neutral when unchanged", asyn
       await expect(section).toHaveCSS("background-color", "rgb(250, 247, 240)");
       await expect(section.locator(".brief-change-up")).toHaveCSS("color", "rgb(20, 115, 68)");
       await expect(section.locator(".brief-change-down")).toHaveCSS("color", "rgb(180, 35, 24)");
-      await expect(section.locator(".brief-metrics > div").last().locator("small")).toHaveText("+0.00% · US close");
+      await expect(section.locator(".brief-metrics > div").last().locator("small")).toHaveText("+0.00%");
+      await expect(section.locator(".brief-metrics > div").last().locator("small")).toHaveAttribute("title", "+0.00% · US close");
       await expect(section.locator(".brief-metrics > div").last().locator("small span")).toHaveCount(0);
     }
   }
@@ -226,8 +249,7 @@ test("readability: larger research text, unclipped tools and complete mobile con
     await expect(page.locator(".brief-headline")).toHaveCSS("text-transform", "none");
     await expect(page.locator(".brief-metrics small").first()).toHaveCSS("font-size", "12px");
     if (width < 961) {
-      await expect(page.locator(".mobile-execution").first()).toHaveCSS("white-space", "normal");
-      await expect(page.locator(".mobile-execution").first()).toHaveCSS("text-overflow", "clip");
+      await expect(page.locator(".mobile-execution")).toHaveCount(0);
       await page.locator(".coverage-disclosure > summary").click();
       await expect(page.locator(".coverage-content")).toBeVisible();
       await page.locator(".coverage-disclosure > summary").click();
@@ -264,7 +286,7 @@ test("mobile ticker plan is readable without page overflow", async ({ page }) =>
   await page.goto(`${baseUrl}/ticker.html?ticker=TEST`);
   await expect(page.getByText("Frozen execution plan")).toBeVisible();
   await expect(page.locator("html")).toHaveCSS("color-scheme", "light");
-  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(238, 235, 226)");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(239, 235, 227)");
   const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
   expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
   expect(runtimeErrors).toEqual([]);

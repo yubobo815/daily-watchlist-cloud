@@ -27,7 +27,8 @@
     const result = distance(row);
     if (result === null) return "Unavailable";
     // Avoid displaying a signed zero caused by rounding a tiny move.
-    return Math.abs(result) < 0.005 ? "0.00%" : `${result > 0 ? "+" : "−"}${Math.abs(result).toFixed(2)}%`;
+    if (result === 0) return "Inside";
+    return Math.abs(result) < 0.005 ? `${result > 0 ? "+" : "−"}<0.01%` : `${result > 0 ? "+" : "−"}${Math.abs(result).toFixed(2)}%`;
   }
   function compareDistance(a, b) {
     const left = distance(a); const right = distance(b);
