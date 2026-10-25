@@ -2280,11 +2280,12 @@ function markNotificationsRead(ids) {
 function renderNotificationCenter() {
   const mount = document.querySelector("#profit-alerts");
   if (!mount) return;
+  const wasOpen = mount.querySelector(".notification-center")?.open || false;
   const items = notificationHistory();
   const read = new Set(readStoredList(APP_NOTIFICATION_READ));
   const unread = items.filter((item) => !read.has(item.id));
   mount.innerHTML = `
-    <details class="notification-center">
+    <details class="notification-center" ${wasOpen ? "open" : ""}>
       <summary>
         <span><strong>Notification Center</strong><small>Action alerts for saved positions</small></span>
         <span class="notification-count ${unread.length ? "has-unread" : ""}">${unread.length ? `${unread.length} unread` : "All read"}</span>
