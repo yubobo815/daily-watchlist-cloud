@@ -1,0 +1,51 @@
+name: Market brief Drive access
+
+# Authorization-only rollout. Enable a schedule only after the curated JSON
+# producer and protected-PR publishing path have been validated end to end.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-brief-drive-access
+  cancel-in-progress: false
+
+jobs:
+  verify-drive-reader:
+    if: github.repository == 'yubobo815/daily-watchlist-cloud' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check non-secret identity settings
+        env:
+          GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          GOOGLE_DRIVE_SERVICE_ACCOUNT: ${{ vars.GOOGLE_DRIVE_SERVICE_ACCOUNT }}
+          MARKET_REPORTS_DRIVE_FOLDER_ID: ${{ vars.MARKET_REPORTS_DRIVE_FOLDER_ID }}
+        run: |
+          test -n "$GOOGLE_WORKLOAD_IDENTITY_PROVIDER"
+          test -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT"
+          test -n "$MARKET_REPORTS_DRIVE_FOLDER_ID"
+      - id: google
+        name: Obtain a short-lived read-only Google token
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GOOGLE_DRIVE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Verify folder and published source reads without exposing content
+        env:
+          GOOGLE_DRIVE_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+          MARKET_REPORTS_DRIVE_FOLDER_ID: ${{ vars.MARKET_REPORTS_DRIVE_FOLDER_ID }}
+        run: python3 scripts/probe_market_brief_drive.py
