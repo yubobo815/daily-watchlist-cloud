@@ -22,7 +22,8 @@ class SourceFixture:
         self.forecast = b["sources"][1]["url"].split("/d/")[1].split("/")[0]
         f = b["forecast"]
         end=datetime.fromisoformat(f["evaluates_at"].replace("Z","+00:00")).astimezone(ZoneInfo("America/New_York"))
-        card = (f"{f['id']} Reference S&P 500: {f['reference_close']:g}\nFinal official close {end.strftime('%A %d %B %Y')} is the sole outcome measure.\n"
+        # Real prose ends this decimal reference with a sentence-ending full stop.
+        card = (f"{f['id']} Reference S&P 500: {f['reference_close']:,.2f}.\nFinal official close {end.strftime('%A %d %B %Y')} is the sole outcome measure.\n"
                 + f"| Bull | {f['probabilities']['bull']:g}% | Greater than {f['upper_bound']:g} |\n"
                 + f"| Base | {f['probabilities']['base']:g}% | Inclusive range |\n"
                 + f"| Bear | {f['probabilities']['bear']:g}% | Less than {f['lower_bound']:g} |\nn={f['completed_sample']}")

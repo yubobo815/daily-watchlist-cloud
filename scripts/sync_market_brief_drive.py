@@ -176,7 +176,7 @@ def collect(reader, folder_id, current, now=None):
     for outcome in ("bull", "base", "bear"):
         p = brief["forecast"]["probabilities"][outcome]
         require(re.search(r"\|\s*" + outcome + r"\s*\|\s*" + re.escape(f"{p:g}") + r"%\s*\|", plain_card, re.I), "Forecast probability does not match the separately issued card.")
-    reference = re.search(r"Reference S&P 500:\s*([\d.]+)", plain_card)
+    reference = re.search(r"Reference S&P 500:\s*(\d+(?:\.\d+)?)", plain_card)
     require(reference and float(reference[1]) == brief["forecast"]["reference_close"], "Forecast reference does not match the original card.")
     for outcome, operator, key in (("Bull", "Greater than", "upper_bound"), ("Bear", "Less than", "lower_bound")):
         boundary = re.search(r"\|\s*" + outcome + r"\s*\|\s*[\d.]+%\s*\|\s*" + operator + r"\s+([\d.]+)\s*\|", plain_card, re.I)
