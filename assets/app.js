@@ -5,7 +5,7 @@ const UI_LABELS = {
     "SETUP FORMING": "BUILDING",
     "WATCH TREND": "WATCH",
     "EXIT PRESSURE": "EXIT",
-    "WAIT": "AVOID",
+    "WAIT": "WAIT",
     "WAIT / AVOID": "AVOID"
   },
   setup: {
@@ -2638,15 +2638,18 @@ function pressureSummary(rows, summaryApi) {
 
 function historyInterpretation(latest, priceMovePct, summaryApi) {
   const kind = actionKind(latest.action);
+  const defensiveLabel = latest.action === "WAIT" ? "Wait" : "Avoid";
   const state = summaryApi.interpretationState(kind, {
     stale: qualityConstraintLabel(latest) === "DATA NEEDS REFRESH",
     checksClear: executionChecksClear(latest),
   });
   if (state === "stale-exit") return "The latest data is stale. Keep the defensive Exit posture until fresh data confirms otherwise.";
-  if (state === "stale-avoid") return "The latest data is stale. Continue to Avoid new entries until fresh data is available.";
+  if (state === "stale-avoid") return latest.action === "WAIT"
+    ? "The latest data is stale. Wait for fresh data before considering new entries."
+    : "The latest data is stale. Continue to Avoid new entries until fresh data is available.";
   if (state === "stale") return "The latest data is stale, so the recent record cannot support an entry.";
   if (state === "exit") return "The current Exit signal takes priority over any positive move in the recent price record.";
-  if (state === "avoid") return "The recent record does not establish a usable setup; the current view remains Avoid.";
+  if (state === "avoid") return `The recent record does not establish a usable setup; the current view remains ${defensiveLabel}.`;
   if (state === "blocked") return "The latest data and risk checks do not support an entry.";
   if (state === "setup") return "The technical picture is developing, but it has not reached an entry signal.";
   if (state === "watch") return "The recent record remains mixed; there is no confirmed entry.";

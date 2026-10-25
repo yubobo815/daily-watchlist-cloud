@@ -443,6 +443,7 @@ def audit_action_display_labels_match_product_ui():
     assert_true(dwo.ACTION_DISPLAY_LABELS["SETUP FORMING"] == "BUILDING", "setup-forming label must match product UI")
     assert_true(dwo.ACTION_DISPLAY_LABELS["WATCH TREND"] == "WATCH", "watch label must match product UI")
     assert_true(dwo.ACTION_DISPLAY_LABELS["EXIT PRESSURE"] == "EXIT", "exit label must match product UI")
+    assert_true(dwo.ACTION_DISPLAY_LABELS["WAIT"] == "WAIT", "neutral wait must not be presented as avoid")
     assert_true(dwo.ACTION_DISPLAY_LABELS["WAIT / AVOID"] == "AVOID", "avoid label must match product UI")
 
 
