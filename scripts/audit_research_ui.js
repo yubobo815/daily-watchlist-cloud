@@ -5,7 +5,11 @@ const row = (close, low = 100, high = 110) => ({ ticker: "TEST", close, entry_zo
 assert.equal(ui.distance(row(95)), -5);
 assert.equal(ui.distance(row(115)), 5 / 110 * 100);
 for (const price of [100, 105, 110]) assert.equal(ui.distance(row(price)), 0);
-assert.equal(ui.formatDistance(row(100.00001)), "0.00%");
+assert.equal(ui.formatDistance(row(100.00001)), "Inside");
+assert.equal(ui.formatDistance(row(100)), "Inside");
+assert.equal(ui.formatDistance(row(110)), "Inside");
+assert.equal(ui.formatDistance(row(99.99999)), "−<0.01%");
+assert.equal(ui.formatDistance(row(110.00001)), "+<0.01%");
 assert.equal(ui.formatDistance(row(95)), "−5.00%");
 assert.equal(ui.formatDistance(row(115)), "+4.55%");
 for (const invalid of [row(null), row(""), row(0), row(-5), row(Infinity), row(100, 110, 90), row(100, 0, 110)]) assert.equal(ui.distance(invalid), null);
@@ -44,12 +48,13 @@ assert.equal(coverage.missing[0].ticker, "MISS");
 assert.equal(coverage.stale[0].ticker, "OLD");
 assert.equal(coverage.staleCount, 2);
 const packageVersion = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
-assert.equal(packageVersion, "5.0.0");
+assert.equal(packageVersion, "5.1.0");
 for (const file of ["index.html", "ticker.html"]) {
   const source = fs.readFileSync(file, "utf8");
-  assert.ok(source.includes('data-ui-version="5.0.0"'));
-  assert.ok(source.includes("research-ui.js?v=v5.0.0"));
-  assert.ok(source.includes("research-workspace.css?v=v5.0.0"));
+  assert.ok(source.includes('data-ui-version="5.1.0"'));
+  assert.ok(source.includes("research-ui.js?v=v5.1.0"));
+  assert.ok(source.includes("research-workspace.css?v=v5.1.0"));
+  assert.ok(!source.includes('class="app-version"'), "Version belongs in release metadata, not the visible brand");
 }
 assert.ok(!fs.readFileSync("index.html", "utf8").includes("Scanner rank first"));
 console.log("Research UI v5: distance, frozen bounds, sorting, rulers, recorded transitions, coverage and version checks passed.");

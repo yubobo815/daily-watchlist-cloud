@@ -1,6 +1,6 @@
 {
   "name": "daily-watchlist-cloud",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "private": true,
   "scripts": {
     "audit:market-brief": "node scripts/audit_market_brief.js",

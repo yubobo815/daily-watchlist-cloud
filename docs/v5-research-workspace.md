@@ -10,7 +10,7 @@ One warm-ivory research desk for the homepage and individual stock page: Georgia
 
 ## Data definitions
 
-- Signed distance is zero inside the inclusive planned zone; below the zone it is `(close − lower) / lower × 100`; above it is `(close − upper) / upper × 100`. Default order is increasing absolute distance, ticker as deterministic tie-breaker; unavailable values last. This is proximity, not an execution recommendation.
+- Signed distance is numerically zero inside the inclusive planned zone, displayed as Inside from v5.1; below the zone it is `(close − lower) / lower × 100`; above it is `(close − upper) / upper × 100`. Tiny outside distances retain their direction as signed <0.01%, never Inside. Default order is increasing absolute distance, ticker as deterministic tie-breaker; unavailable values last. This is proximity, not an execution recommendation.
 - Active frozen execution plans use their frozen zone, never a current replacement zone. Missing/invalid prices or bounds show Unavailable.
 - Price-position ruler shows the existing latest close and zone bounds on a linear padded scale. It is not historical price action. Missing inputs suppress the ruler, with a text explanation instead.
 - State changes come only from dated ticker history, ignoring unchanged sessions. Show the most recent available changes; never fabricate transitions to fill a minimum.
@@ -35,3 +35,17 @@ Fidelity ledger (reference versus rendered 1440px, 1280px, 390px and automated 3
 - Intentional data-preserving differences: retain all original brief paragraphs, mandatory percentage distances, the original meaning column, genuine conditional frozen-plan risk fields and source judgement labels. Do not import the reference's 12 demo rows, sample BUY, invented prices, narratives or history. Full stock detail retains the minimal ruler/readiness/navigation.
 
 The preview is read-only; cloud favourite writes are not exercised. Browser plugin/skill is absent, so the existing Playwright/Docker workflow verifies rendering and interactions; desktop and mobile screenshots are compared directly with the accepted reference. Source algorithms, API validation and snapshot data are unchanged.
+
+## v5.1.0 approved revision
+
+Version 5.1.0 is retained in package/release metadata, asset URLs and the non-visible UI marker only. The user explicitly removed all visible brand/header version labels.
+
+The 25 October follow-up supersedes the v5.0 layout, not the data/decision boundary:
+
+- A real two-column desk contains the brief, count filters and list in its left column; sticky evidence starts at the top of the right column, aligned with the brief. Maximum reading width is 1200px, gap 24px, evidence width 320px.
+- The compact brief opens by default. It retains the original first complete summary sentence, immutable forecast and signed metrics. Read full brief reveals the exact full summary, original paragraphs and scenario boundaries. Source descriptions for metrics remain available as tooltips; actual session/publication dates remain visible.
+- The watchlist has exactly five columns. The user explicitly removed What it means, including the corresponding mobile summary. Genuine protection and stopped-loss values move into conditional evidence sections.
+- Sidebar evidence retains the original explanations, two immediately visible recorded changes plus expandable earlier changes, conditional plan facts and previous/next navigation. Mobile expands supporting evidence under the card without repeating its identity, and removes the redundant bottom tab bar.
+- Inside replaces a zero-distance percentage only when the close is actually within the inclusive zone. Numeric distance and sorting are unchanged; all original entry restrictions remain.
+
+Verification compares the live Grok reference with renders at 1440x900, 1280x800, 390x844, 320x844 and the 2880px reference width. Intentional deviations remain source accuracy, the approved percentage/Inside convention, five real-data columns, original reasons (not demo narratives), and the approved secondary full-brief disclosure. The shared stylesheet is consolidated rather than another layer of v5 overrides.

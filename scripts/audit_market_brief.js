@@ -35,6 +35,11 @@ unsafe.headline = '<img src=x onerror="alert(1)">';
 assert.ok(!brief.render(unsafe).includes("<img"));
 assert.ok(brief.render(fixture, new Date("2026-10-29T01:00:00Z")).includes("ARCHIVED OUTLOOK"));
 assert.ok(brief.render(fixture).includes('<details class="research-brief" open>'), "Daily Brief must open by default and remain collapsible");
+assert.ok(brief.render(fixture).includes('<details class="full-brief"><summary>Read full brief</summary>'), "Full original narrative is available through a second-level disclosure");
+for (const highlight of fixture.highlights) {
+  const escapedText = highlight.text.replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+  assert.ok(brief.render(fixture).includes(escapedText), "Retain every original narrative paragraph, safely escaped");
+}
 assert.ok(!brief.render(fixture).includes("Forecast conditions"), "Do not restore the removed source disclosure");
 assert.ok(!brief.render(fixture).includes("drive.google.com"));
 assert.ok(!brief.render(fixture).includes("Completed forecast sample"), "Do not render the removed method/sample note");
