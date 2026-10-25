@@ -13,13 +13,16 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=v4.1.7">
+    <link rel="stylesheet" href="./assets/styles.css?v=v5.0.0">
+    <link rel="stylesheet" href="./assets/research-workspace.css?v=v5.0.0">
     <script defer src="./assets/market-session.js?v=v4.0.9"></script>
-    <script defer src="./assets/market-brief.js?v=5"></script>
+    <script defer src="./assets/market-brief.js?v=v5.0.0"></script>
+    <script defer src="./assets/research-ui.js?v=v5.0.0"></script>
     <script defer src="./assets/presentation.js?v=v4.0.9"></script>
-    <script defer src="./assets/app.js?v=v4.1.0"></script>
+    <script defer src="./assets/app.js?v=v5.0.0"></script>
+    <script defer src="./assets/research-workspace.js?v=v5.0.0"></script>
   </head>
-  <body data-page="watchlist">
+  <body data-page="watchlist" data-ui-version="5.0.0">
     <main class="shell">
       <header class="top-utility-row">
         <section id="market-rail" class="market-rail" aria-label="Data freshness"></section>
@@ -40,7 +43,7 @@
               <img src="./assets/brand/concept-c-app-icon.svg" alt="">
             </span>
             <span class="brand-copy">
-              <span class="brand-name">Daily Trade Copilot</span>
+              <span class="brand-name">Daily Trade Copilot</span><span class="app-version">v5.0.0</span>
               <span class="brand-subtitle">Watchlist</span>
             </span>
           </a>
@@ -62,16 +65,17 @@
           <strong id="mobile-search-count">Loading...</strong>
         </div>
         <div class="search-shell mobile-search-shell">
-          <input id="mobile-search" class="search" type="search" placeholder="Search ticker, company, signal..." autocomplete="off" inputmode="search">
+          <input id="mobile-search" class="search" type="search" aria-label="Search watchlist" placeholder="Search ticker, company, signal..." autocomplete="off" inputmode="search">
           <button id="mobile-clear-search" class="search-clear hidden" type="button" aria-label="Clear mobile search">Clear</button>
         </div>
         <div class="mobile-filter-row" aria-label="Signal filters">
           <button type="button" data-mobile-filter="all">All</button>
           <button type="button" data-mobile-filter="buy">Buy setups</button>
-          <button type="button" data-mobile-filter="building">Building</button>
-          <button type="button" data-mobile-filter="watch">Watch</button>
+          <button type="button" data-mobile-filter="building">Developing</button>
+          <button type="button" data-mobile-filter="favourites">Favourites</button>
           <button type="button" data-mobile-filter="risk">Risk</button>
         </div>
+        <label class="mobile-sort-label">Sort <select id="mobile-sort"><option value="distance-asc">Nearest planned zone · absolute distance</option><option value="score-desc">Trend quality high to low</option><option value="day_change_pct-desc">Best day change</option><option value="day_change_pct-asc">Worst day change</option><option value="ticker-asc">Ticker A to Z</option></select></label>
       </section>
 
       <section id="daily-brief" class="daily-brief" aria-hidden="true"></section>
@@ -80,7 +84,7 @@
 
       <section id="cards" class="cards"></section>
 
-      <section class="watchlist-workspace">
+      <section class="watchlist-workspace" aria-label="Stock research workspace">
       <section id="watchlist-table" class="table-wrap">
         <div class="section-heading watchlist-heading">
           <div>
@@ -89,31 +93,33 @@
         </div>
         <section class="controls">
           <div class="search-shell">
-            <input id="search" class="search" type="search" placeholder="Search ticker, company, or signal..." autocomplete="off" inputmode="search">
+            <input id="search" class="search" type="search" aria-label="Search watchlist" placeholder="Search ticker, company, or signal..." autocomplete="off" inputmode="search">
             <button id="clear-search" class="search-clear hidden" type="button" aria-label="Clear search">Clear</button>
           </div>
-          <select id="sort" class="control">
-            <option value="execution_priority-asc">Scanner rank first</option>
+          <select id="sort" class="control" aria-label="Sort watchlist">
+            <option value="distance-asc">Nearest planned zone · absolute distance</option>
             <option value="score-desc">Trend quality high to low</option>
             <option value="day_change_pct-desc">Best day change</option>
             <option value="day_change_pct-asc">Worst day change</option>
             <option value="ticker-asc">Ticker A to Z</option>
           </select>
           <div id="count" class="count">Loading...</div>
+          <div class="workspace-filters" aria-label="Watchlist scope"><button type="button" data-workspace-filter="all">All stocks</button><button type="button" data-workspace-filter="favourites">Favourites</button></div>
         </section>
         <table>
           <thead id="watchlist-head"></thead>
           <tbody id="watchlist-body"></tbody>
         </table>
         <div id="empty" class="empty hidden">No matching rows yet.</div>
-        <div class="watchlist-pagination"><button id="show-more" class="button secondary hidden" type="button">Show more</button></div>
+        <div id="research-pagination" class="watchlist-pagination" aria-label="Watchlist pages"></div>
+        <button id="show-more" type="button" hidden aria-hidden="true">Show more</button>
       </section>
       <aside id="ticker-detail-panel" class="ticker-detail-panel" aria-label="Selected ticker scanner review"></aside>
       </section>
 
     </main>
     <nav class="app-tabbar" aria-label="App navigation">
-      <a href="#cards" class="active"><span>Overview</span></a>
+      <a href="#market-brief" class="active"><span>Daily Brief</span></a>
       <a href="#market-activity"><span>Activity</span></a>
       <a href="#watchlist-table"><span>Watchlist</span></a>
     </nav>

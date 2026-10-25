@@ -34,12 +34,14 @@ const unsafe = structuredClone(fixture);
 unsafe.headline = '<img src=x onerror="alert(1)">';
 assert.ok(!brief.render(unsafe).includes("<img"));
 assert.ok(brief.render(fixture, new Date("2026-10-29T01:00:00Z")).includes("ARCHIVED OUTLOOK"));
-assert.ok(!brief.render(fixture).includes("<details"), "Homepage should not show forecast conditions or sources");
+assert.ok(brief.render(fixture).includes('<details class="research-brief" open>'), "Daily Brief must open by default and remain collapsible");
+assert.ok(!brief.render(fixture).includes("Forecast conditions"), "Do not restore the removed source disclosure");
 assert.ok(!brief.render(fixture).includes("drive.google.com"));
 assert.ok(!brief.render(fixture).includes("Completed forecast sample"), "Do not render the removed method/sample note");
 assert.ok(!brief.render(fixture).includes("Subjective research probabilities"));
 assert.ok(brief.render(fixture).includes("NOT A TRADE SIGNAL"), "Keep the research outlook label");
-assert.ok(!brief.render(fixture).includes("<progress"), "Do not render probability bars");
+assert.ok(!brief.render(fixture).includes("<progress"), "Do not restore three independent probability bars");
+assert.ok(brief.render(fixture).includes('class="probability-strip"'), "Use one segmented probability strip");
 for (const key of ["bull", "base", "bear"]) {
   assert.ok(brief.render(fixture).includes(`<strong>${fixture.forecast.probabilities[key]}%</strong>`), "Preserve each scenario percentage");
 }

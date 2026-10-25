@@ -10,17 +10,21 @@
     <link rel="icon" href="./assets/brand/concept-c-app-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./assets/brand/apple-touch-icon.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/styles.css?v=v4.1.7">
+    <link rel="stylesheet" href="./assets/styles.css?v=v5.0.0">
+    <link rel="stylesheet" href="./assets/research-workspace.css?v=v5.0.0">
+    <script defer src="./assets/research-ui.js?v=v5.0.0"></script>
     <script defer src="./assets/history_summary.js?v=v4.0.9"></script>
     <script defer src="./assets/market-session.js?v=v4.0.9"></script>
     <script defer src="./assets/presentation.js?v=v4.0.9"></script>
-    <script defer src="./assets/app.js?v=v4.1.0"></script>
+    <script defer src="./assets/app.js?v=v5.0.0"></script>
+    <script defer src="./assets/research-workspace.js?v=v5.0.0"></script>
   </head>
-  <body data-page="history" class="ticker-page">
+  <body data-page="history" class="ticker-page" data-ui-version="5.0.0">
     <main class="shell">
       <section id="market-rail" class="market-rail ticker-rail" aria-label="Data freshness"></section>
+      <nav id="ticker-navigation" class="ticker-navigation" aria-label="Stock navigation"><a href="./">← Back to watchlist</a></nav>
       <section class="hero editorial-hero ticker-hero"><div class="ticker-identity">
-        <a class="brand" href="./" aria-label="Daily Trade Copilot home"><span class="brand-mark" aria-hidden="true"><img src="./assets/brand/concept-c-app-icon.svg" alt=""></span><span class="brand-copy"><span class="brand-name">Daily Trade Copilot</span><span class="brand-subtitle">Ticker detail</span></span></a>
+        <a class="brand" href="./" aria-label="Daily Trade Copilot home"><span class="brand-mark" aria-hidden="true"><img src="./assets/brand/concept-c-app-icon.svg" alt=""></span><span class="brand-copy"><span class="brand-name">Daily Trade Copilot <span class="app-version">v5.0.0</span></span><span class="brand-subtitle">Ticker detail</span></span></a>
         <h1 id="history-title">Ticker</h1><p id="status" class="subtle meta">Loading ticker history...</p><div id="run-status" class="status loading">Loading current data...</div><p id="app-disclaimer" class="app-disclaimer"></p>
       </div><div class="ticker-hero-tools"><form id="ticker-form" class="ticker-lookup" role="search"><label for="ticker">Change stock</label><div class="ticker-lookup-controls"><input id="ticker" class="ticker-input" type="search" list="ticker-options" placeholder="Ticker or company name" autocomplete="off"><datalist id="ticker-options"></datalist><button class="button primary" type="submit">View</button></div></form><div id="hero-brief" class="hero-brief ticker-hero-brief" aria-live="polite"></div></div></section>
       <section class="history-grid">

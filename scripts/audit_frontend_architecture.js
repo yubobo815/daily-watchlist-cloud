@@ -156,3 +156,4 @@ function main() {
 
 main();
 require("./audit_market_brief.js");
+require("./audit_research_ui.js");
