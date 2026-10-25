@@ -35,7 +35,7 @@ class DriveReader:
         if not FILE_ID.fullmatch(file_id):
             raise ProbeError("Invalid Drive file identifier.")
         params = {"alt": "media"} if media else {
-            "fields": "id,mimeType,parents,size,capabilities(canEdit,canAddChildren)"
+            "fields": "id,name,mimeType,parents,size,modifiedTime,createdTime,trashed,capabilities(canEdit,canAddChildren)"
         }
         url = "https://www.googleapis.com/drive/v3/files/" + file_id + "?" + urllib.parse.urlencode(params)
         request = urllib.request.Request(url, headers={"Authorization": "Bearer " + self.token})
@@ -54,6 +54,31 @@ class DriveReader:
             return json.loads(body)
         except (UnicodeError, json.JSONDecodeError):
             raise ProbeError("Drive returned invalid metadata.") from None
+
+    def list_children(self, folder_id: str) -> list[dict]:
+        if not FILE_ID.fullmatch(folder_id):
+            raise ProbeError("Invalid Drive folder identifier.")
+        files, page = [], None
+        for _ in range(100):
+            params = {"q": f"'{folder_id}' in parents and trashed=false", "pageSize": 100,
+                      "fields": "nextPageToken,files(id,name,mimeType,parents,size,modifiedTime,createdTime,trashed)"}
+            if page:
+                params["pageToken"] = page
+            request = urllib.request.Request("https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(params),
+                                             headers={"Authorization": "Bearer " + self.token})
+            try:
+                with self.opener.open(request, timeout=25) as response:
+                    body = response.read(MAX_BYTES + 1)
+                if len(body) > MAX_BYTES:
+                    raise ProbeError("Drive metadata response exceeded the safe size limit.")
+                result = json.loads(body)
+            except (urllib.error.HTTPError, urllib.error.URLError, UnicodeError, json.JSONDecodeError):
+                raise ProbeError("Cannot list the authorized reports folder; retry the workflow.") from None
+            files.extend(result.get("files", []))
+            page = result.get("nextPageToken")
+            if not page:
+                return files
+        raise ProbeError("Drive listing exceeded the bounded pagination limit.")
 
 
 def probe(reader, folder_id: str, source_ids: list[str]) -> dict:
