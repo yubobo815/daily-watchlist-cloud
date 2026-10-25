@@ -5,7 +5,7 @@ const UI_LABELS = {
     "SETUP FORMING": "BUILDING",
     "WATCH TREND": "WATCH",
     "EXIT PRESSURE": "EXIT",
-    "WAIT": "AVOID",
+    "WAIT": "WAIT",
     "WAIT / AVOID": "AVOID"
   },
   setup: {

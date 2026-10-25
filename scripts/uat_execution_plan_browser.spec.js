@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 const baseUrl = process.env.BASE_URL || "http://web:4178";
 const marketBrief = require(process.env.MARKET_BRIEF_FILE || "../data/market-brief.json");
 
-async function useResearchDataset(page, { optionalPlan = false, missingZone = false } = {}) {
+async function useResearchDataset(page, { optionalPlan = false, missingZone = false, matchLatestAction = false } = {}) {
   const rows = Array.from({ length: 61 }, (_, index) => ({
     ticker: `V${String(index).padStart(3, "0")}`, name: `Research Stock ${index}`,
     publication_id: "v5-browser-uat", run_date: "2026-10-23", data_date: index === 1 ? "2026-10-20" : "2026-10-23",
@@ -26,6 +26,7 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
       const ticker = decodeURIComponent(path.split("/").at(-1));
       const source = rows.find(row => row.ticker === ticker) || rows[0];
       const actions = ["WAIT / AVOID", "WATCH TREND", "SETUP FORMING", "WAIT / AVOID", "WATCH TREND", "SETUP FORMING", "SETUP FORMING"];
+      if (matchLatestAction) actions[actions.length - 1] = source.action;
       const historyRows = actions.map((action, i) => ({ ...source, action, history_date: `2026-10-${17 + i}`, data_date: `2026-10-${17 + i}` })).reverse();
       return route.fulfill({ json: { ticker, latest: "2026-10-23", snapshot: source, historyRows, runInfo } });
     }
@@ -34,6 +35,22 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
   });
   return rows;
 }
+
+test("WAIT remains distinct from AVOID on the watchlist and stock page", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const rows = await useResearchDataset(page, { matchLatestAction: true });
+  Object.assign(rows[0], { action: "WAIT", shadow_action: "WAIT" });
+  await page.goto(baseUrl);
+  await expect(page.locator('#watchlist-body tr[data-select-ticker="V000"] .badge')).toHaveText(["WAIT", "WAIT"]);
+  await page.getByRole("button", { name: "V000", exact: true }).click();
+  await expect(page.locator("#ticker-detail-panel h2")).toHaveText("V000");
+  await page.locator("#ticker-detail-panel .full-detail-link").click();
+  await expect(page.locator("#latest-panel .latest-head > .badge")).toHaveText("WAIT");
+  await page.goto(`${baseUrl}/ticker.html?ticker=V060`);
+  await expect(page.locator("#latest-panel .latest-head > .badge")).toHaveText("AVOID");
+  expect(errors).toEqual([]);
+});
 
 test("v5 research workspace: coverage, distance order, selected reasons, filters and pagination", async ({ page }) => {
   const errors = [];
