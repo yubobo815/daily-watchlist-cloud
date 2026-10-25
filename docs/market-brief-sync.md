@@ -4,7 +4,7 @@ The visible homepage section reads `data/market-brief.json` independently of the
 
 The homepage does not render a forecast-conditions/source disclosure or the method/calibration-sample paragraph. Keep underlying provenance, forecast conditions, method and calibration sample in the validated JSON for syncing and auditability; do not add the removed text back during daily updates. Dates, expiry and the research-outlook/not-a-trade-signal label remain visible.
 
-Show scenario names, percentages and final-close ranges as text only. Probability progress bars were removed at the user's request; daily updates must not restore them.
+v5 shows the report probabilities as one segmented Bull/Base/Bear strip, with the existing final-close ranges below. This explicitly replaces the earlier text-only presentation. Do not restore three independent progress bars or isolated large percentages; daily syncs update JSON only.
 
 ## Daily Codex sync contract
 

@@ -314,7 +314,7 @@ function auditDecisionFunnelUi() {
   assert(appSource.includes("pruneNotificationReadState(items)"), "expired notification read markers must be reclaimed");
   assert(appSource.includes(".slice(0, 50)"), "notification history must remain storage-bounded");
   assert(!appSource.includes("Notification.requestPermission"), "in-app notifications must not request browser notification permission");
-  assert(pageSource.includes("Scanner rank first"), "watchlist sorting must use scanner-review terminology");
+  assert(pageSource.includes("Nearest planned zone · absolute distance") && !pageSource.includes("Scanner rank first"), "watchlist must explain its actual distance sort rather than claim an undisplayed scanner rank");
   assert(!pageSource.includes("Execution tier first"), "watchlist must not retain execution-tier sorting copy");
   assert(!tickerSource.includes("Execution plan"), "ticker detail must not retain execution-plan copy");
   assert(tickerSource.includes('placeholder="Ticker or company name"'), "ticker detail search must advertise ticker and company matching");

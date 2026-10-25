@@ -76,13 +76,15 @@
       ["base", "Base", `${f.lower_bound.toLocaleString("en-AU")}–${f.upper_bound.toLocaleString("en-AU")} inclusive`],
       ["bear", "Bear", `Final close < ${f.lower_bound.toLocaleString("en-AU")}`],
     ];
-    return `<div class="brief-heading"><div><p class="brief-eyebrow">INDEPENDENT RESEARCH · DAILY BRIEF</p><h2>Market overview</h2></div><span class="brief-state">${state.dated ? "Dated report — awaiting a newer session" : "Latest completed US session"}</span></div>
-      <p class="brief-date">US session ${escape(data.session_date)} · Published ${stamp(data.issued_at)} Melbourne</p>
-      <h3 class="brief-headline">${escape(data.headline)}</h3><p>${escape(data.summary)}</p>
-      <div class="brief-metrics">${data.metrics.map((m) => `<div><span>${escape(m.label)}</span><strong>${escape(m.value)}</strong><small>${renderChange(m.detail)}</small></div>`).join("")}</div>
-      <div class="brief-columns"><div class="brief-developments">${data.highlights.map((h) => `<article><h4>${escape(h.title)}</h4><p>${escape(h.text)}</p></article>`).join("")}</div>
+    const shortSummary = data.summary.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || data.summary;
+    return `<details class="research-brief" open><summary class="brief-toggle"><span class="brief-heading"><h2>Daily Brief</h2><span class="brief-toggle-label"><span class="when-open">Collapse</span><span class="when-closed">Expand</span></span></span>
+      <h3 class="brief-headline">${escape(data.headline)}</h3><span class="brief-summary when-open">${escape(data.summary)}</span><span class="brief-summary when-closed">${escape(shortSummary)}</span>
       <div class="brief-outlook"><p class="brief-eyebrow">${state.expired ? "FORECAST WINDOW ENDED · ARCHIVED OUTLOOK" : "RESEARCH OUTLOOK · NOT A TRADE SIGNAL"}</p><h3>${escape(f.outlook)}</h3><p>${escape(f.horizon)}</p>
-      <div class="brief-scenarios">${probabilities.map(([key, label, boundary]) => `<div class="brief-scenario"><span>${label}</span><strong>${f.probabilities[key]}%</strong><small>${escape(boundary)}</small></div>`).join("")}</div></div></div>`;
+      <div class="probability-strip" role="img" aria-label="${probabilities.map(([key, label]) => `${label} ${f.probabilities[key]}%`).join(", ")}">${probabilities.map(([key, label]) => `<span class="probability-segment segment-${key}" style="flex-basis:${f.probabilities[key]}%" ${f.probabilities[key] === 0 ? 'hidden' : ""}><span>${label}</span><strong>${f.probabilities[key]}%</strong></span>`).join("")}</div></div></summary>
+      <div class="brief-body"><div class="brief-meta"><span class="brief-date">US session ${escape(data.session_date)} · Published ${stamp(data.issued_at)} Melbourne</span><span class="brief-state">${state.dated ? "Dated report — awaiting a newer session" : "Latest completed US session"}</span></div>
+      <div class="brief-metrics">${data.metrics.map((m) => `<div><span>${escape(m.label)}</span><strong>${escape(m.value)}</strong><small>${renderChange(m.detail)}</small></div>`).join("")}</div>
+      <div class="brief-columns"><div class="brief-developments">${data.highlights.map((h) => `<article><h4>${escape(h.title)}</h4><p>${escape(h.text)}</p></article>`).join("")}</div></div>
+      <div class="scenario-ranges">${probabilities.map(([, label, boundary]) => `<small><b>${label}</b> ${escape(boundary)}</small>`).join("")}</div></div></details>`;
   }
   return Object.freeze({ validate, status, render, renderChange });
 }));
