@@ -45,6 +45,18 @@ body[data-ui-version] #market-rail > span { white-space: nowrap; }
 .coverage-content ul { margin: 0; padding: 0; list-style: none; }
 .coverage-content li { display: grid; grid-template-columns: 58px 1fr; gap: 12px; padding: 8px 0; border-top: 1px solid var(--research-line); }
 body[data-ui-version] :is(.secondary-tools,.watchlist-heading,.brand-mark,.brand-subtitle,.app-tabbar) { display: none; }
+/* Notifications remain a visible, independent tool; legacy activity stays hidden. */
+body[data-ui-version] .profit-alert-center { margin: 14px 0 0; min-width: 0; }
+body[data-ui-version] .notification-center { border-radius: 10px; background: var(--research-surface); }
+body[data-ui-version] .notification-center > summary { min-height: 52px; padding: 10px 16px; }
+body[data-ui-version] .notification-center > summary strong { font: 500 14px/1.5 var(--font-app); letter-spacing: 0; }
+body[data-ui-version] .notification-center > summary small { font-size: 12px; white-space: normal; }
+body[data-ui-version] .notification-list { max-height: 40vh; overflow-y: auto; }
+body[data-ui-version] .notification-item { background: var(--research-surface); }
+body[data-ui-version] .notification-item small,
+body[data-ui-version] .notification-empty { font-size: 13px; line-height: 1.6; }
+body[data-ui-version] .notification-item.read { opacity: 1; }
+body[data-ui-version] .notification-item.read .notification-dot { background: var(--research-line); }
 body[data-page="watchlist"] .editorial-hero { display: none; }
 body[data-ui-version] :is(#hero-brief,#run-status,#status,#app-disclaimer,#daily-brief,#run-health-panel) { display: none; }
 #research-data-error { padding: 16px; border: 1px solid #caa498; color: var(--research-risk); background: #f6e9e2; }

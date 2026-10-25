@@ -36,6 +36,49 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
   return rows;
 }
 
+test("notification center is visible on desktop/mobile and preserves read state", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.clock.setFixedTime(new Date("2026-10-24T01:00:00Z"));
+  const rows = await useResearchDataset(page);
+  Object.assign(rows[0], { profit_stage: "TP1 REACHED", take_profit_1: 110, take_profit_1_reduce_pct: 33 });
+  Object.assign(rows[1], { data_date: "2026-10-23", profit_stage: "PROTECT REMAINDER", active_protective_stop: 99 });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(baseUrl);
+  await expect(page).toHaveTitle("Daily Trade Copilot");
+  const center = page.locator(".notification-center");
+  await expect(center).toBeVisible();
+  await expect(center.locator("summary")).toContainText("2 unread");
+  await center.locator("summary").click();
+  await expect(center.locator(".notification-item")).toHaveCount(2);
+  await expect(center).toContainText("V000 · Take Profit 1 reached");
+  await expect(center).toContainText("V001 · Protect remaining profit");
+  await page.screenshot({ path: `${process.env.SCREENSHOT_DIR || "/tmp"}/notification-center-desktop.png` });
+  await page.getByRole("button", { name: "Mark all read", exact: true }).click();
+  await expect(center).toHaveAttribute("open", "");
+  await expect(center.locator("summary")).toContainText("All read");
+  await expect(center.locator(".notification-item.unread")).toHaveCount(0);
+  await page.reload();
+  await expect(center.locator("summary")).toContainText("All read");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await center.locator("summary").click();
+  await expect(center.locator(".notification-item")).toHaveCount(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `${process.env.SCREENSHOT_DIR || "/tmp"}/notification-center-mobile.png` });
+  await center.locator('[data-notification-id="2026-10-23:V000:take-profit-1"]').click();
+  await expect(page).toHaveURL(/ticker\.html\?ticker=V000/);
+  expect(errors).toEqual([]);
+});
+
+test("notification center shows an honest empty state without browser permissions", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-24T01:00:00Z"));
+  await useResearchDataset(page);
+  await page.goto(baseUrl);
+  await page.locator(".notification-center summary").click();
+  await expect(page.locator(".notification-empty")).toContainText("TP1 and profit-protection events");
+  await expect(page.locator(".notification-item")).toHaveCount(0);
+});
+
 test("WAIT remains distinct from AVOID on the watchlist and stock page", async ({ page }) => {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -62,7 +105,7 @@ test("v5 research workspace: coverage, distance order, selected reasons, filters
   await page.goto(baseUrl);
   await expect(page.locator("#sort")).toHaveValue("distance-asc");
   await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
-  await expect(page.locator("body")).not.toContainText("v5.1.0");
+  await expect(page.locator("body")).not.toContainText("v5.1.1");
   await expect(page.locator("#watchlist-body tr")).toHaveCount(40);
   await expect(page.locator("#watchlist-body tr").first().locator(".ticker-link")).toHaveText("V000");
   await expect(page.locator("#watchlist-head")).not.toContainText("Protection");
@@ -125,7 +168,7 @@ test("v5 stock page: price ruler, source readiness and previous/next navigation"
   await page.goto(`${baseUrl}/ticker.html?ticker=V002`);
   await expect(page.locator(".price-ruler")).toHaveAttribute("aria-label", /planned zone 100.00 to 105.00/);
   await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
-  await expect(page.locator("body")).not.toContainText("v5.1.0");
+  await expect(page.locator("body")).not.toContainText("v5.1.1");
   await expect(page.locator(".readiness-meter > strong")).toContainText("57.1");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "57.1");
   await expect(page.locator("#timeline .state-timeline li")).toHaveCount(5);
