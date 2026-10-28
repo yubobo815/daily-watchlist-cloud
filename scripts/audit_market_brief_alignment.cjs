@@ -9,17 +9,22 @@ const now = new Date('2026-10-24T01:00:00Z');
 function published() {
   return { latest: '2026-10-25', runInfo: { status: 'success', live_access_ok: true,
     publication_id: 'verified-publication', latest_data_date: brief.session_date, symbols_failed: 0 },
-    rows: [{ publication_id: 'verified-publication', data_date: brief.session_date }] };
+    rows: [{ ticker: 'AAPL', publication_id: 'verified-publication', data_date: brief.session_date }] };
 }
 assert.equal(alignment(brief, published(), now).ready, true);
 // Melbourne run dates are NOT US session dates; Friday remains latest on Monday morning.
 assert.equal(alignment(brief, published(), new Date('2026-10-25T23:00:00Z')).ready, true);
 const partial = published();
 partial.runInfo.status = 'degraded'; partial.runInfo.symbols_failed = 2;
-partial.rows.push({ publication_id: 'verified-publication', data_date: '2026-10-22' });
+partial.rows.push({ ticker: 'MSFT', publication_id: 'verified-publication', data_date: '2026-10-22' });
 assert.equal(alignment(brief, partial, now).partial_coverage, true);
+const mixedMarkets = published();
+mixedMarkets.runInfo.latest_data_date = '2026-10-26';
+mixedMarkets.rows.push({ ticker: 'EOS.AX', publication_id: 'verified-publication', data_date: '2026-10-26' });
+assert.equal(alignment(brief, mixedMarkets, now).ready, true, 'ASX dates must not block current US data');
+const asxOnly = published(); asxOnly.rows[0].ticker = 'EOS.AX';
+assert.equal(alignment(brief, asxOnly, now).ready, false, 'An ASX row must not establish US freshness');
 for (const mutate of [
-  p => { p.runInfo.latest_data_date = '2026-10-22'; },
   p => { p.runInfo.status = 'running'; },
   p => { p.runInfo.live_access_ok = false; },
   p => { p.rows = []; },
@@ -27,6 +32,7 @@ for (const mutate of [
   p => { p.rows[0].data_date = '2026-10-26'; },
   p => { p.rows[0].data_date = '2026-10-22'; },
   p => { p.rows[0].data_date = '2026-02-30'; },
+  p => { delete p.rows[0].ticker; },
 ]) {
   const p = published(); mutate(p); assert.equal(alignment(brief, p, now).ready, false);
 }

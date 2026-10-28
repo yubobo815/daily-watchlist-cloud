@@ -1,40 +1,40 @@
 {
   "schema_version": 1,
-  "session_date": "2026-10-23",
-  "issued_at": "2026-10-23T23:12:41.730Z",
-  "headline": "A fragile rotation, not a broad recovery",
-  "summary": "Friday's semiconductor stabilisation did not repair Thursday's sell-off. Broader equity weakness, rising oil and higher yields leave the near-term outlook vulnerable.",
+  "session_date": "2026-10-27",
+  "issued_at": "2026-10-28T10:10:00+11:00",
+  "headline": "Concentration, not broad confirmation",
+  "summary": "US indices rose on semiconductor leadership, but most S&P 500 constituents fell. Small-cap strength offers counterevidence to a broad equity sell-off.",
   "metrics": [
-    {"label": "S&P 500", "value": "7,623.68", "detail": "−0.52% · US close"},
-    {"label": "Nasdaq Composite", "value": "25,955.34", "detail": "−0.21% · US close"},
-    {"label": "US 10-year yield", "value": "5.00%", "detail": "+4 bp · Treasury par yield"},
-    {"label": "Brent futures", "value": "US$116.72", "detail": "+3.14% · reported settlement"}
+    {"label":"S&P 500","value":"7,722.60","detail":"+0.60% · US close"},
+    {"label":"Nasdaq Composite","value":"26,477.81","detail":"+1.18% · US close"},
+    {"label":"US 10-year yield","value":"4.99%","detail":"−1 bp · Treasury par yield"},
+    {"label":"Brent futures","value":"US$113.88","detail":"−1.7% · reported settlement"}
   ],
   "highlights": [
-    {"title": "Participation remains weak", "text": "Equal-weight equities lagged the S&P 500. Semiconductor gains were selective rather than a broad recovery."},
-    {"title": "AI financing quality matters", "text": "Strong AI demand does not guarantee strong cash returns. The report distinguishes cash-generative platforms from businesses dependent on external funding."},
-    {"title": "Oil, yields and the Fed", "text": "Higher energy prices and yields pressure financing conditions. The 27–28 October Fed meeting falls inside the forecast window."}
+    {"title":"Narrow breadth, resilient small caps","text":"Most S&P 500 stocks declined despite the index gain, while the Russell 2000 rose 1.16%. The two signals do not support a simple all-market risk-on or capitulation conclusion."},
+    {"title":"AI financing merits scrutiny","text":"Broadcom's Anthropic financing structure and Nvidia's Meta investment support capacity, while raising questions about supplier exposure and future cash returns. Neither proves a financing failure."},
+    {"title":"Macro relief, event risk","text":"Lower oil and a slightly lower Treasury yield ease some pressure, but the Fed decision and major technology earnings remain within the forecast window."}
   ],
   "forecast": {
-    "id": "IND-2026-10-23-3D-v1",
-    "outlook": "Volatile consolidation",
-    "horizon": "26–28 October US sessions · S&P 500 final close",
-    "evaluates_at": "2026-10-28T20:00:00Z",
-    "reference_close": 7623.68,
-    "lower_bound": 7500,
-    "upper_bound": 7740,
-    "probabilities": {"bull": 20, "base": 45, "bear": 35},
-    "completed_sample": 0,
-    "method": "Subjective research probabilities, not statistically calibrated. Boundaries define final-close outcomes, not technical support or resistance.",
-    "watch_next": "Improving equal-weight participation and Nvidia leadership with contained yields would favour Bull/Base in the next forecast. Confirmed credit stress, renewed AI financing pressure and higher oil would favour Bear."
+    "id":"IND-2026-10-27-3D-v1",
+    "outlook":"Earnings dispersion and consolidation",
+    "horizon":"28–30 October US sessions · S&P 500 final close",
+    "evaluates_at":"2026-10-30T20:00:00Z",
+    "reference_close":7722.60,
+    "lower_bound":7600,
+    "upper_bound":7850,
+    "probabilities":{"bull":25,"base":45,"bear":30},
+    "completed_sample":1,
+    "method":"Original forecast issued 2026-10-28T10:10:34+11:00. Subjective research probabilities, not statistically calibrated. Boundaries define final-close outcomes, not technical support or resistance.",
+    "watch_next":"Watch the Fed statement, major technology earnings, breadth, credit indicators and financing disclosures. A single completed forecast is insufficient to establish calibration."
   },
-  "limitations": "VIX close, put/call and credit-spread confirmation were unavailable. Research outlook only; not a trading signal or guarantee.",
-  "sources": [
-    {"label": "Daily report · Drive access required", "url": "https://drive.google.com/file/d/1FC4ysR7c1uLA3hHqXo-DpDZS6p7h4iRe/view", "modified_at": "2026-10-23T23:12:41.730Z"},
-    {"label": "Original forecast · Drive access required", "url": "https://drive.google.com/file/d/1Oboy-KKhZQTCUNAF3voUK-f98E33x-KL/view", "modified_at": "2026-10-23T23:12:54.198Z"},
-    {"label": "AP · index closes", "url": "https://apnews.com/article/e07c72bc5cbe5dffe352ddf30054e35f"},
-    {"label": "US Treasury · yields", "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?field_tdr_date_value=2026&field_tdr_date_value_month=202610&type=daily_treasury_yield_curve"},
-    {"label": "Federal Reserve · calendar", "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"},
-    {"label": "Reuters via GV Wire · oil", "url": "https://gvwire.com/2026/10/23/oil-prices-jump-3-on-houthi-attacks-oil-spill-highest-settlement-since-april/"}
+  "limitations":"The exact VIX close, exchange advance-decline figures, consolidated volume, put/call, credit measures and DXY close were not verified. Research outlook only; not a trading signal or guarantee.",
+  "sources":[
+    {"label":"Daily report · Drive access required","url":"https://drive.google.com/file/d/19EE7aBeNeJvB2FWYYATqbRMLsE6h9JYs/view","modified_at":"2026-10-28T01:12:56.421Z"},
+    {"label":"Original forecast · Drive access required","url":"https://drive.google.com/file/d/1Grx7dx59wVsYJQz8Wrs7-Q3xmJDjd0by/view","modified_at":"2026-10-28T01:13:02.706Z"},
+    {"label":"AP · index closes","url":"https://apnews.com/article/eae2932c0c253be1039e1545909656a8"},
+    {"label":"AP · market breadth","url":"https://apnews.com/article/e11a2240fc3283c4507d44b9833f30a2"},
+    {"label":"US Treasury · yields","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?field_tdr_date_value=2026&type=daily_treasury_yield_curve"},
+    {"label":"Reuters · oil","url":"https://www.reuters.com/business/energy/oil-eases-middle-east-diplomacy-hopes-saudi-attacks-keep-supply-worries-alive-2026-10-27/"}
   ]
 }
