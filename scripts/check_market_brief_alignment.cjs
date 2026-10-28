@@ -21,19 +21,26 @@ function alignment(brief, publication, now = new Date()) {
   if (!run || !['ok', 'success', 'degraded'].includes(run.status) || run.live_access_ok !== true) {
     return wait('The active watchlist publication is unavailable or not verified as live.');
   }
-  if (run.latest_data_date !== target) return wait('Wait for the scanner to publish the same completed US session.');
   const rows = publication.rows;
   if (!run.publication_id || !Array.isArray(rows) || !rows.length || rows.some(row => row.publication_id !== run.publication_id)) {
     return wait('The watchlist response is empty or mixes publication identities.');
   }
   const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
-  if (rows.some(row => !validDate(row.data_date) || row.data_date > target)
-      || !rows.some(row => row.data_date === target)) {
+  // ASX dates can be a calendar day ahead of the US close.
+  // Exclude only explicitly identified ASX tickers; unknown rows fail closed.
+  if (rows.some(row => !validDate(row.data_date) || typeof row.ticker !== 'string' || !row.ticker.trim())) {
+    return wait('The published rows have missing or invalid dates or ticker identities.');
+  }
+  const usRows = rows.filter(row => !/\.AX$/i.test(row.ticker.trim()));
+  const usLatest = usRows.map(row => row.data_date).sort().at(-1) || null;
+  result.watchlist_session = usLatest;
+  if (!usRows.length || usRows.some(row => row.data_date > target)
+      || !usRows.some(row => row.data_date === target) || usLatest !== target) {
     return wait('The published row dates are inconsistent with the stated US session.');
   }
   return { ...result, ready: true, publication_id: run.publication_id,
-    partial_coverage: run.status === 'degraded' || Number(run.symbols_failed || 0) > 0 || rows.some(row => row.data_date < target) };
+    partial_coverage: run.status === 'degraded' || Number(run.symbols_failed || 0) > 0 || usRows.some(row => row.data_date < target) };
 }
 
 async function main() {

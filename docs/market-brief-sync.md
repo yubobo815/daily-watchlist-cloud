@@ -34,7 +34,12 @@ before creating a publishing PR, and again immediately before merging its exact
 tested head. Exit 2 means wait for a later check; exit 1 means an invalid or
 unavailable input. Preserve the last valid summary in either case. Partial
 coverage is allowed when honestly disclosed; never turn it into claimed full
-coverage. A mixed publication identity is not allowed.
+coverage. A mixed publication identity is not allowed. For this US-market brief,
+derive the US session date from the live US ticker rows: an explicitly identified
+ASX ticker ending in `.AX` may have a different local session date and must not
+set the US date. Require valid dates and identity for every row, at least one
+US row at the completed session, and no future-dated US rows. Do not alter
+the original row dates or pretend partial coverage is complete.
 
 Normal upstream waiting stays quiet. At the final 19:45 check, surface an
 actionable failure if the newest completed session is still blocked, including
