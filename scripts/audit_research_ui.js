@@ -54,6 +54,23 @@ const coverage = ui.coverage({ symbols_failed: 1, latest_data_date: "2026-10-23"
 assert.equal(coverage.missing[0].ticker, "MISS");
 assert.equal(coverage.stale[0].ticker, "OLD");
 assert.equal(coverage.staleCount, 2);
+const mixedRows = [
+  { ticker: "AAPL", data_date: "2026-10-28", freshness_block: "NO" },
+  { ticker: "MSFT", data_date: "2026-10-28", freshness_block: "NO" },
+  { ticker: "EA", data_date: "2026-08-07", freshness_block: "YES" },
+  { ticker: "WBD", data_date: "2026-10-06" },
+  { ticker: "EOS.AX", data_date: "2026-10-29" },
+  { ticker: "BHP.AX", data_date: "2026-10-28" },
+];
+const beforeMixed = JSON.stringify(mixedRows);
+assert.equal(ui.latestUSDataDate(mixedRows), "2026-10-28");
+assert.equal(ui.latestUSDataDate([{ ticker: "EOS.ax", data_date: "2026-10-29" }]), null);
+assert.equal(ui.latestUSDataDate([{ ticker: "BAD", data_date: "2026-02-30" }]), null);
+const mixedCoverage = ui.coverage({ latest_data_date: "2026-10-29" }, mixedRows);
+assert.deepEqual(mixedCoverage.stale.map(row => row.ticker), ["EA", "WBD", "BHP.AX"]);
+assert.equal(mixedCoverage.staleCount, 3);
+assert.equal(JSON.stringify(mixedRows), beforeMixed, "Display logic must not relabel any source date");
+assert.equal(ui.coverage({}, [{ ticker: "BLOCKED", data_date: "2026-10-28", freshness_block: "YES" }]).staleCount, 1, "Never remove scanner freshness blocks");
 const packageVersion = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
 assert.equal(packageVersion, "5.1.1");
 for (const file of ["index.html", "ticker.html"]) {
