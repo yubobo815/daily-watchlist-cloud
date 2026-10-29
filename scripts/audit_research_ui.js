@@ -71,6 +71,13 @@ assert.deepEqual(mixedCoverage.stale.map(row => row.ticker), ["EA", "WBD", "BHP.
 assert.equal(mixedCoverage.staleCount, 3);
 assert.equal(JSON.stringify(mixedRows), beforeMixed, "Display logic must not relabel any source date");
 assert.equal(ui.coverage({}, [{ ticker: "BLOCKED", data_date: "2026-10-28", freshness_block: "YES" }]).staleCount, 1, "Never remove scanner freshness blocks");
+assert.deepEqual(ui.coverage({}, [
+  { ticker: "ADI", data_date: "2026-10-28", freshness_block: "NO" },
+  { ticker: "ADI", data_date: "2026-09-17", freshness_block: "YES" },
+]).stale, [], "Historical sessions must not masquerade as stale current inputs on ticker pages");
+const partialTickerCoverage = ui.coverage({ payload: { stale_execution_blocks: 2, stale_cache_fallbacks: [{ ticker: "EA" }, { ticker: "WBD" }] } }, [{ ticker: "ADI", data_date: "2026-10-28" }]);
+assert.deepEqual(partialTickerCoverage.stale.map(row => row.ticker), ["EA", "WBD"]);
+assert.equal(partialTickerCoverage.stale[0].date, "Unavailable", "Do not invent cache dates while the directory is loading");
 const packageVersion = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
 assert.equal(packageVersion, "5.1.1");
 for (const file of ["index.html", "ticker.html"]) {
