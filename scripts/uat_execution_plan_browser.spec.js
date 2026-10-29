@@ -50,13 +50,18 @@ test("readiness uses one source, keeps blockers and never invents missing scores
   const first = page.locator('#watchlist-body tr[data-select-ticker="V000"] .col-readiness');
   await expect(first).toContainText("78");
   await expect(first.locator("meter")).toHaveAttribute("value", "78.4");
+  await expect(first.locator(".readiness-compact")).toHaveAttribute("data-readiness-tone", "high");
+  await expect(first.locator(".readiness-compact")).toHaveCSS("--readiness-fill", "#4f775b");
   const stale = page.locator('#watchlist-body tr[data-select-ticker="V001"] .col-readiness');
   await expect(stale.locator(".readiness-status, .readiness-date")).toHaveCount(0);
   await expect(stale.locator(".readiness-compact")).toHaveAttribute("title", /As of 2026-10-20/);
   await expect(stale.locator(".readiness-compact")).toHaveClass(/is-dated/);
+  await expect(stale.locator(".readiness-compact")).toHaveCSS("--readiness-fill", "#a7a49b");
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"] .col-readiness')).toContainText("Not scored");
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"] .col-readiness meter')).toHaveCount(0);
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V003"] .col-readiness meter')).toHaveAttribute("value", "0");
+  await expect(page.locator('#watchlist-body tr[data-select-ticker="V003"] .col-readiness .readiness-compact')).toHaveCSS("--readiness-fill", "#a45d50");
+  await expect(page.locator('#watchlist-body tr[data-select-ticker="V004"] .col-readiness .readiness-compact')).toHaveCSS("--readiness-fill", "#a27b35");
   await page.locator("#ticker-detail-panel .readiness-factors summary").click();
   await expect(page.locator("#ticker-detail-panel .readiness-factors")).toContainText("85/100");
   await expect(page.locator("#ticker-detail-panel .readiness-factors")).toContainText("Unavailable");
@@ -66,6 +71,7 @@ test("readiness uses one source, keeps blockers and never invents missing scores
   await page.goto(baseUrl + "/ticker.html?ticker=V000");
   await expect(page.locator(".readiness-meter > strong")).toContainText("78");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "78.4");
+  await expect(page.locator(".readiness-meter")).toHaveCSS("--readiness-fill", "#4f775b");
   await expect(page.locator(".readiness-meter p, .readiness-meter .readiness-status, .readiness-meter details")).toHaveCount(0);
 });
 

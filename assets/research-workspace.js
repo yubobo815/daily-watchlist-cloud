@@ -18,13 +18,15 @@
   const label = action => ACTION_LABELS[action] || action;
   const escaped = escapeHtml;
   const badge = row => `<span class="badge ${actionKind(row.action)}">${escaped(label(row.action))}</span>`;
+  // Presentation bands only: colours never grant entry permission.
+  const readinessTone = score => score === null ? "unavailable" : score >= 75 ? "high" : score >= 50 ? "mid" : "low";
   function readiness(row) {
     const score = ui.readinessScore(row);
     const status = qualityConstraintLabel(row);
     const dated = freshnessBlocked(row);
     const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
     const context = [status, dated ? "As of " + date : "", "Setup evidence, not a win probability"].filter(Boolean).join(" · ");
-    return `<span class="readiness-label readiness-compact ${dated ? "is-dated" : ""}" title="${escaped(context)}">${score === null
+    return `<span class="readiness-label readiness-compact ${dated ? "is-dated" : ""}" data-readiness-tone="${readinessTone(score)}" title="${escaped(context)}">${score === null
       ? '<span class="readiness-value">Not scored</span>'
       : `<span class="readiness-value">${Math.round(score)}<small>/100</small></span><meter min="0" max="100" value="${score}" aria-label="Signal readiness for ${escaped(row.ticker)}">${score}/100</meter>`}
       </span>`;
@@ -240,7 +242,7 @@
     const status = qualityConstraintLabel(row);
     const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
     const context = [status, dated ? "As of " + date : "", "Setup evidence, not a win probability"].filter(Boolean).join(" · ");
-    return `<section class="readiness-meter ${dated ? "is-dated" : ""}" aria-label="Signal readiness" title="${escaped(context)}">
+    return `<section class="readiness-meter ${dated ? "is-dated" : ""}" data-readiness-tone="${readinessTone(score)}" aria-label="Signal readiness" title="${escaped(context)}">
       <span>Signal readiness</span><strong>${score === null ? "—" : Math.round(score)}<small>/100</small></strong>
       ${score === null ? '<span class="readiness-unavailable">Not scored</span>' : `<meter min="0" max="100" value="${score}" aria-label="Signal readiness">${score}/100</meter>`}
       </section>`;
