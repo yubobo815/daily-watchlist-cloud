@@ -1,6 +1,7 @@
 const assert=require('node:assert/strict');
 const {createPublisher,digest,stable,CHECKS}=require('./publish_market_brief.cjs');
-const base=structuredClone(require('../data/market-brief.json'));
+// Keep the disabled independent-card publisher's fixture separate from live briefs.
+const base=structuredClone(require('./fixtures/market-brief-independent.json'));
 delete base.provenance;
 const head='b'.repeat(40), main='a'.repeat(40), merged='d'.repeat(40);
 const candidate=structuredClone(base);

@@ -15,7 +15,9 @@ SUMMARY = "curated_summary_123"
 
 class SourceFixture:
     def __init__(self):
-        self.current = json.loads((Path(__file__).resolve().parents[1]/"data/market-brief.json").read_text())
+        # The disabled independent-card publisher has its own frozen contract.
+        # Live monthly briefs may instead contain one report with an embedded outlook.
+        self.current = json.loads((Path(__file__).resolve().parent/"fixtures/market-brief-independent.json").read_text())
         self.current.pop("provenance", None)
         b = copy.deepcopy(self.current)
         self.report = b["sources"][0]["url"].split("/d/")[1].split("/")[0]
