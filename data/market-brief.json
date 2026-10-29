@@ -1,40 +1,36 @@
 {
   "schema_version": 1,
-  "session_date": "2026-10-27",
-  "issued_at": "2026-10-28T10:10:00+11:00",
-  "headline": "Concentration, not broad confirmation",
-  "summary": "US indices rose on semiconductor leadership, but most S&P 500 constituents fell. Small-cap strength offers counterevidence to a broad equity sell-off.",
+  "session_date": "2026-10-28",
+  "issued_at": "2026-10-28T23:09:40.123Z",
+  "headline": "Semiconductor leadership, uneven participation",
+  "summary": "US indices edged higher with semiconductor leadership, while equal-weight weakness showed limited breadth. Earnings dispersion and higher Treasury yields remain important risks.",
   "metrics": [
-    {"label":"S&P 500","value":"7,722.60","detail":"+0.60% · US close"},
-    {"label":"Nasdaq Composite","value":"26,477.81","detail":"+1.18% · US close"},
-    {"label":"US 10-year yield","value":"4.99%","detail":"−1 bp · Treasury par yield"},
-    {"label":"Brent futures","value":"US$113.88","detail":"−1.7% · reported settlement"}
+    {"label":"S&P 500","value":"7,743.98","detail":"+0.28% · US close"},
+    {"label":"Nasdaq Composite","value":"26,549.85","detail":"+0.27% · US close"},
+    {"label":"US 10-year yield","value":"5.05%","detail":"+6 bp · Treasury par yield"},
+    {"label":"Brent futures","value":"US$115.32","detail":"+1.26% · reported December settlement"}
   ],
   "highlights": [
-    {"title":"Narrow breadth, resilient small caps","text":"Most S&P 500 stocks declined despite the index gain, while the Russell 2000 rose 1.16%. The two signals do not support a simple all-market risk-on or capitulation conclusion."},
-    {"title":"AI financing merits scrutiny","text":"Broadcom's Anthropic financing structure and Nvidia's Meta investment support capacity, while raising questions about supplier exposure and future cash returns. Neither proves a financing failure."},
-    {"title":"Macro relief, event risk","text":"Lower oil and a slightly lower Treasury yield ease some pressure, but the Fed decision and major technology earnings remain within the forecast window."}
+    {"title":"Leadership without broad confirmation","text":"Semiconductors rose 1.75%, but the equal-weight S&P 500 fell 0.04%. Positive small-cap performance provides counterevidence to a broad risk-off reading."},
+    {"title":"Rates and earnings remain the test","text":"The report describes a Fed hold with two hawkish dissents. Microsoft and Alphabet showed divergent after-hours reactions; those prices remain pending, not confirmed next-session outcomes."},
+    {"title":"Original research outlook","text":"The report retains a consolidation-led base case. GDP/PCE and Amazon earnings are the next tests; this is a subjective research scenario, not an entry signal."}
   ],
   "forecast": {
-    "id":"IND-2026-10-27-3D-v1",
+    "id":"drive:1NQMsQkwsmohpTpuIh9K1xpfLZ82pYdrv#us-original-outlook",
     "outlook":"Earnings dispersion and consolidation",
-    "horizon":"28–30 October US sessions · S&P 500 final close",
-    "evaluates_at":"2026-10-30T20:00:00Z",
-    "reference_close":7722.60,
-    "lower_bound":7600,
-    "upper_bound":7850,
+    "horizon":"29 October–2 November US sessions · S&P 500 final close",
+    "evaluates_at":"2026-11-02T21:00:00Z",
+    "reference_close":7743.98,
+    "lower_bound":7650,
+    "upper_bound":7830,
     "probabilities":{"bull":25,"base":45,"bear":30},
-    "completed_sample":1,
-    "method":"Original forecast issued 2026-10-28T10:10:34+11:00. Subjective research probabilities, not statistically calibrated. Boundaries define final-close outcomes, not technical support or resistance.",
-    "watch_next":"Watch the Fed statement, major technology earnings, breadth, credit indicators and financing disclosures. A single completed forecast is insufficient to establish calibration."
+    "completed_sample":6,
+    "method":"Embedded original US outlook, section 9. ID is an archive locator, not an author-issued forecast ID. issued_at is the verified completed Drive modification time; precise original issue time is unavailable. Subjective probabilities, not statistically calibrated. Final-close boundaries are not technical support or resistance.",
+    "watch_next":"Watch breadth, semiconductor confirmation, GDP/PCE and Amazon earnings. US completed-window mean Brier is reported as 0.764 across six windows, worse than the source's 0.667 uniform baseline."
   },
-  "limitations":"The exact VIX close, exchange advance-decline figures, consolidated volume, put/call, credit measures and DXY close were not verified. Research outlook only; not a trading signal or guarantee.",
+  "limitations":"Curated from the source report, not a new independent market verification. Put/call, current fund flows, sector ETFs, NDX and individual-stock volume were unavailable. Oil settlement was media-reported, not directly verified with ICE. X sentiment was partial; after-hours reactions remain pending.",
   "sources":[
-    {"label":"Daily report · Drive access required","url":"https://drive.google.com/file/d/19EE7aBeNeJvB2FWYYATqbRMLsE6h9JYs/view","modified_at":"2026-10-28T01:12:56.421Z"},
-    {"label":"Original forecast · Drive access required","url":"https://drive.google.com/file/d/1Grx7dx59wVsYJQz8Wrs7-Q3xmJDjd0by/view","modified_at":"2026-10-28T01:13:02.706Z"},
-    {"label":"AP · index closes","url":"https://apnews.com/article/eae2932c0c253be1039e1545909656a8"},
-    {"label":"AP · market breadth","url":"https://apnews.com/article/e11a2240fc3283c4507d44b9833f30a2"},
-    {"label":"US Treasury · yields","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?field_tdr_date_value=2026&type=daily_treasury_yield_curve"},
-    {"label":"Reuters · oil","url":"https://www.reuters.com/business/energy/oil-eases-middle-east-diplomacy-hopes-saudi-attacks-keep-supply-worries-alive-2026-10-27/"}
+    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1NQMsQkwsmohpTpuIh9K1xpfLZ82pYdrv/view","modified_at":"2026-10-28T23:09:40.123Z"},
+    {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202610"}
   ]
 }
