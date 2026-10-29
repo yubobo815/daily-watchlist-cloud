@@ -52,7 +52,7 @@
     const wasOpen = Boolean(rail.querySelector("details[open]"));
     const analyzed = Number(runInfo?.symbols_analyzed ?? rows.length);
     const total = Number(runInfo?.symbols_total ?? rows.length);
-    const date = ui.latestUSDataDate(rows) || "Unavailable";
+    const date = ui.latestUSDataDate(coverageRows.length ? coverageRows : rows) || "Unavailable";
     const partial = health.label.toLowerCase().includes("partial") || analyzed < total || ui.coverage(runInfo, rows).staleCount > 0;
     rail.innerHTML = `<a class="rail-home" href="./">Daily Trade Copilot</a>
       <span>US close <strong>${escaped(date)}</strong></span><span>Coverage <strong>${analyzed}/${total}</strong></span>

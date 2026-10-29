@@ -88,12 +88,19 @@
     const failed = Array.isArray(payload.failed_symbols) ? payload.failed_symbols : [];
     const missing = failed.map(item => ({ ticker: String(item.ticker || "Unknown"), reason: String(item.error || "Unavailable") }));
     const unique = new Map();
-    const latestByMarket = new Map();
+    // Ticker pages initially pass a history series. Coverage describes current
+    // inputs, not old sessions: retain only the latest dated row per ticker.
+    const current = new Map();
     for (const row of rows || []) {
+      const previous = current.get(row.ticker);
+      if (!previous || (rowDate(row) || "") > (rowDate(previous) || "")) current.set(row.ticker, row);
+    }
+    const latestByMarket = new Map();
+    for (const row of current.values()) {
       const date = rowDate(row); const key = marketKey(row);
       if (date && (!latestByMarket.has(key) || date > latestByMarket.get(key))) latestByMarket.set(key, date);
     }
-    for (const row of rows || []) {
+    for (const row of current.values()) {
       const blocked = ["YES", "TRUE"].includes(String(value(row, "freshness_block") || "").toUpperCase());
       const dataDate = rowDate(row);
       // US and ASX have different session dates. A newer ASX date must not
@@ -103,6 +110,14 @@
         ticker: row.ticker,
         date: String(dataDate || "Unavailable").slice(0, 10),
         reason: String(value(row, "freshness_plan") || value(row, "freshness_status") || "Older market data"),
+      });
+    }
+    // Publication metadata can identify old cache inputs before a ticker page's
+    // full directory finishes loading. Do not invent their unavailable dates.
+    for (const item of Array.isArray(payload.stale_cache_fallbacks) ? payload.stale_cache_fallbacks : []) {
+      if (item.ticker && !unique.has(item.ticker)) unique.set(item.ticker, {
+        ticker: item.ticker, date: "Unavailable",
+        reason: String(item.error || "Old cache input; source date unavailable in this view"),
       });
     }
     const declared = number(payload.stale_execution_blocks) || 0;
