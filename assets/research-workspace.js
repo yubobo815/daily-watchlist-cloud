@@ -23,11 +23,11 @@
     const status = qualityConstraintLabel(row);
     const dated = freshnessBlocked(row);
     const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
-    return `<span class="readiness-label readiness-compact ${dated ? "is-dated" : ""}">${score === null
+    const context = [status, dated ? "As of " + date : "", "Setup evidence, not a win probability"].filter(Boolean).join(" · ");
+    return `<span class="readiness-label readiness-compact ${dated ? "is-dated" : ""}" title="${escaped(context)}">${score === null
       ? '<span class="readiness-value">Not scored</span>'
       : `<span class="readiness-value">${Math.round(score)}<small>/100</small></span><meter min="0" max="100" value="${score}" aria-label="Signal readiness for ${escaped(row.ticker)}">${score}/100</meter>`}
-      ${status ? `<span class="readiness-status">${escaped(status)}</span>` : ""}
-      ${dated ? `<small class="readiness-date">As of ${escaped(date)}</small>` : ""}</span>`;
+      </span>`;
   }
   window.renderQualityScore = readiness;
 
@@ -208,7 +208,7 @@
     const history = historyCache.get(row.ticker) || { loading: true, rows: [] };
     const index = state.visibleRows.findIndex(item => item.ticker === row.ticker);
     const plan = protection(row) > 0 || loss(row) > 0 ? `<section class="recorded-plan"><h3>${activeExecutionPlan(row) ? "Existing frozen plan" : "Qualified plan"}</h3><dl class="plan-facts">${protection(row) > 0 ? `<div><dt>Protection</dt><dd>${fmt(protection(row))}</dd></div>` : ""}${loss(row) > 0 ? `<div><dt>Loss if stopped</dt><dd>−${Math.abs(loss(row)).toFixed(1)}%</dd></div>` : ""}</dl></section>` : "";
-    const evidence = `${readinessDetails(row)}<section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
+    const evidence = `${readinessDetails(row)}<section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}${readinessFactorsMarkup(row)}</section>
       <section class="state-changes"><h3>State changes</h3>${transitionsMarkup(history.rows, history.loading, history.failed, true)}</section>${plan}`;
     const fullLink = `<a class="full-detail-link" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">Open full detail →</a>`;
     panel.innerHTML = `<div class="detail-panel-head"><div><h2>${escaped(row.ticker)}</h2><p>${escaped(displaySecurityName(row.name, row.ticker) || row.ticker)}</p></div>${favourite(row)}</div>${evidence}<nav class="detail-neighbours" aria-label="Selected stock navigation"><button type="button" data-research-step="-1" ${index <= 0 ? "disabled" : ""}>Previous stock</button><button type="button" data-research-step="1" ${index >= state.visibleRows.length - 1 ? "disabled" : ""}>Next stock</button></nav>${fullLink}`;
@@ -238,15 +238,16 @@
     const score = ui.readinessScore(row);
     const dated = freshnessBlocked(row);
     const status = qualityConstraintLabel(row);
-    const factors = ui.readinessFactors(row);
     const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
-    return `<section class="readiness-meter ${dated ? "is-dated" : ""}" aria-label="Signal readiness">
+    const context = [status, dated ? "As of " + date : "", "Setup evidence, not a win probability"].filter(Boolean).join(" · ");
+    return `<section class="readiness-meter ${dated ? "is-dated" : ""}" aria-label="Signal readiness" title="${escaped(context)}">
       <span>Signal readiness</span><strong>${score === null ? "—" : Math.round(score)}<small>/100</small></strong>
       ${score === null ? '<span class="readiness-unavailable">Not scored</span>' : `<meter min="0" max="100" value="${score}" aria-label="Signal readiness">${score}/100</meter>`}
-      <div>${status ? `<strong class="readiness-status">${escaped(status)}</strong>` : ""}
-      <p>${dated ? `Historical score as of ${escaped(date)}; refresh data before using it.` : "Setup evidence, not a win probability or permission to enter."}</p>
-      <details class="readiness-factors"><summary>Score components</summary><dl>${factors.map(f => `<div><dt>${f.label}<small>${f.weight}% weight</small></dt><dd>${f.score === null ? "Unavailable" : Math.round(f.score) + "/100"}</dd></div>`).join("")}</dl>
-      <p>Published model components, not a win probability. Missing values are not zero. Entry triggers and risk checks remain separate.</p></details></div></section>`;
+      </section>`;
+  }
+  function readinessFactorsMarkup(row) {
+    return `<details class="readiness-factors"><summary>Score components</summary><dl>${ui.readinessFactors(row).map(f => `<div><dt>${f.label}<small>${f.weight}% weight</small></dt><dd>${f.score === null ? "Unavailable" : Math.round(f.score) + "/100"}</dd></div>`).join("")}</dl>
+      <p>Published model components, not a win probability. Missing values are not zero. Entry triggers and risk checks remain separate.</p></details>`;
   }
   window.renderShadowPolicyPreview = readinessDetails;
 
@@ -259,7 +260,7 @@
       ${rulerMarkup(latest)}${renderShadowPolicyPreview(latest)}
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escaped(decisionHeadline(latest))}</strong><p>${escaped(decisionNarrative(latest))}</p></section>
       ${renderFrozenExecutionPlan(latest) || (active ? `<section class="active-plan"><h3>Price plan</h3>${renderReferenceLevels(latest, { active: true })}</section>` : '<div class="inactive-plan">No entry is recommended from the latest session.</div>')}
-      <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(latest)}</section></div>`;
+      <section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(latest)}${readinessFactorsMarkup(latest)}</section></div>`;
     updateTickerNavigation();
   };
 

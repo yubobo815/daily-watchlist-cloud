@@ -51,8 +51,8 @@ test("readiness uses one source, keeps blockers and never invents missing scores
   await expect(first).toContainText("78");
   await expect(first.locator("meter")).toHaveAttribute("value", "78.4");
   const stale = page.locator('#watchlist-body tr[data-select-ticker="V001"] .col-readiness');
-  await expect(stale).toContainText("DATA NEEDS REFRESH");
-  await expect(stale).toContainText("As of 2026-10-20");
+  await expect(stale.locator(".readiness-status, .readiness-date")).toHaveCount(0);
+  await expect(stale.locator(".readiness-compact")).toHaveAttribute("title", /As of 2026-10-20/);
   await expect(stale.locator(".readiness-compact")).toHaveClass(/is-dated/);
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"] .col-readiness')).toContainText("Not scored");
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"] .col-readiness meter')).toHaveCount(0);
@@ -66,6 +66,7 @@ test("readiness uses one source, keeps blockers and never invents missing scores
   await page.goto(baseUrl + "/ticker.html?ticker=V000");
   await expect(page.locator(".readiness-meter > strong")).toContainText("78");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "78.4");
+  await expect(page.locator(".readiness-meter p, .readiness-meter .readiness-status, .readiness-meter details")).toHaveCount(0);
 });
 
 test("notification center is visible on desktop/mobile and preserves read state", async ({ page }) => {
