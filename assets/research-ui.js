@@ -10,6 +10,22 @@
     const result = Number(input);
     return Number.isFinite(result) ? result : null;
   }
+  function readinessScore(row) {
+    const raw = value(row, "shadow_readiness_score");
+    const score = typeof raw === "number" || typeof raw === "string" ? number(raw) : null;
+    return score !== null && score >= 0 && score <= 100 ? score : null;
+  }
+  function readinessFactors(row) {
+    return [
+      ["trend", "Trend", 25], ["entry", "Entry quality", 20],
+      ["momentum", "Momentum", 15], ["volume_demand", "Volume / demand", 15],
+      ["relative_strength", "Relative strength", 10], ["market", "Market environment", 10],
+      ["history", "Historical evidence", 5],
+    ].map(([key, label, weight]) => {
+      const score = number(value(row, "shadow_readiness_" + key));
+      return { key, label, weight, score: score !== null && score >= 0 && score <= 100 ? score : null };
+    });
+  }
   function zone(row) {
     const frozen = ["ARMED", "MODEL_FILLED", "TP1_HIT"].includes(String(value(row, "execution_plan_status") || "").toUpperCase());
     const high = number(frozen ? value(row, "execution_plan_zone_high") : value(row, "entry_zone_high") ?? value(row, "entry_est"));
@@ -77,5 +93,5 @@
     const declared = number(payload.stale_execution_blocks) || 0;
     return { missing, stale: [...unique.values()], staleCount: Math.max(declared, unique.size), declaredMissing: number(runInfo?.symbols_failed) || 0 };
   }
-  return Object.freeze({ value, number, zone, distance, formatDistance, compareDistance, pricePosition, transitions, coverage });
+  return Object.freeze({ value, number, readinessScore, readinessFactors, zone, distance, formatDistance, compareDistance, pricePosition, transitions, coverage });
 }));

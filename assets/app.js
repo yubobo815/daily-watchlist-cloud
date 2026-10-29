@@ -752,7 +752,8 @@ function setupTone(value) {
 }
 
 function convictionScore(rowOrScore) {
-  const raw = typeof rowOrScore === "object" ? scannerScoreValue(rowOrScore) : Number(rowOrScore);
+  if (typeof rowOrScore === "object") return window.ResearchUI.readinessScore(rowOrScore);
+  const raw = Number(rowOrScore);
   if (!Number.isFinite(raw)) return 0;
   return Math.max(0, Math.min(100, (raw / 128) * 100));
 }
