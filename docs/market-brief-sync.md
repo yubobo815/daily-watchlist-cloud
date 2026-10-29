@@ -12,12 +12,46 @@ This is the active publisher. GitHub scheduled publishing stays disabled
 (`MARKET_BRIEF_SYNC_ENABLED=false`); do not create a publishing App, approve
 workflow runs automatically, or bypass protected checks.
 
-Publication order is completion-gated: final morning US-close report and matching
-immutable forecast card saved/read back in Drive; scanner has activated its live
+Publication order is completion-gated: final morning US-close report and its
+original forecast saved/read back in Drive; scanner has activated its live
 publication for the same US session; publish the concise summary through a tested
 PR; verify production JSON and rendering. A scheduled start is not proof that
 either upstream task has finished. Never use the evening AU/Asia preview as a
 replacement for the morning US-close report.
+
+## Active source selection (authorised 29 October 2026)
+
+Use **Market Desk Reports** (Drive parent ID `1KjIqM7VurftWyjCH3kygjywSMyKZWv4d`),
+under its `YYYY-MM` month folders. Discover the appropriate month dynamically,
+including the previous month around month boundaries; do not permanently pin
+October. The verified October folder is `1ZwBqRqDDilX7PrHrOPLjdai4XqXsJigK`.
+Select the newest completed **US post-close daily report** by the US trading
+session stated in its body, not its filename, upload date or Australian date.
+For example, `2026-10-29.md` covers the US 28 October session.
+
+Use the original US outlook embedded in that same report. A separately issued
+forecast card is **not required** for this monthly source. Preserve its stated
+probabilities, reference close, final-close boundaries, horizon, limitations and
+US-only completed calibration sample. Do not splice in an older independent
+forecast, a later revision, an ASX outlook or an entry from `forecast-log.md`.
+If the source has no forecast ID, use a transparent source locator such as
+`drive:<file-id>#us-original-outlook` in `forecast.id`; explain in `method` that
+this is an archive locator, not a forecast ID assigned by the author. Never
+invent an author-issued ID or an exact issue timestamp. If the report has no
+precise publication time, use its verified completed Drive modification time
+for `issued_at` and disclose that timestamp basis in `method`.
+
+The public summary is US-market-only, even when the source includes an ASX
+appendix. Exclude Australian stocks, XJO/ASX forecasts, RBA/AUD-only sections,
+personal holdings and account details. Do not use the separate **ASX Reports**
+archive as a substitute for a morning US-close report. Original Drive sharing
+and files must remain unchanged.
+
+The former `US Market & AI Daily Reports` folder is a legacy source, not the
+sole discovery scope or an automatic fallback to an older session. Existing
+published snapshots keep their original provenance. The disabled GitHub
+publisher prototype below retains its separate-card contract and must remain
+disabled; it does not define the active Codex source selection.
 
 The existing morning producer is scheduled at 10:00 Melbourne, Monday through
 Saturday. Tuesday–Saturday normally cover the preceding completed US session,
@@ -55,11 +89,11 @@ same source IDs/modification times, return immediately without full report or
 watchlist downloads, audits or PR creation. Fetch the watchlist only for a new
 or changed candidate awaiting publication.
 
-Use only the private **US Market & AI Daily Reports** folder, ID `1vFVQbX-xmbVrOSO4OXDGb1ACwZF3-oXw`, through the existing connected Drive account. Find the latest final dated daily report and its matching, separately issued forecast card. Do not mistake `forecast-log.md`, a prior forecast or an unfinished report for the current outlook.
+Use the monthly **Market Desk Reports** source above through the existing connected Drive account. Verify the final report's metadata and completed text readback, including the original US outlook within that file. Do not mistake `forecast-log.md`, a prior forecast, a revision or an unfinished report for the current original outlook.
 
-Update only `data/market-brief.json`. Preserve the report's actual US session date, publication timestamp, source file IDs and modified timestamps. Whitelist market facts, concise interpretation, public citations and the original forecast ID, probabilities, final-close boundaries, horizon, limitations and completed calibration sample. Never publish private account details, personal positions, credentials or entire source documents. Do not add unsupported data or invent a model forecast. A changed judgement requires a new forecast ID from the source, never retrospective edits.
+For routine content syncs update only `data/market-brief.json`. Preserve the report's actual US session date, publication timestamp (or explicitly disclosed completed-upload timestamp), source file ID and modified timestamp. Whitelist market facts, concise interpretation, public citations and the original forecast ID (or explicitly disclosed source locator), probabilities, final-close boundaries, horizon, limitations and completed US calibration sample. Never publish private account details, personal positions, credentials or entire source documents. Do not add unsupported data or invent a model forecast. Preserve original forecasts; a changed judgement must be separately identified, never a retrospective edit.
 
-Identical source IDs, modification times and content are a no-op. If the source is missing, inconsistent or older than the published report, retain the last valid snapshot; never relabel it as today's report. The UI independently labels dated reports by completed US market sessions and archives forecasts after their evaluation time. No browser has access to Drive credentials, no Google sharing changes are needed and there is no added Supabase egress.
+An unchanged report ID, modification time and meaningful content is a no-op; no second card is needed for an embedded outlook. If the source is missing, inconsistent or older than the published report, retain the last valid snapshot; never relabel it as today's report. The UI independently labels dated reports by completed US market sessions and archives forecasts after their evaluation time. No browser has access to Drive credentials, no Google sharing changes are needed and there is no added Supabase egress.
 
 Validate with `npm run audit:market-brief` (an optional file path can be passed with `-- path/to/file.json`), then `npm run audit:watchlist` and `npm run uat:docker`. Publish through a pull request and the protected main branch's required checks; merge only the tested head SHA after all checks pass. Verify the deployed JSON and rendered section on production. Do not trigger a full scanner or weekly calibration just to publish research. GitHub Pages includes the brief on its next ordinary watchlist publication; Vercel serves it directly from the repository.
 
