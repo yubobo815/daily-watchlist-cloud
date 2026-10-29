@@ -28,7 +28,7 @@
     const context = [status, dated ? "As of " + date : "", "Setup evidence, not a win probability"].filter(Boolean).join(" · ");
     return `<span class="readiness-label readiness-compact ${dated ? "is-dated" : ""}" data-readiness-tone="${readinessTone(score)}" title="${escaped(context)}">${score === null
       ? '<span class="readiness-value">Not scored</span>'
-      : `<span class="readiness-value">${Math.round(score)}<small>/100</small></span><meter min="0" max="100" value="${score}" aria-label="Signal readiness for ${escaped(row.ticker)}">${score}/100</meter>`}
+      : `<span class="readiness-value">${Math.round(score)}</span><meter min="0" max="100" value="${score}" aria-label="Signal readiness for ${escaped(row.ticker)}">${score}/100</meter>`}
       </span>`;
   }
   window.renderQualityScore = readiness;
@@ -243,12 +243,12 @@
     const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
     const context = [status, dated ? "As of " + date : "", "Setup evidence, not a win probability"].filter(Boolean).join(" · ");
     return `<section class="readiness-meter ${dated ? "is-dated" : ""}" data-readiness-tone="${readinessTone(score)}" aria-label="Signal readiness" title="${escaped(context)}">
-      <span>Signal readiness</span><strong>${score === null ? "—" : Math.round(score)}<small>/100</small></strong>
+      <span>Signal readiness</span><strong>${score === null ? "—" : Math.round(score)}</strong>
       ${score === null ? '<span class="readiness-unavailable">Not scored</span>' : `<meter min="0" max="100" value="${score}" aria-label="Signal readiness">${score}/100</meter>`}
       </section>`;
   }
   function readinessFactorsMarkup(row) {
-    return `<details class="readiness-factors"><summary>Score components</summary><dl>${ui.readinessFactors(row).map(f => `<div><dt>${f.label}<small>${f.weight}% weight</small></dt><dd>${f.score === null ? "Unavailable" : Math.round(f.score) + "/100"}</dd></div>`).join("")}</dl>
+    return `<details class="readiness-factors"><summary>Score components</summary><dl>${ui.readinessFactors(row).map(f => `<div><dt>${f.label}<small>${f.weight}% weight</small></dt><dd>${f.score === null ? "Unavailable" : Math.round(f.score)}</dd></div>`).join("")}</dl>
       <p>Published model components, not a win probability. Missing values are not zero. Entry triggers and risk checks remain separate.</p></details>`;
   }
   window.renderShadowPolicyPreview = readinessDetails;

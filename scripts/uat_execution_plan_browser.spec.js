@@ -49,6 +49,7 @@ test("readiness uses one source, keeps blockers and never invents missing scores
   await page.goto(baseUrl);
   const first = page.locator('#watchlist-body tr[data-select-ticker="V000"] .col-readiness');
   await expect(first).toContainText("78");
+  await expect(first.locator(".readiness-value")).toHaveText("78");
   await expect(first.locator("meter")).toHaveAttribute("value", "78.4");
   await expect(first.locator(".readiness-compact")).toHaveAttribute("data-readiness-tone", "high");
   await expect(first.locator(".readiness-compact")).toHaveCSS("--readiness-fill", "#4f775b");
@@ -63,13 +64,14 @@ test("readiness uses one source, keeps blockers and never invents missing scores
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V003"] .col-readiness .readiness-compact')).toHaveCSS("--readiness-fill", "#a45d50");
   await expect(page.locator('#watchlist-body tr[data-select-ticker="V004"] .col-readiness .readiness-compact')).toHaveCSS("--readiness-fill", "#a27b35");
   await page.locator("#ticker-detail-panel .readiness-factors summary").click();
-  await expect(page.locator("#ticker-detail-panel .readiness-factors")).toContainText("85/100");
+  await expect(page.locator("#ticker-detail-panel .readiness-factors dd").first()).toHaveText("85");
   await expect(page.locator("#ticker-detail-panel .readiness-factors")).toContainText("Unavailable");
   await expect(page.locator("#ticker-detail-panel")).toContainText("not a win probability");
   await page.selectOption("#sort", "score-desc");
   await expect(page.locator("#watchlist-body tr").first().locator(".ticker-link")).toHaveText("V001");
   await page.goto(baseUrl + "/ticker.html?ticker=V000");
   await expect(page.locator(".readiness-meter > strong")).toContainText("78");
+  await expect(page.locator(".readiness-meter > strong")).toHaveText("78");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "78.4");
   await expect(page.locator(".readiness-meter")).toHaveCSS("--readiness-fill", "#4f775b");
   await expect(page.locator(".readiness-meter p, .readiness-meter .readiness-status, .readiness-meter details")).toHaveCount(0);
