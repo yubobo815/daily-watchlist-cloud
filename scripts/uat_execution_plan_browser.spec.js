@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 const baseUrl = process.env.BASE_URL || "http://web:4178";
 const marketBrief = require(process.env.MARKET_BRIEF_FILE || "../data/market-brief.json");
 
-async function useResearchDataset(page, { optionalPlan = false, missingZone = false, matchLatestAction = false, readinessCases = false } = {}) {
+async function useResearchDataset(page, { optionalPlan = false, missingZone = false, matchLatestAction = false, readinessCases = false, mixedMarkets = false } = {}) {
   const rows = Array.from({ length: 61 }, (_, index) => ({
     ticker: `V${String(index).padStart(3, "0")}`, name: `Research Stock ${index}`,
     publication_id: "v5-browser-uat", run_date: "2026-10-23", data_date: index === 1 ? "2026-10-20" : "2026-10-23",
@@ -25,6 +25,11 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
   }
   const runInfo = { publication_id: "v5-browser-uat", run_date: "2026-10-23", latest_data_date: "2026-10-23", symbols_total: 63, symbols_analyzed: 61, symbols_failed: 2, status: "degraded", live_access_ok: true,
     payload: { failed_symbols: [{ ticker: "MISS1", error: "No stored OHLCV" }, { ticker: "MISS2", error: "Not enough history" }], stale_execution_blocks: 1 } };
+  if (mixedMarkets) {
+    rows.forEach((row, index) => { row.data_date = index === 1 ? "2026-10-20" : "2026-10-28"; });
+    rows.push({ ...rows[0], ticker: "EOS.AX", data_date: "2026-10-29" });
+    Object.assign(runInfo, { run_date: "2026-10-29", latest_data_date: "2026-10-29", symbols_total: 64, symbols_analyzed: 62 });
+  }
   await page.route("**/api/**", route => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/watchlist/latest") return route.fulfill({ json: { latest: "2026-10-23", rows, previousRows: [], runInfo } });
@@ -41,6 +46,20 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
   });
   return rows;
 }
+
+test("US close and coverage do not inherit the newer ASX session", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-29T09:00:00Z"));
+  await useResearchDataset(page, { mixedMarkets: true });
+  for (const url of [baseUrl, `${baseUrl}/ticker.html?ticker=V000`]) {
+    await page.goto(url);
+    await expect(page.locator("#market-rail")).toContainText("US close 2026-10-28");
+    await page.locator(".coverage-disclosure > summary").click();
+    await expect(page.locator(".coverage-content")).toContainText("Stale or older inputs (1)");
+    await expect(page.locator(".coverage-content")).toContainText("V001");
+    await expect(page.locator(".coverage-content")).not.toContainText("V000");
+    await expect(page.locator(".coverage-content")).not.toContainText("EOS.AX");
+  }
+});
 
 test("readiness uses one source, keeps blockers and never invents missing scores", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-10-24T01:00:00Z"));

@@ -75,15 +75,30 @@
     }
     return { changes: changes.slice(-limit).reverse(), total: changes.length, sessions: ordered.length, first: ordered[0] || null };
   }
+  const marketKey = row => /\.AX$/i.test(String(row?.ticker || "")) ? "ASX" : "US";
+  function rowDate(row) {
+    const date = String(row?.data_date || row?.history_date || row?.date || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date ? date : null;
+  }
+  function latestUSDataDate(rows) {
+    return (rows || []).filter(row => row.ticker && marketKey(row) === "US").map(rowDate).filter(Boolean).sort().at(-1) || null;
+  }
   function coverage(runInfo, rows) {
     const payload = runInfo?.payload || {};
     const failed = Array.isArray(payload.failed_symbols) ? payload.failed_symbols : [];
     const missing = failed.map(item => ({ ticker: String(item.ticker || "Unknown"), reason: String(item.error || "Unavailable") }));
     const unique = new Map();
+    const latestByMarket = new Map();
+    for (const row of rows || []) {
+      const date = rowDate(row); const key = marketKey(row);
+      if (date && (!latestByMarket.has(key) || date > latestByMarket.get(key))) latestByMarket.set(key, date);
+    }
     for (const row of rows || []) {
       const blocked = ["YES", "TRUE"].includes(String(value(row, "freshness_block") || "").toUpperCase());
-      const dataDate = row.data_date || row.history_date || row.date;
-      const oldDate = runInfo?.latest_data_date && dataDate && String(dataDate).slice(0, 10) < String(runInfo.latest_data_date).slice(0, 10);
+      const dataDate = rowDate(row);
+      // US and ASX have different session dates. A newer ASX date must not
+      // mark every current US row stale; explicit scanner blocks remain intact.
+      const oldDate = dataDate && dataDate < latestByMarket.get(marketKey(row));
       if ((blocked || oldDate) && row.ticker) unique.set(row.ticker, {
         ticker: row.ticker,
         date: String(dataDate || "Unavailable").slice(0, 10),
@@ -93,5 +108,5 @@
     const declared = number(payload.stale_execution_blocks) || 0;
     return { missing, stale: [...unique.values()], staleCount: Math.max(declared, unique.size), declaredMissing: number(runInfo?.symbols_failed) || 0 };
   }
-  return Object.freeze({ value, number, readinessScore, readinessFactors, zone, distance, formatDistance, compareDistance, pricePosition, transitions, coverage });
+  return Object.freeze({ value, number, readinessScore, readinessFactors, zone, distance, formatDistance, compareDistance, pricePosition, transitions, latestUSDataDate, coverage });
 }));
