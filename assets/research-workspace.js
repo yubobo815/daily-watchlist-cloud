@@ -14,12 +14,22 @@
   const requestedTicker = new URLSearchParams(location.search).get("ticker");
   const originalSelectTicker = window.selectTicker;
   const originalLoadDirectory = window.loadTickerDirectory;
-  const originalReadiness = window.renderShadowPolicyPreview;
   const fmt = n => Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const label = action => ACTION_LABELS[action] || action;
   const escaped = escapeHtml;
   const badge = row => `<span class="badge ${actionKind(row.action)}">${escaped(label(row.action))}</span>`;
-  const readiness = row => `<span class="readiness-label ${["exit", "avoid"].includes(actionKind(row.action)) ? "is-risk" : ""}">${escaped(qualityConstraintLabel(row) || fmtConviction(row))}</span>`;
+  function readiness(row) {
+    const score = ui.readinessScore(row);
+    const status = qualityConstraintLabel(row);
+    const dated = freshnessBlocked(row);
+    const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
+    return `<span class="readiness-label readiness-compact ${dated ? "is-dated" : ""}">${score === null
+      ? '<span class="readiness-value">Not scored</span>'
+      : `<span class="readiness-value">${Math.round(score)}<small>/100</small></span><meter min="0" max="100" value="${score}" aria-label="Signal readiness for ${escaped(row.ticker)}">${score}/100</meter>`}
+      ${status ? `<span class="readiness-status">${escaped(status)}</span>` : ""}
+      ${dated ? `<small class="readiness-date">As of ${escaped(date)}</small>` : ""}</span>`;
+  }
+  window.renderQualityScore = readiness;
 
   function coverageMarkup(runInfo, rows) {
     const result = ui.coverage(runInfo, rows);
@@ -63,7 +73,7 @@
   function freshnessBlocked(row) {
     const flagged = ["YES", "TRUE"].includes(String(payloadValue(row, "freshness_block") || "").toUpperCase());
     const date = row.data_date || row.date;
-    return flagged || Boolean(date && state.runInfo?.latest_data_date && String(date).slice(0, 10) < state.runInfo.latest_data_date.slice(0, 10));
+    return flagged || window.WatchlistMarketSession.marketSessionAge(date) > 0;
   }
 
   function protection(row) {
@@ -126,7 +136,7 @@
     const [sortKey, direction] = state.sort.split("-");
     filtered.sort((a, b) => sortKey === "distance" ? ui.compareDistance(a, b)
       : sortKey === "ticker" ? a.ticker.localeCompare(b.ticker)
-      : sortKey === "score" ? convictionScore(b) - convictionScore(a) || a.ticker.localeCompare(b.ticker)
+      : sortKey === "score" ? (ui.readinessScore(b) ?? -1) - (ui.readinessScore(a) ?? -1) || a.ticker.localeCompare(b.ticker)
       : (Number(a[sortKey] || 0) - Number(b[sortKey] || 0)) * (direction === "asc" ? 1 : -1) || a.ticker.localeCompare(b.ticker));
     state.visibleRows = filtered;
     document.querySelector("#sort").value = state.sort;
@@ -198,7 +208,7 @@
     const history = historyCache.get(row.ticker) || { loading: true, rows: [] };
     const index = state.visibleRows.findIndex(item => item.ticker === row.ticker);
     const plan = protection(row) > 0 || loss(row) > 0 ? `<section class="recorded-plan"><h3>${activeExecutionPlan(row) ? "Existing frozen plan" : "Qualified plan"}</h3><dl class="plan-facts">${protection(row) > 0 ? `<div><dt>Protection</dt><dd>${fmt(protection(row))}</dd></div>` : ""}${loss(row) > 0 ? `<div><dt>Loss if stopped</dt><dd>−${Math.abs(loss(row)).toFixed(1)}%</dd></div>` : ""}</dl></section>` : "";
-    const evidence = `<section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
+    const evidence = `${readinessDetails(row)}<section class="detail-diagnostics"><h3>Why we see it this way</h3>${renderScoreBreakdown(row)}</section>
       <section class="state-changes"><h3>State changes</h3>${transitionsMarkup(history.rows, history.loading, history.failed, true)}</section>${plan}`;
     const fullLink = `<a class="full-detail-link" href="./ticker.html?ticker=${encodeURIComponent(row.ticker)}">Open full detail →</a>`;
     panel.innerHTML = `<div class="detail-panel-head"><div><h2>${escaped(row.ticker)}</h2><p>${escaped(displaySecurityName(row.name, row.ticker) || row.ticker)}</p></div>${favourite(row)}</div>${evidence}<nav class="detail-neighbours" aria-label="Selected stock navigation"><button type="button" data-research-step="-1" ${index <= 0 ? "disabled" : ""}>Previous stock</button><button type="button" data-research-step="1" ${index >= state.visibleRows.length - 1 ? "disabled" : ""}>Next stock</button></nav>${fullLink}`;
@@ -224,22 +234,28 @@
       <div class="position-zone"><span>Planned entry zone</span><strong>${escaped(zone ? `${fmt(zone.low)}–${fmt(zone.high)}` : "Unavailable")}</strong><small>${zone?.frozen ? "Frozen plan" : "Reference zone"}</small></div></section>`;
   }
 
-  window.renderShadowPolicyPreview = function renderResearchReadiness(row) {
-    const original = originalReadiness(row);
-    const score = ui.number(payloadValue(row, "shadow_readiness_score"));
-    if (!original) return '<p class="readiness-unavailable">Readiness score unavailable in this publication.</p>';
-    const headline = original.match(/<strong>([\s\S]*?)<\/strong>/)?.[1] || "";
-    const explanation = original.match(/<p>([\s\S]*?)<\/p>/)?.[1] || "";
-    if (score === null || score < 0 || score > 100) return `<section class="readiness-unavailable"><span>Readiness score unavailable</span><strong>${headline}</strong><p>${explanation}</p></section>`;
-    return `<section class="readiness-meter"><span>Readiness</span><strong>${score.toFixed(1)}<small>/100</small></strong><meter min="0" max="100" value="${score}" aria-label="Readiness">${score}/100</meter><div><strong>${headline}</strong><p>${explanation}</p></div></section>`;
-  };
+  function readinessDetails(row) {
+    const score = ui.readinessScore(row);
+    const dated = freshnessBlocked(row);
+    const status = qualityConstraintLabel(row);
+    const factors = ui.readinessFactors(row);
+    const date = String(row.data_date || row.history_date || row.date || "Unavailable").slice(0, 10);
+    return `<section class="readiness-meter ${dated ? "is-dated" : ""}" aria-label="Signal readiness">
+      <span>Signal readiness</span><strong>${score === null ? "—" : Math.round(score)}<small>/100</small></strong>
+      ${score === null ? '<span class="readiness-unavailable">Not scored</span>' : `<meter min="0" max="100" value="${score}" aria-label="Signal readiness">${score}/100</meter>`}
+      <div>${status ? `<strong class="readiness-status">${escaped(status)}</strong>` : ""}
+      <p>${dated ? `Historical score as of ${escaped(date)}; refresh data before using it.` : "Setup evidence, not a win probability or permission to enter."}</p>
+      <details class="readiness-factors"><summary>Score components</summary><dl>${factors.map(f => `<div><dt>${f.label}<small>${f.weight}% weight</small></dt><dd>${f.score === null ? "Unavailable" : Math.round(f.score) + "/100"}</dd></div>`).join("")}</dl>
+      <p>Published model components, not a win probability. Missing values are not zero. Entry triggers and risk checks remain separate.</p></details></div></section>`;
+  }
+  window.renderShadowPolicyPreview = readinessDetails;
 
   window.renderLatestHistoryPanel = function renderResearchStock(latest) {
     const panel = document.querySelector("#latest-panel");
     if (!latest) { panel.innerHTML = `<p role="alert">${escaped(document.querySelector("#status")?.textContent || "Current stock data is unavailable.")}</p>`; return; }
     const kind = actionKind(latest.action);
     const active = executionChecksClear(latest) && ["buy", "continue"].includes(kind);
-    panel.innerHTML = `<div class="latest-card tone-${kind}"><div class="latest-head">${badge(latest)}${readiness(latest)}</div>
+    panel.innerHTML = `<div class="latest-card tone-${kind}"><div class="latest-head">${badge(latest)}</div>
       ${rulerMarkup(latest)}${renderShadowPolicyPreview(latest)}
       <section class="decision-callout tone-${kind}"><span class="eyebrow">What to do</span><strong>${escaped(decisionHeadline(latest))}</strong><p>${escaped(decisionNarrative(latest))}</p></section>
       ${renderFrozenExecutionPlan(latest) || (active ? `<section class="active-plan"><h3>Price plan</h3>${renderReferenceLevels(latest, { active: true })}</section>` : '<div class="inactive-plan">No entry is recommended from the latest session.</div>')}

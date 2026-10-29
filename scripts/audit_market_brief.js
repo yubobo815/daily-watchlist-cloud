@@ -44,7 +44,7 @@ assert.ok(!brief.render(fixture).includes("Forecast conditions"), "Do not restor
 assert.ok(!brief.render(fixture).includes("drive.google.com"));
 assert.ok(!brief.render(fixture).includes("Completed forecast sample"), "Do not render the removed method/sample note");
 assert.ok(!brief.render(fixture).includes("Subjective research probabilities"));
-assert.ok(brief.render(fixture).includes("NOT A TRADE SIGNAL"), "Keep the research outlook label");
+assert.ok(brief.render(fixture, new Date("2026-10-24T01:00:00Z")).includes("NOT A TRADE SIGNAL"), "Keep the research outlook label within its fixed forecast window");
 assert.ok(!brief.render(fixture).includes("<progress"), "Do not restore three independent probability bars");
 assert.ok(brief.render(fixture).includes('class="probability-strip"'), "Use one segmented probability strip");
 for (const key of ["bull", "base", "bear"]) {

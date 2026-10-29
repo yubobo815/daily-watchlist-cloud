@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 const baseUrl = process.env.BASE_URL || "http://web:4178";
 const marketBrief = require(process.env.MARKET_BRIEF_FILE || "../data/market-brief.json");
 
-async function useResearchDataset(page, { optionalPlan = false, missingZone = false, matchLatestAction = false } = {}) {
+async function useResearchDataset(page, { optionalPlan = false, missingZone = false, matchLatestAction = false, readinessCases = false } = {}) {
   const rows = Array.from({ length: 61 }, (_, index) => ({
     ticker: `V${String(index).padStart(3, "0")}`, name: `Research Stock ${index}`,
     publication_id: "v5-browser-uat", run_date: "2026-10-23", data_date: index === 1 ? "2026-10-20" : "2026-10-23",
@@ -17,6 +17,12 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
   }));
   if (optionalPlan) Object.assign(rows[0], { execution_plan_status: "ARMED", execution_plan_zone_low: 100, execution_plan_zone_high: 105, execution_plan_stop: 95, execution_plan_risk_pct: 7, execution_plan_id: "fixture-only-plan" });
   if (missingZone) { delete rows[0].entry_zone_low; delete rows[0].entry_zone_high; }
+  if (readinessCases) {
+    Object.assign(rows[0], { shadow_readiness_score: 78.4, market_permission: "ALLOW", shadow_readiness_trend: 85, shadow_readiness_entry: 72 });
+    Object.assign(rows[1], { shadow_readiness_score: 92.2 });
+    delete rows[2].shadow_readiness_score;
+    Object.assign(rows[3], { shadow_readiness_score: 0 });
+  }
   const runInfo = { publication_id: "v5-browser-uat", run_date: "2026-10-23", latest_data_date: "2026-10-23", symbols_total: 63, symbols_analyzed: 61, symbols_failed: 2, status: "degraded", live_access_ok: true,
     payload: { failed_symbols: [{ ticker: "MISS1", error: "No stored OHLCV" }, { ticker: "MISS2", error: "Not enough history" }], stale_execution_blocks: 1 } };
   await page.route("**/api/**", route => {
@@ -35,6 +41,32 @@ async function useResearchDataset(page, { optionalPlan = false, missingZone = fa
   });
   return rows;
 }
+
+test("readiness uses one source, keeps blockers and never invents missing scores", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-24T01:00:00Z"));
+  await useResearchDataset(page, { readinessCases: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(baseUrl);
+  const first = page.locator('#watchlist-body tr[data-select-ticker="V000"] .col-readiness');
+  await expect(first).toContainText("78");
+  await expect(first.locator("meter")).toHaveAttribute("value", "78.4");
+  const stale = page.locator('#watchlist-body tr[data-select-ticker="V001"] .col-readiness');
+  await expect(stale).toContainText("DATA NEEDS REFRESH");
+  await expect(stale).toContainText("As of 2026-10-20");
+  await expect(stale.locator(".readiness-compact")).toHaveClass(/is-dated/);
+  await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"] .col-readiness')).toContainText("Not scored");
+  await expect(page.locator('#watchlist-body tr[data-select-ticker="V002"] .col-readiness meter')).toHaveCount(0);
+  await expect(page.locator('#watchlist-body tr[data-select-ticker="V003"] .col-readiness meter')).toHaveAttribute("value", "0");
+  await page.locator("#ticker-detail-panel .readiness-factors summary").click();
+  await expect(page.locator("#ticker-detail-panel .readiness-factors")).toContainText("85/100");
+  await expect(page.locator("#ticker-detail-panel .readiness-factors")).toContainText("Unavailable");
+  await expect(page.locator("#ticker-detail-panel")).toContainText("not a win probability");
+  await page.selectOption("#sort", "score-desc");
+  await expect(page.locator("#watchlist-body tr").first().locator(".ticker-link")).toHaveText("V001");
+  await page.goto(baseUrl + "/ticker.html?ticker=V000");
+  await expect(page.locator(".readiness-meter > strong")).toContainText("78");
+  await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "78.4");
+});
 
 test("notification center is visible on desktop/mobile and preserves read state", async ({ page }) => {
   const errors = [];
@@ -169,7 +201,7 @@ test("v5 stock page: price ruler, source readiness and previous/next navigation"
   await expect(page.locator(".price-ruler")).toHaveAttribute("aria-label", /planned zone 100.00 to 105.00/);
   await expect(page.locator(".rail-home")).toHaveText("Daily Trade Copilot");
   await expect(page.locator("body")).not.toContainText("v5.1.1");
-  await expect(page.locator(".readiness-meter > strong")).toContainText("57.1");
+  await expect(page.locator(".readiness-meter > strong")).toContainText("57");
   await expect(page.locator(".readiness-meter meter")).toHaveAttribute("value", "57.1");
   await expect(page.locator("#timeline .state-timeline li")).toHaveCount(5);
   await expect(page.getByRole("link", { name: /Previous stock/ })).toHaveAttribute("href", /ticker=V001$/);
