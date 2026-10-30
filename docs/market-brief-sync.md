@@ -60,7 +60,12 @@ opening-preview section, never the US-close report. Monday retains the AU
 weekend/next-open analysis and reuses Friday's already archived US sources;
 do not duplicate reports, relabel a session or manufacture another forecast.
 
-The existing local heartbeat checks hourly from 11:45 through 19:45 Melbourne.
+The existing local heartbeat checks every 15 minutes from 11:00 through 23:45
+Melbourne. This replaces the hourly cadence and extends the recovery window
+when GitHub starts a scanner hours late. It is bounded polling, **not** a
+GitHub-completion webhook or a guarantee of immediate/precise execution.
+The machine, app and connections must be available. Once both inputs pass the
+gates, complete the publication in that run rather than waiting for another slot.
 At each check use the latest completed US session from `assets/market-session.js`,
 not the Melbourne run date. Run
 `node scripts/check_market_brief_alignment.cjs --candidate path/to/candidate.json`
@@ -75,7 +80,15 @@ set the US date. Require valid dates and identity for every row, at least one
 US row at the completed session, and no future-dated US rows. Do not alter
 the original row dates or pretend partial coverage is complete.
 
-Normal upstream waiting stays quiet. At the final 19:45 check, surface an
+The alignment CLI retries explicit fallback/transport/HTTP 5xx failures at most
+three total attempts, with 1-second and 3-second pauses and a 15-second request
+timeout. A valid but old publication, malformed JSON, a permissions error, or
+any failed date/identity gate is never turned into permission to publish.
+Persistent fallback remains a wait/failure; do not claim recovery or repeat the
+full scanner. An unchanged completed snapshot still exits before any full
+watchlist fetch, checkout, audit or PR work.
+
+Normal upstream waiting stays quiet. At the final 23:45 check, surface an
 actionable failure if the newest completed session is still blocked, including
 the expected/report/watchlist dates and which input is missing. An already
 published unchanged snapshot is always a no-op. Repeated daily failures should

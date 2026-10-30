@@ -11,7 +11,7 @@ function alignment(brief, publication, now = new Date()) {
   const result = { ready: false, target_session: target, report_session: brief.session_date,
     watchlist_session: run?.latest_data_date || null };
   const wait = reason => ({ ...result, reason });
-  if (brief.session_date !== target) return wait('The newest completed US session needs its final morning report and matching forecast card.');
+  if (brief.session_date !== target) return wait('The newest completed US session needs its final morning report and original US outlook.');
   if (Date.parse(brief.issued_at) > now.getTime()) return wait('The report publication time is in the future.');
   const issue = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(brief.issued_at)).map(p => [p.type, p.value]));
   const issueDate = `${issue.year}-${issue.month}-${issue.day}`;
@@ -43,6 +43,35 @@ function alignment(brief, publication, now = new Date()) {
     partial_coverage: run.status === 'degraded' || Number(run.symbols_failed || 0) > 0 || usRows.some(row => row.data_date < target) };
 }
 
+async function fetchPublication(fetcher = fetch, pause = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  // Retry transport/5xx failures and explicit fallback, never date mismatches or
+  // invalid content. Each call remains bounded; all publication gates still run.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response, body;
+    try {
+      response = await fetcher(WATCHLIST_URL, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15000) });
+      if (response.ok) body = await response.text();
+    } catch {
+      if (attempt === 2) throw new Error('Live publication transport unavailable; preserve the existing summary.');
+      await pause(attempt === 0 ? 1000 : 3000);
+      continue;
+    }
+    if (!response.ok) {
+      if (response.status >= 500 && attempt < 2) {
+        await pause(attempt === 0 ? 1000 : 3000);
+        continue;
+      }
+      throw new Error(`Published watchlist unavailable (HTTP ${response.status}); preserve the existing summary.`);
+    }
+    if (body.length > 10 * 1024 * 1024) throw new Error('Unexpected watchlist response size.');
+    const publication = JSON.parse(body);
+    const run = publication?.runInfo;
+    const fallback = ['published_fallback', 'static_fallback'].includes(run?.status) || run?.live_access_ok === false;
+    if (!fallback || attempt === 2) return publication;
+    await pause(attempt === 0 ? 1000 : 3000);
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const candidate = args.indexOf('--candidate');
@@ -53,18 +82,14 @@ async function main() {
   if (fixture >= 0) {
     publication = JSON.parse(fs.readFileSync(args[fixture + 1], 'utf8'));
   } else {
-    const response = await fetch(WATCHLIST_URL, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(20000) });
-    if (!response.ok) throw new Error(`Published watchlist unavailable (HTTP ${response.status}); preserve the existing summary.`);
-    const body = await response.text();
-    if (body.length > 10 * 1024 * 1024) throw new Error('Unexpected watchlist response size.');
-    publication = JSON.parse(body);
+    publication = await fetchPublication();
   }
   const result = alignment(brief, publication);
   console.log(JSON.stringify(result));
   if (!result.ready) process.exitCode = 2;
 }
 
-module.exports = { alignment };
+module.exports = { alignment, fetchPublication };
 if (require.main === module) main().catch(() => {
   console.error('Alignment check failed: verify candidate schema and live publication; do not publish or relabel older data.');
   process.exitCode = 1;
