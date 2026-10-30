@@ -1,36 +1,37 @@
 {
   "schema_version": 1,
-  "session_date": "2026-10-28",
-  "issued_at": "2026-10-28T23:09:40.123Z",
-  "headline": "Semiconductor leadership, uneven participation",
-  "summary": "US indices edged higher with semiconductor leadership, while equal-weight weakness showed limited breadth. Earnings dispersion and higher Treasury yields remain important risks.",
+  "session_date": "2026-10-29",
+  "issued_at": "2026-10-29T22:45:47.156Z",
+  "headline": "Broad rotation beneath technology weakness",
+  "summary": "US headline indices fell as large technology stocks weakened, but equal-weight and small-cap gains suggest rotation rather than broad liquidation. Earnings-related AI spending concerns remain the main near-term risk.",
   "metrics": [
-    {"label":"S&P 500","value":"7,743.98","detail":"+0.28% · US close"},
-    {"label":"Nasdaq Composite","value":"26,549.85","detail":"+0.27% · US close"},
-    {"label":"US 10-year yield","value":"5.05%","detail":"+6 bp · Treasury par yield"},
-    {"label":"Brent futures","value":"US$115.32","detail":"+1.26% · reported December settlement"}
+    {"label":"S&P 500","value":"7,720.39","detail":"−0.30% · US close"},
+    {"label":"Nasdaq Composite","value":"26,184.72","detail":"−1.38% · US close"},
+    {"label":"US 10-year yield","value":"4.98%","detail":"−7 bp · Treasury par yield"},
+    {"label":"Brent futures","value":"US$114.88","detail":"−0.38% · reported December settlement"}
   ],
   "highlights": [
-    {"title":"Leadership without broad confirmation","text":"Semiconductors rose 1.75%, but the equal-weight S&P 500 fell 0.04%. Positive small-cap performance provides counterevidence to a broad risk-off reading."},
-    {"title":"Rates and earnings remain the test","text":"The report describes a Fed hold with two hawkish dissents. Microsoft and Alphabet showed divergent after-hours reactions; those prices remain pending, not confirmed next-session outcomes."},
-    {"title":"Original research outlook","text":"The report retains a consolidation-led base case. GDP/PCE and Amazon earnings are the next tests; this is a subjective research scenario, not an entry signal."}
+    {"title":"Participation is stronger than the headline","text":"The equal-weight S&P 500 gained 1.20% and the Russell 2000 rose 1.01%, despite technology-led index declines. The report does not interpret this as a confirmed market-wide sell-off."},
+    {"title":"AI spending and earnings are the pressure point","text":"Alphabet weakness and reported Amazon and Intel after-hours declines renewed concerns about AI investment returns. After-hours moves remain pending, not confirmed next-session closing outcomes."},
+    {"title":"A cautious, range-led original outlook","text":"The report gives the base case 45%, with downside risk at 33%. Breadth and credit resilience argue against treating weaker technology futures alone as proof of systemic stress."}
   ],
   "forecast": {
-    "id":"drive:1NQMsQkwsmohpTpuIh9K1xpfLZ82pYdrv#us-original-outlook",
-    "outlook":"Earnings dispersion and consolidation",
-    "horizon":"29 October–2 November US sessions · S&P 500 final close",
-    "evaluates_at":"2026-11-02T21:00:00Z",
-    "reference_close":7743.98,
-    "lower_bound":7650,
-    "upper_bound":7830,
-    "probabilities":{"bull":25,"base":45,"bear":30},
-    "completed_sample":6,
+    "id":"drive:1voBkJmMD_pR2Zc4UQMxAYg-VXVpAyMlt#us-original-outlook",
+    "outlook":"Technology weakness, broader rotation",
+    "horizon":"30 October–3 November US sessions · S&P 500 final close",
+    "evaluates_at":"2026-11-03T21:00:00Z",
+    "reference_close":7720.39,
+    "lower_bound":7620,
+    "upper_bound":7800,
+    "probabilities":{"bull":22,"base":45,"bear":33},
+    "completed_sample":7,
     "method":"Embedded original US outlook, section 9. ID is an archive locator, not an author-issued forecast ID. issued_at is the verified completed Drive modification time; precise original issue time is unavailable. Subjective probabilities, not statistically calibrated. Final-close boundaries are not technical support or resistance.",
-    "watch_next":"Watch breadth, semiconductor confirmation, GDP/PCE and Amazon earnings. US completed-window mean Brier is reported as 0.764 across six windows, worse than the source's 0.667 uniform baseline."
+    "watch_next":"Watch whether earnings-related losses narrow at the close, semiconductor confirmation, breadth and credit. The report's mean Brier is 0.725 across seven completed US windows, worse than its 0.667 uniform baseline."
   },
-  "limitations":"Curated from the source report, not a new independent market verification. Put/call, current fund flows, sector ETFs, NDX and individual-stock volume were unavailable. Oil settlement was media-reported, not directly verified with ICE. X sentiment was partial; after-hours reactions remain pending.",
+  "limitations":"Curated from the source report, not a new independent market verification. Put/call and current fund-flow data were unavailable. Oil settlement was media-reported, not directly checked with ICE; the January Brent settlement was missing. Several upcoming-event dates were not reverified with primary sources. After-hours prices remain pending.",
   "sources":[
-    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1NQMsQkwsmohpTpuIh9K1xpfLZ82pYdrv/view","modified_at":"2026-10-28T23:09:40.123Z"},
-    {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202610"}
+    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1voBkJmMD_pR2Zc4UQMxAYg-VXVpAyMlt/view","modified_at":"2026-10-29T22:45:47.156Z"},
+    {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202610"},
+    {"label":"BEA PCE release · cited by report","url":"https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026"}
   ]
 }
