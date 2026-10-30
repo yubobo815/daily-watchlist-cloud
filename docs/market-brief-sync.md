@@ -60,7 +60,12 @@ opening-preview section, never the US-close report. Monday retains the AU
 weekend/next-open analysis and reuses Friday's already archived US sources;
 do not duplicate reports, relabel a session or manufacture another forecast.
 
-The existing local heartbeat checks hourly from 11:45 through 19:45 Melbourne.
+The existing local heartbeat checks every 15 minutes from 11:00 through 23:45
+Melbourne. This replaces the hourly cadence and extends the recovery window
+when GitHub starts a scanner hours late. It is bounded polling, **not** a
+GitHub-completion webhook or a guarantee of immediate/precise execution.
+The machine, app and connections must be available. Once both inputs pass the
+gates, complete the publication in that run rather than waiting for another slot.
 At each check use the latest completed US session from `assets/market-session.js`,
 not the Melbourne run date. Run
 `node scripts/check_market_brief_alignment.cjs --candidate path/to/candidate.json`
@@ -75,7 +80,15 @@ set the US date. Require valid dates and identity for every row, at least one
 US row at the completed session, and no future-dated US rows. Do not alter
 the original row dates or pretend partial coverage is complete.
 
-Normal upstream waiting stays quiet. At the final 19:45 check, surface an
+The alignment CLI retries explicit fallback/transport/HTTP 5xx failures at most
+three total attempts, with 1-second and 3-second pauses and a 15-second request
+timeout. A valid but old publication, malformed JSON, a permissions error, or
+any failed date/identity gate is never turned into permission to publish.
+Persistent fallback remains a wait/failure; do not claim recovery or repeat the
+full scanner. An unchanged completed snapshot still exits before any full
+watchlist fetch, checkout, audit or PR work.
+
+Normal upstream waiting stays quiet. At the final 23:45 check, surface an
 actionable failure if the newest completed session is still blocked, including
 the expected/report/watchlist dates and which input is missing. An already
 published unchanged snapshot is always a no-op. Repeated daily failures should
@@ -93,7 +106,7 @@ Use the monthly **Market Desk Reports** source above through the existing connec
 
 For routine content syncs update only `data/market-brief.json`. Preserve the report's actual US session date, publication timestamp (or explicitly disclosed completed-upload timestamp), source file ID and modified timestamp. Whitelist market facts, concise interpretation, public citations and the original forecast ID (or explicitly disclosed source locator), probabilities, final-close boundaries, horizon, limitations and completed US calibration sample. Never publish private account details, personal positions, credentials or entire source documents. Do not add unsupported data or invent a model forecast. Preserve original forecasts; a changed judgement must be separately identified, never a retrospective edit.
 
-An unchanged report ID, modification time and meaningful content is a no-op; no second card is needed for an embedded outlook. If the source is missing, inconsistent or older than the published report, retain the last valid snapshot; never relabel it as today's report. The UI independently labels dated reports by completed US market sessions and archives forecasts after their evaluation time. No browser has access to Drive credentials, no Google sharing changes are needed and there is no added Supabase egress.
+Only a report ID, modification time and meaningful content matching the currently deployed snapshot is a no-op; an unchanged source across unsuccessful readiness checks is still pending, not published. Re-evaluate that pending report against the watchlist on the next check and publish when ready. No second card is needed for an embedded outlook. If the source is missing, inconsistent or older than the published report, retain the last valid snapshot; never relabel it as today's report. The UI independently labels dated reports by completed US market sessions and archives forecasts after their evaluation time. No browser has access to Drive credentials, no Google sharing changes are needed and there is no added Supabase egress.
 
 Validate with `npm run audit:market-brief` (an optional file path can be passed with `-- path/to/file.json`), then `npm run audit:watchlist` and `npm run uat:docker`. Publish through a pull request and the protected main branch's required checks; merge only the tested head SHA after all checks pass. Verify the deployed JSON and rendered section on production. Do not trigger a full scanner or weekly calibration just to publish research. GitHub Pages includes the brief on its next ordinary watchlist publication; Vercel serves it directly from the repository.
 
