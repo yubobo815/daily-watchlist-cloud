@@ -1,37 +1,37 @@
 {
   "schema_version": 1,
-  "session_date": "2026-10-29",
-  "issued_at": "2026-10-29T22:45:47.156Z",
-  "headline": "Broad rotation beneath technology weakness",
-  "summary": "US headline indices fell as large technology stocks weakened, but equal-weight and small-cap gains suggest rotation rather than broad liquidation. Earnings-related AI spending concerns remain the main near-term risk.",
+  "session_date": "2026-10-30",
+  "issued_at": "2026-10-30T22:45:35.798Z",
+  "headline": "Semiconductor selling, uneven market stress",
+  "summary": "US indices fell sharply as semiconductor selling intensified. Equal-weight resilience, defensive-sector gains and steady credit ETFs provide counterevidence to a market-wide panic, but earnings and election uncertainty keep the outlook cautious.",
   "metrics": [
-    {"label":"S&P 500","value":"7,720.39","detail":"−0.30% · US close"},
-    {"label":"Nasdaq Composite","value":"26,184.72","detail":"−1.38% · US close"},
-    {"label":"US 10-year yield","value":"4.98%","detail":"−7 bp · Treasury par yield"},
-    {"label":"Brent futures","value":"US$114.88","detail":"−0.38% · reported December settlement"}
+    {"label":"S&P 500","value":"7,580.07","detail":"−1.82% · US close"},
+    {"label":"Nasdaq Composite","value":"25,437.00","detail":"−2.86% · US close"},
+    {"label":"US 10-year yield","value":"4.94%","detail":"−4 bp · Treasury par yield"},
+    {"label":"Brent futures","value":"US$113.43","detail":"+2.63 USD · reported January settlement; contract rolled from December"}
   ],
   "highlights": [
-    {"title":"Participation is stronger than the headline","text":"The equal-weight S&P 500 gained 1.20% and the Russell 2000 rose 1.01%, despite technology-led index declines. The report does not interpret this as a confirmed market-wide sell-off."},
-    {"title":"AI spending and earnings are the pressure point","text":"Alphabet weakness and reported Amazon and Intel after-hours declines renewed concerns about AI investment returns. After-hours moves remain pending, not confirmed next-session closing outcomes."},
-    {"title":"A cautious, range-led original outlook","text":"The report gives the base case 45%, with downside risk at 33%. Breadth and credit resilience argue against treating weaker technology futures alone as proof of systemic stress."}
+    {"title":"The pressure centres on semiconductors","text":"The semiconductor index fell 7.20%, with Intel down 28.58% and AMD down 10.88%. The report interprets stronger selling volume as a deterioration from the prior session's lower-volume retreat."},
+    {"title":"Broad panic is not yet confirmed","text":"The equal-weight S&P 500 lost 0.79%, less than the headline index, while six sector ETFs gained. VIX closed at 19.42 after touching 23.93; credit ETFs remained comparatively steady."},
+    {"title":"Earnings and election pricing are the next tests","text":"The original outlook retains a range-led base case. Apple, Palantir and AMD earnings, alongside US election pricing, test whether semiconductor weakness spreads; the report does not predict the election result."}
   ],
   "forecast": {
-    "id":"drive:1voBkJmMD_pR2Zc4UQMxAYg-VXVpAyMlt#us-original-outlook",
-    "outlook":"Technology weakness, broader rotation",
-    "horizon":"30 October–3 November US sessions · S&P 500 final close",
-    "evaluates_at":"2026-11-03T21:00:00Z",
-    "reference_close":7720.39,
-    "lower_bound":7620,
-    "upper_bound":7800,
-    "probabilities":{"bull":22,"base":45,"bear":33},
-    "completed_sample":7,
+    "id":"drive:1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP#us-original-outlook",
+    "outlook":"Semiconductor weakness, resilient breadth and credit",
+    "horizon":"2–4 November US sessions · S&P 500 final close",
+    "evaluates_at":"2026-11-04T21:00:00Z",
+    "reference_close":7580.07,
+    "lower_bound":7480,
+    "upper_bound":7680,
+    "probabilities":{"bull":24,"base":43,"bear":33},
+    "completed_sample":8,
     "method":"Embedded original US outlook, section 9. ID is an archive locator, not an author-issued forecast ID. issued_at is the verified completed Drive modification time; precise original issue time is unavailable. Subjective probabilities, not statistically calibrated. Final-close boundaries are not technical support or resistance.",
-    "watch_next":"Watch whether earnings-related losses narrow at the close, semiconductor confirmation, breadth and credit. The report's mean Brier is 0.725 across seven completed US windows, worse than its 0.667 uniform baseline."
+    "watch_next":"Watch earnings reactions at the close, semiconductor confirmation, breadth and credit. The report's mean Brier is 0.728 across eight completed US windows, worse than its 0.667 uniform baseline."
   },
-  "limitations":"Curated from the source report, not a new independent market verification. Put/call and current fund-flow data were unavailable. Oil settlement was media-reported, not directly checked with ICE; the January Brent settlement was missing. Several upcoming-event dates were not reverified with primary sources. After-hours prices remain pending.",
+  "limitations":"Curated from the source report, not a new independent market verification. End-of-day put/call and same-session fund flows were unavailable; cited Lipper flows cover the week to 28 October. Oil settlements were media-reported, not directly checked with ICE/CME. Brent has rolled to January; its indicative ATR band mixes December data. A reliable Friday after-hours list was unavailable, and NYSE election-day opening was not reverified with a primary source.",
   "sources":[
-    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1voBkJmMD_pR2Zc4UQMxAYg-VXVpAyMlt/view","modified_at":"2026-10-29T22:45:47.156Z"},
+    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP/view","modified_at":"2026-10-30T22:45:35.798Z"},
     {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202610"},
-    {"label":"BEA PCE release · cited by report","url":"https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026"}
+    {"label":"BLS Employment Cost Index · cited by report","url":"https://www.bls.gov/news.release/eci.htm"}
   ]
 }
