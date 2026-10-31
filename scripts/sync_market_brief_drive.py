@@ -64,7 +64,7 @@ def number(value):
     return type(value) in (int, float) and value == value and abs(value) != float("inf")
 
 
-def validate_brief(brief, now):
+def validate_brief(brief, now, *, embedded=False):
     exact_keys(brief, BRIEF_KEYS, "public brief")
     require(brief["schema_version"] == 1, "Unsupported public summary version.")
     try:
@@ -89,7 +89,8 @@ def validate_brief(brief, now):
         text(highlight["text"], 500)
     forecast = brief["forecast"]
     exact_keys(forecast, FORECAST_KEYS, "forecast")
-    require(re.fullmatch(r"IND-" + re.escape(str(session)) + r"-[A-Za-z0-9-]+", forecast["id"] or ""), "The forecast ID must match the report session.")
+    forecast_pattern = r"drive:[A-Za-z0-9_-]{10,120}#us-original-outlook" if embedded else r"IND-" + re.escape(str(session)) + r"-[A-Za-z0-9-]+"
+    require(re.fullmatch(forecast_pattern, forecast["id"] or ""), "The forecast identity must match its authorized source contract.")
     for key in ("outlook", "horizon", "method", "watch_next"):
         text(forecast[key], 800)
     require(timestamp(forecast["evaluates_at"]) > issued, "Forecast evaluation must follow original publication.")

@@ -432,6 +432,35 @@ jobs:
           EXPECTED_PUBLICATION_ID: ${{ needs.build-publication.outputs.publication_id }}
         run: python scripts/supabase_learning_health.py --activate
 
+  dispatch-market-brief:
+    needs: [build-publication, verify-and-activate]
+    if: needs.build-publication.outputs.should_run == 'true' && needs.verify-and-activate.result == 'success' && vars.MARKET_BRIEF_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Brief transport failures must not roll back verified stock data or rescan.
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Immediately start Daily Brief publication after activation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_RUN_ID: ${{ github.run_id }}
+          EXPECTED_PUBLICATION_ID: ${{ needs.build-publication.outputs.publication_id }}
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if gh workflow run market-brief-sync.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f mode=sync -f upstream_run_id="$UPSTREAM_RUN_ID" \
+              -f expected_publication_id="$EXPECTED_PUBLICATION_ID"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo '::error::Watchlist is live but Daily Brief dispatch failed; retry the publisher with this run ID and publication ID.'
+          exit 1
+
   finalize-storage:
     needs:
       - build-publication
