@@ -33,5 +33,9 @@
     {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP/view","modified_at":"2026-10-30T22:45:35.798Z"},
     {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202610"},
     {"label":"BLS Employment Cost Index · cited by report","url":"https://www.bls.gov/news.release/eci.htm"}
-  ]
+  ],
+  "provenance": {
+    "report":{"id":"1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP","modified_at":"2026-10-30T22:45:35.798Z","sha256":"a4cdd87b87205d29398d52beb7878bd56f73a68193608613545bb60e83ac35a2"},
+    "forecast":{"id":"1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP","modified_at":"2026-10-30T22:45:35.798Z","sha256":"a4cdd87b87205d29398d52beb7878bd56f73a68193608613545bb60e83ac35a2"}
+  }
 }
