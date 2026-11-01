@@ -4,6 +4,8 @@ This repo contains a static Vercel app. It intentionally has no Next.js dependen
 
 This repository is the production source of truth for the app, API routes, scanner, Supabase schema, and refresh workflow. See `SOURCE_OF_TRUTH.md`.
 
+`npm run vercel-build` copies only the three HTML pages, web manifest, browser assets and bundled JSON into `dist/`. Vercel publishes `dist/`, not the repository root: Python packages, workflow files, scanner code and build caches must never become static assets. The root `api/` routes are built separately as Vercel Functions; their bundled fallback JSON remains in root `data/`. Run `npm run audit:vercel-build` to check the output boundary and browser references. Existing deployments and retention settings are unaffected.
+
 ## Data flow
 
 - GitHub Actions schedules daily refreshes Tuesday–Saturday at 11:17 Australia/Melbourne, with guarded recovery attempts at 14:17 and 17:17. See the workflow for the current schedule.

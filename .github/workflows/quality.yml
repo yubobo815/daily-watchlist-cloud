@@ -45,7 +45,9 @@ jobs:
           git ls-files -z '*.js' | xargs -0 -n 1 node --check
           for script in scripts/*.sh; do bash -n "$script"; done
       - name: Run regression audits
-        run: npm run audit:watchlist
+        run: |
+          npm run audit:vercel-build
+          npm run audit:watchlist
 
   browser:
     name: Browser UAT
