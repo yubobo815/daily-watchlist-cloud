@@ -3,7 +3,8 @@ const {createPreparedPublisher} = require('./publish_prepared_market_brief.cjs')
 const {CHECKS} = require('./publish_market_brief.cjs');
 const repo='yubobo815/daily-watchlist-cloud', head='b'.repeat(40), main='a'.repeat(40);
 const now=()=>new Date('2026-10-31T05:00:00Z');
-const base=structuredClone(require('../data/market-brief.json'));
+// A fixed test clock needs a fixed baseline, never the rolling public snapshot.
+const base=structuredClone(require('./fixtures/market-brief-independent.json'));
 const candidate=structuredClone(base);
 candidate.session_date='2026-10-30';candidate.issued_at='2026-10-30T22:45:35.798Z';
 candidate.forecast.id='drive:report_fixture_123#us-original-outlook';
@@ -42,7 +43,8 @@ async function test(){
   assert.ok(!m.calls.some(c=>c.method==='POST'),'Never create/approve PRs or fabricate checks');
   for(const o of [{author:'github-actions[bot]'},{files:[{filename:'assets/app.js',status:'modified'}]},
     {parent:'e'.repeat(40)},{activation:'failure'},{date:'2026-10-29'},{publication:'different'},
-    {event:'workflow_dispatch'},{quality:'failure'},{job:'failure'},{app:99},{check:'failure'}]){
+    {event:'workflow_dispatch'},{quality:'failure'},{job:'failure'},{app:99},{check:'failure'},
+    {current:{...base,session_date:'2026-11-02',issued_at:'2026-11-02T22:46:52Z'}}]){
     m=mock(o);
     await assert.rejects(async()=>{const s=await m.p.inspect('100','publication-100');await m.p.merge(s);});
     assert.ok(!m.calls.some(c=>c.path.endsWith('/merge')));
