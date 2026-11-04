@@ -14,7 +14,7 @@ NOW = datetime(2026, 10, 31, 5, tzinfo=timezone.utc)
 
 class Fixture:
     def __init__(self):
-        self.brief = json.loads((Path(__file__).parent.parent/'data/market-brief.json').read_text())
+        self.brief = json.loads((Path(__file__).parent/'fixtures/market-brief-independent.json').read_text())
         self.brief.pop('provenance', None)
         self.brief.update(session_date='2026-10-30', issued_at='2026-10-30T22:45:35.798Z')
         f = self.brief['forecast']
@@ -51,6 +51,37 @@ class Fixture:
 
 
 class PreparedSourceTests(unittest.TestCase):
+    def paragraph_fixture(self):
+        s = Fixture()
+        s.raw = ('8 个已结算原始窗口\n# 美股盘后日报 — 美国周五 30 Oct 2026 交易时段\n'
+                 '## 4. 新美股展望：Mon 2 – Wed 4 Nov 2026（按 Wed 4 Nov 收盘判定，参考 SPX 7,580.07）\n'
+                 '- Bull 24%（收盘 >7,680，回升）/ Base 43%（7,480–7,680）/ Bear 33%（收盘 <7,480，下跌）。\n'
+                 '## 5. AI 核心表\n## 7. 今日澳股预测修正\n'
+                 'Bull 99%（收盘 >9,999）/ Base 0%（1–9,999）/ Bear 1%（收盘 <1）\n').encode()
+        s.rehash()
+        return s
+
+    def test_paragraph_original_preserves_all_source_gates(self):
+        s = self.paragraph_fixture()
+        self.assertTrue(s.verify()['source_verified'])
+        for key, value in (('reference_close',7581),('lower_bound',7479),('upper_bound',7681),
+                           ('completed_sample',99),('evaluates_at','2026-11-05T21:00:00Z')):
+            s = self.paragraph_fixture(); s.brief['forecast'][key] = value
+            with self.subTest(key=key), self.assertRaises(ProbeError): s.verify()
+        s = self.paragraph_fixture(); s.brief['forecast']['probabilities'].update(bull=25,base=42)
+        with self.assertRaises(ProbeError): s.verify()
+
+    def test_paragraph_rejects_revisions_missing_duplicate_and_wrong_layout(self):
+        for old, new in [('新美股展望','美股预测修正'), ('Bear 33%','Other 33%'),
+                         ('收盘 >7,680','盘中 >7,680'),
+                         ('## 5.', '- Bull 24%（收盘 >7,680）\n## 5.')]:
+            s = self.paragraph_fixture(); s.raw = s.raw.replace(old.encode(), new.encode()); s.rehash()
+            with self.subTest(change=new), self.assertRaises(ProbeError): s.verify()
+        s = self.paragraph_fixture()
+        s.raw += ('\n## 9. 展望（Mon 2 – Wed 4 Nov，参考收盘 SPX 7,580.07）\n'
+                  '| Bull | 24% | >7,680 |\n').encode(); s.rehash()
+        with self.assertRaises(ProbeError): s.verify()
+
     def test_monthly_original_and_short_horizon(self):
         s=Fixture()
         self.assertTrue(s.verify()['source_verified'])
