@@ -1,41 +1,40 @@
 {
   "schema_version": 1,
-  "session_date": "2026-10-30",
-  "issued_at": "2026-10-30T22:45:35.798Z",
-  "headline": "Semiconductor selling, uneven market stress",
-  "summary": "US indices fell sharply as semiconductor selling intensified. Equal-weight resilience, defensive-sector gains and steady credit ETFs provide counterevidence to a market-wide panic, but earnings and election uncertainty keep the outlook cautious.",
+  "session_date": "2026-11-03",
+  "issued_at": "2026-11-03T22:36:38.761Z",
+  "headline": "Chip rebound lifts indices, but breadth remains narrow",
+  "summary": "US technology shares rebounded as semiconductors led gains, while equal-weight stocks and the Dow declined. Softer volatility and a modest credit-ETF recovery offer support, but higher Treasury yields, election uncertainty and Friday's jobs report keep the original outlook range-led.",
   "metrics": [
-    {"label":"S&P 500","value":"7,580.07","detail":"−1.82% · US close"},
-    {"label":"Nasdaq Composite","value":"25,437.00","detail":"−2.86% · US close"},
-    {"label":"US 10-year yield","value":"4.94%","detail":"−4 bp · Treasury par yield"},
-    {"label":"Brent futures","value":"US$113.43","detail":"+2.63 USD · reported January settlement; contract rolled from December"}
+    {"label":"S&P 500","value":"7,568.92","detail":"+0.36% · US close"},
+    {"label":"Nasdaq Composite","value":"Not reported","detail":"Source reports Nasdaq-100 instead: 28,180.26 (+0.68%); not interchangeable"},
+    {"label":"US 10-year yield","value":"4.95%","detail":"+4 bp · Treasury par yield"},
+    {"label":"Brent futures","value":"Approx. US$104.5","detail":"Approximately unchanged · January settlement, media-reported"}
   ],
   "highlights": [
-    {"title":"The pressure centres on semiconductors","text":"The semiconductor index fell 7.20%, with Intel down 28.58% and AMD down 10.88%. The report interprets stronger selling volume as a deterioration from the prior session's lower-volume retreat."},
-    {"title":"Broad panic is not yet confirmed","text":"The equal-weight S&P 500 lost 0.79%, less than the headline index, while six sector ETFs gained. VIX closed at 19.42 after touching 23.93; credit ETFs remained comparatively steady."},
-    {"title":"Earnings and election pricing are the next tests","text":"The original outlook retains a range-led base case. Apple, Palantir and AMD earnings, alongside US election pricing, test whether semiconductor weakness spreads; the report does not predict the election result."}
+    {"title":"Semiconductors lead a concentrated rebound","text":"The semiconductor index rose 2.63%, with Nvidia up 2.29%, Broadcom 3.07% and Micron 2.58%. The equal-weight S&P 500 fell 0.33% and the Dow lost 0.38%, limiting evidence of a broad recovery."},
+    {"title":"Credit improves modestly as yields rise","text":"HYG gained 0.12% to 76.98 and VIX eased to 20.83. The Treasury 10-year par yield rose four basis points to 4.95%; the source does not count this as a confirmed directional trigger."},
+    {"title":"Earnings follow-through and event pricing matter","text":"AMD's reported after-hours gain was provisional and is not a forecast anchor. The outlook judges its next-session close and semiconductor follow-through, while US election pricing and Friday's payrolls remain risks within the window."}
   ],
   "forecast": {
-    "id":"drive:1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP#us-original-outlook",
-    "outlook":"Semiconductor weakness, resilient breadth and credit",
-    "horizon":"2–4 November US sessions · S&P 500 final close",
-    "evaluates_at":"2026-11-04T21:00:00Z",
-    "reference_close":7580.07,
-    "lower_bound":7480,
+    "id":"drive:1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27#us-original-outlook",
+    "outlook":"Semiconductor support, narrow breadth and event uncertainty",
+    "horizon":"4–6 November US sessions · S&P 500 final close",
+    "evaluates_at":"2026-11-06T21:00:00Z",
+    "reference_close":7568.92,
+    "lower_bound":7460,
     "upper_bound":7680,
-    "probabilities":{"bull":24,"base":43,"bear":33},
-    "completed_sample":8,
-    "method":"Embedded original US outlook, section 9. ID is an archive locator, not an author-issued forecast ID. issued_at is the verified completed Drive modification time; precise original issue time is unavailable. Subjective probabilities, not statistically calibrated. Final-close boundaries are not technical support or resistance.",
-    "watch_next":"Watch earnings reactions at the close, semiconductor confirmation, breadth and credit. The report's mean Brier is 0.728 across eight completed US windows, worse than its 0.667 uniform baseline."
+    "probabilities":{"bull":26,"base":46,"bear":28},
+    "completed_sample":10,
+    "method":"Embedded original US outlook, section 4, using the approved newer paragraph layout; not a historical revision or the appended Australian outlook. ID is an archive locator, not an author-issued forecast ID. issued_at is the verified completed Drive modification time; precise original issue time is unavailable. Subjective probabilities, not statistically calibrated. Final-close boundaries are not technical support or resistance.",
+    "watch_next":"Watch AMD's closing follow-through, semiconductor breadth, credit, election pricing and Friday's payrolls. The report's mean Brier is 0.728 across ten completed original US windows, worse than its 0.667 uniform baseline; revised forecasts are excluded."
   },
-  "limitations":"Curated from the source report, not a new independent market verification. End-of-day put/call and same-session fund flows were unavailable; cited Lipper flows cover the week to 28 October. Oil settlements were media-reported, not directly checked with ICE/CME. Brent has rolled to January; its indicative ATR band mixes December data. A reliable Friday after-hours list was unavailable, and NYSE election-day opening was not reverified with a primary source.",
+  "limitations":"Curated from the source report, not a new market verification. NYSE breadth, Nasdaq new lows and same-session Cboe end-of-day put/call were unavailable; non-current fund flows were not used. Nasdaq Composite was not reported; Nasdaq-100 is not substituted. The partial X handoff missed 17:00–18:00 ET. AMD after-hours and overnight futures were provisional, not forecast anchors. Oil settlement was approximate and media-reported; gold and WTI settlements were unavailable. Election counting was ongoing at the source cutoff; no outcome is asserted.",
   "sources":[
-    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP/view","modified_at":"2026-10-30T22:45:35.798Z"},
-    {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202610"},
-    {"label":"BLS Employment Cost Index · cited by report","url":"https://www.bls.gov/news.release/eci.htm"}
+    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27/view","modified_at":"2026-11-03T22:36:38.761Z"},
+    {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202611"}
   ],
   "provenance": {
-    "report":{"id":"1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP","modified_at":"2026-10-30T22:45:35.798Z","sha256":"a4cdd87b87205d29398d52beb7878bd56f73a68193608613545bb60e83ac35a2"},
-    "forecast":{"id":"1hExZ7Cv1sQk6-yKFrPZEEoATONvbxgIP","modified_at":"2026-10-30T22:45:35.798Z","sha256":"a4cdd87b87205d29398d52beb7878bd56f73a68193608613545bb60e83ac35a2"}
+    "report":{"id":"1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27","modified_at":"2026-11-03T22:36:38.761Z","sha256":"f0285bffd5dea16471055f3ae285308cbc25da319ddeb8c41fd29c08afb048e4"},
+    "forecast":{"id":"1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27","modified_at":"2026-11-03T22:36:38.761Z","sha256":"f0285bffd5dea16471055f3ae285308cbc25da319ddeb8c41fd29c08afb048e4"}
   }
 }
