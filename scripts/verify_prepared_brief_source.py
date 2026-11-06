@@ -77,7 +77,7 @@ def verify(reader, root, candidate, now=None):
     require(header is not None, "Expected the original US post-close daily report, not a preview.")
     session = datetime.strptime(f"{header[1]} {header[2][:3]} {header[3]}", "%d %b %Y").date()
     require(str(session) == brief["session_date"], "The filename date is not the US session stated in the report.")
-    # Accept only the two curator-approved original-US layouts. Never search
+    # Accept only explicitly supported original-US layouts. Never search
     # historical records or the appended ASX revision for matching numbers.
     sections = list(re.finditer(r"^##\s*(?:9\.\s*展望|4\.\s*新美股展望)[^\n]*\n[\s\S]*?(?=^##\s|\Z)", source, re.M))
     require(len(sections) == 1, "A unique original US outlook section is required.")
@@ -90,12 +90,14 @@ def verify(reader, root, candidate, now=None):
         if len(cells) >= 3 and cells[0] in {"Bull", "Base", "Bear"}:
             require(cells[0] not in rows, "Ambiguous duplicate original outlook rows.")
             rows[cells[0]] = cells
-    if paragraph:
+    bullets = not paragraph and not rows
+    if paragraph or bullets:
         require(not rows, "Mixed original outlook layouts are ambiguous.")
         # The new layout is a single three-way bullet: Bull P% (收盘 >U)
         # / Base P% (L-U) / Bear P% (收盘 <L). Require exactly one of each.
         for name in ("Bull", "Base", "Bear"):
-            matches = list(re.finditer(r"\b" + name + r"\s+(\d+(?:\.\d+)?)%\s*[（(]([^）)]+)[）)]", text))
+            prefix = r"^\s*-\s*" if bullets else r"\b"
+            matches = list(re.finditer(prefix + name + r"\s+(\d+(?:\.\d+)?)%\s*[（(]([^）)]+)[）)]", text, re.M))
             require(len(matches) == 1, "The original three-way US outlook is incomplete or ambiguous.")
             outcome = matches[0]
             if name != "Base":
@@ -111,7 +113,7 @@ def verify(reader, root, candidate, now=None):
         require(bound is not None and float(bound[1]) == f[key], "The final-close boundary differs from the original US outlook.")
     base = re.search(r"(\d+(?:\.\d+)?)\s*[–—-]\s*(\d+(?:\.\d+)?)", rows["Base"][2])
     require(base is not None and [float(base[1]), float(base[2])] == [f["lower_bound"], f["upper_bound"]], "The original base-case range is inconsistent.")
-    close = re.search(r"参考" + (r"(?:收盘)?" if paragraph else r"收盘") + r"\s*(?:SPX|S&P\s*500)\s*(\d+(?:\.\d+)?)", text)
+    close = re.search(r"参考" + (r"(?:收盘)?" if paragraph or bullets else r"收盘") + r"\s*(?:SPX|S&P\s*500)\s*(\d+(?:\.\d+)?)", text.splitlines()[0])
     require(close is not None and float(close[1]) == f["reference_close"], "The reference close differs from the original US outlook.")
     horizon = re.search(r"[A-Za-z]{3,9}\s+(\d{1,2})(?:\s+([A-Za-z]{3,9}))?\s*[–—-]\s*[A-Za-z]{3,9}\s+(\d{1,2})\s+([A-Za-z]{3,9})", text.splitlines()[0])
     require(horizon is not None, "The original US outlook horizon is missing.")
@@ -123,6 +125,8 @@ def verify(reader, root, candidate, now=None):
     # Calibration must precede the original outlook, outside appended AU text.
     us_text = source[:outlook.start()]
     sample = re.search(r"(\d+)\s*个已结算(?:原始)?窗口", us_text)
+    if sample is None and bullets:
+        sample = re.search(r"^累计美股 Brier 现为\s+\d+\.\d+[（(](\d+)\s*个窗口[，\s]+\d+(?:\.\d+)?/\1[）)]", us_text, re.M)
     require(sample is not None and int(sample[1]) == f["completed_sample"], "The completed US calibration sample differs from the report.")
     require(timestamp(brief["issued_at"]) == timestamp(reference["modified_at"]), "The disclosed archive publication time must match completed Drive metadata.")
     links = [s for s in brief["sources"] if s["url"].startswith("https://drive.google.com/")]
