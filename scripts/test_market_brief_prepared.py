@@ -51,6 +51,22 @@ class Fixture:
 
 
 class PreparedSourceTests(unittest.TestCase):
+    def test_section_nine_bullets_and_cumulative_sample(self):
+        s = Fixture()
+        s.raw = ('累计美股 Brier 现为 **0.721（8 个窗口，5.768/8）**\n'
+                 '# 美股盘后日报 — 美国周五 30 Oct 2026 交易时段\n'
+                 '## 9. 展望：Mon 2 – Wed 4 Nov 2026（参考 SPX 7,580.07）\n'
+                 '- **Bull 24%**（收盘 **>7,680**，反弹）\n'
+                 '- **Base 43%**（**7,480–7,680**，震荡）\n'
+                 '- **Bear 33%**（收盘 **<7,480**，续跌）\n'
+                 '## 10. 往绩\n## 今日澳股\n').encode()
+        s.rehash()
+        self.assertTrue(s.verify()['source_verified'])
+        s.raw = s.raw.replace(b'/8', b'/9')
+        s.rehash()
+        with self.assertRaises(ProbeError):
+            s.verify()
+
     def paragraph_fixture(self):
         s = Fixture()
         s.raw = ('8 个已结算原始窗口\n# 美股盘后日报 — 美国周五 30 Oct 2026 交易时段\n'
