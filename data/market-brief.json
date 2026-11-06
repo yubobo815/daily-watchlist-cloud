@@ -1,40 +1,84 @@
 {
   "schema_version": 1,
-  "session_date": "2026-11-03",
-  "issued_at": "2026-11-03T22:36:38.761Z",
-  "headline": "Chip rebound lifts indices, but breadth remains narrow",
-  "summary": "US technology shares rebounded as semiconductors led gains, while equal-weight stocks and the Dow declined. Softer volatility and a modest credit-ETF recovery offer support, but higher Treasury yields, election uncertainty and Friday's jobs report keep the original outlook range-led.",
+  "session_date": "2026-11-05",
+  "issued_at": "2026-11-05T23:23:32.166Z",
+  "headline": "Chip sell-off drags US stocks lower as volatility jumps",
+  "summary": "US equities sold off broadly, led by semiconductors. Credit ETFs were comparatively resilient, but weak breadth and higher volatility left the source outlook tilted slightly towards its downside scenario.",
   "metrics": [
-    {"label":"S&P 500","value":"7,568.92","detail":"+0.36% · US close"},
-    {"label":"Nasdaq Composite","value":"Not reported","detail":"Source reports Nasdaq-100 instead: 28,180.26 (+0.68%); not interchangeable"},
-    {"label":"US 10-year yield","value":"4.95%","detail":"+4 bp · Treasury par yield"},
-    {"label":"Brent futures","value":"Approx. US$104.5","detail":"Approximately unchanged · January settlement, media-reported"}
+    {
+      "label": "S&P 500",
+      "value": "7,353.73",
+      "detail": "−4.36% · US close"
+    },
+    {
+      "label": "Nasdaq Composite",
+      "value": "24,315.00",
+      "detail": "−5.52% · US close"
+    },
+    {
+      "label": "US 10-year yield",
+      "value": "4.84%",
+      "detail": "−6 bp · Treasury par yield"
+    },
+    {
+      "label": "Brent futures",
+      "value": "US$98.29",
+      "detail": "+3.88% · January settlement, media-reported"
+    }
   ],
   "highlights": [
-    {"title":"Semiconductors lead a concentrated rebound","text":"The semiconductor index rose 2.63%, with Nvidia up 2.29%, Broadcom 3.07% and Micron 2.58%. The equal-weight S&P 500 fell 0.33% and the Dow lost 0.38%, limiting evidence of a broad recovery."},
-    {"title":"Credit improves modestly as yields rise","text":"HYG gained 0.12% to 76.98 and VIX eased to 20.83. The Treasury 10-year par yield rose four basis points to 4.95%; the source does not count this as a confirmed directional trigger."},
-    {"title":"Earnings follow-through and event pricing matter","text":"AMD's reported after-hours gain was provisional and is not a forecast anchor. The outlook judges its next-session close and semiconductor follow-through, while US election pricing and Friday's payrolls remain risks within the window."}
+    {
+      "title": "Semiconductors led the decline",
+      "text": "The semiconductor index fell 12.25%, while VIX rose from 16.61 to 28.18. The S&P 500 closed near its intraday low."
+    },
+    {
+      "title": "Credit held up better than equities",
+      "text": "HYG slipped 0.31% and LQD rose 0.15%. Equal-weight equities fell less than the headline S&P 500; this was relative resilience, not a broad recovery."
+    },
+    {
+      "title": "Payrolls fall inside the forecast window",
+      "text": "The report retained its original 18/40/42 scenario split after updating its sentiment inputs. It treats payrolls and closing moves in chips, volatility and credit as evidence to monitor."
+    }
   ],
   "forecast": {
-    "id":"drive:1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27#us-original-outlook",
-    "outlook":"Semiconductor support, narrow breadth and event uncertainty",
-    "horizon":"4–6 November US sessions · S&P 500 final close",
-    "evaluates_at":"2026-11-06T21:00:00Z",
-    "reference_close":7568.92,
-    "lower_bound":7460,
-    "upper_bound":7680,
-    "probabilities":{"bull":26,"base":46,"bear":28},
-    "completed_sample":10,
-    "method":"Embedded original US outlook, section 4, using the approved newer paragraph layout; not a historical revision or the appended Australian outlook. ID is an archive locator, not an author-issued forecast ID. issued_at is the verified completed Drive modification time; precise original issue time is unavailable. Subjective probabilities, not statistically calibrated. Final-close boundaries are not technical support or resistance.",
-    "watch_next":"Watch AMD's closing follow-through, semiconductor breadth, credit, election pricing and Friday's payrolls. The report's mean Brier is 0.728 across ten completed original US windows, worse than its 0.667 uniform baseline; revised forecasts are excluded."
+    "id": "drive:1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc#us-original-outlook",
+    "outlook": "Semiconductor weakness and elevated volatility",
+    "horizon": "6–10 November US sessions · S&P 500 final close",
+    "evaluates_at": "2026-11-10T21:00:00Z",
+    "reference_close": 7353.73,
+    "lower_bound": 7200,
+    "upper_bound": 7550,
+    "probabilities": {
+      "bull": 18,
+      "base": 40,
+      "bear": 42
+    },
+    "completed_sample": 12,
+    "method": "Original US outlook in section 9; the source’s sentiment update did not alter its probabilities or final-close boundaries. The forecast ID is an archive locator. The issue timestamp is the verified completed Drive modification time. Subjective probabilities, not statistically calibrated.",
+    "watch_next": "Watch payrolls and closing confirmation in semiconductors, volatility and credit. Mean Brier was 0.721 across 12 completed original US windows, worse than the 0.667 uniform baseline."
   },
-  "limitations":"Curated from the source report, not a new market verification. NYSE breadth, Nasdaq new lows and same-session Cboe end-of-day put/call were unavailable; non-current fund flows were not used. Nasdaq Composite was not reported; Nasdaq-100 is not substituted. The partial X handoff missed 17:00–18:00 ET. AMD after-hours and overnight futures were provisional, not forecast anchors. Oil settlement was approximate and media-reported; gold and WTI settlements were unavailable. Election counting was ongoing at the source cutoff; no outcome is asserted.",
-  "sources":[
-    {"label":"Monthly US report and embedded original outlook · Drive access required","url":"https://drive.google.com/file/d/1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27/view","modified_at":"2026-11-03T22:36:38.761Z"},
-    {"label":"Treasury yield curve · cited by report","url":"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202611"}
+  "limitations": "Curated from the source report, not independently verified. NYSE breadth was secondary, end-of-day put/call and fund flows were unavailable, and Brent settlement was media-reported. After-hours quotes were not used as forecast anchors.",
+  "sources": [
+    {
+      "label": "Monthly US report and original outlook · Drive access required",
+      "url": "https://drive.google.com/file/d/1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc/view",
+      "modified_at": "2026-11-05T23:23:32.166Z"
+    },
+    {
+      "label": "Treasury yield curve · cited by report",
+      "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202611"
+    }
   ],
   "provenance": {
-    "report":{"id":"1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27","modified_at":"2026-11-03T22:36:38.761Z","sha256":"f0285bffd5dea16471055f3ae285308cbc25da319ddeb8c41fd29c08afb048e4"},
-    "forecast":{"id":"1_4QqedAzmhVOU2CyLSfzeF90mTj6Gt27","modified_at":"2026-11-03T22:36:38.761Z","sha256":"f0285bffd5dea16471055f3ae285308cbc25da319ddeb8c41fd29c08afb048e4"}
+    "report": {
+      "id": "1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc",
+      "modified_at": "2026-11-05T23:23:32.166Z",
+      "sha256": "f0f3c942d1ada4511d0f83165026072ccff2dd0475a4ee9c32865aa3c15cc739"
+    },
+    "forecast": {
+      "id": "1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc",
+      "modified_at": "2026-11-05T23:23:32.166Z",
+      "sha256": "f0f3c942d1ada4511d0f83165026072ccff2dd0475a4ee9c32865aa3c15cc739"
+    }
   }
 }
