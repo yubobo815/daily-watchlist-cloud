@@ -38,6 +38,8 @@ def fixture_rows(*, invalid_promotion: bool = False, learning_rows: int = 40):
             "learning_sample_count": 30 if ticker < learning_rows else 0,
             "learning_scope": "exact signal personality" if ticker < learning_rows else "none",
             "learning_promotion_eligible": False,
+            "learning_reporting_only": True,
+            "learning_adjustment": 0.0,
             "raw_window_hash": "a" * 64,
         }
         if invalid_promotion and ticker == 0:
@@ -207,9 +209,6 @@ def run_fixture(
 
 
 def main() -> None:
-    assert health.required_learning_snapshot_rows(185) == 19
-    assert health.required_learning_snapshot_rows(250) == 25
-    assert health.required_learning_snapshot_rows(40) == 10
     assert run_fixture(finalize=False) == 0, "validation must not expose the staged publication"
     assert run_fixture(finalize=True) == 1, "finalization must perform exactly one CAS promotion"
     assert run_fixture(finalize=False, learning_rows=10) == 0, "representative sparse learning coverage must publish"
@@ -217,12 +216,22 @@ def main() -> None:
     assert run_fixture(finalize=False, integrity_state="valid", source_run_status="validated") == 0, (
         "activation must accept an artifact after its source run enters the validated state"
     )
-    try:
-        run_fixture(finalize=False, learning_rows=9)
-    except SystemExit as exc:
-        assert exc.code == 1
-    else:
-        raise AssertionError("insufficient current-row learning coverage must fail closed")
+    assert run_fixture(finalize=True, learning_rows=12) == 1
+    assert run_fixture(finalize=True, learning_rows=0) == 1
+    _, snapshots, _ = fixture_rows(learning_rows=0)
+    neutral = snapshots[0]["payload"]
+    for override in (
+        {"learning_sample_count": None},
+        {"learning_sample_count": True},
+        {"learning_sample_count": 0.5},
+        {"learning_adjustment": 1},
+        {"learning_adjustment": -1},
+        {"learning_reporting_only": False},
+        {"learning_promotion_eligible": True},
+        {"learning_sample_count": 12, "learning_scope": "none"},
+        {"learning_sample_count": 12, "learning_scope": "action family", "learning_adjustment": 1},
+    ):
+        assert not health.valid_learning_attachment({**neutral, **override}), override
     try:
         run_fixture(finalize=False, invalid_promotion=True)
     except SystemExit as exc:

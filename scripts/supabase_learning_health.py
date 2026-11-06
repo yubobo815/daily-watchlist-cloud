@@ -227,9 +227,23 @@ def number(value: object) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
-def required_learning_snapshot_rows(snapshot_count: int) -> int:
-    """Require representative current-row coverage without assuming exact patterns are dense."""
-    return max(10, math.ceil(max(0, snapshot_count) * 0.10))
+def valid_learning_attachment(payload: dict) -> bool:
+    """Distinguish an explicit, neutral no-match from missing or unsafe evidence."""
+    samples = payload.get("learning_sample_count")
+    adjustment = number(payload.get("learning_adjustment"))
+    promotion = payload.get("learning_promotion_eligible")
+    reporting_only = payload.get("learning_reporting_only")
+    scope = payload.get("learning_scope")
+    if type(samples) is not int or samples < 0 or adjustment is None:
+        return False
+    if type(promotion) is not bool or type(reporting_only) is not bool:
+        return False
+    if samples == 0:
+        return scope == "none" and reporting_only and not promotion and adjustment == 0
+    return (
+        scope in ("exact signal personality", "action/setup family", "action family")
+        and (adjustment <= 0 or (promotion and not reporting_only))
+    )
 
 
 def main(*, finalize: bool = False, activate: bool = False) -> None:
@@ -370,8 +384,11 @@ def main(*, finalize: bool = False, activate: bool = False) -> None:
 
     learning_ready = 0
     learning_scope_ready = 0
+    invalid_learning_attachments = []
     for row in snapshot_rows:
         payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        if not valid_learning_attachment(payload):
+            invalid_learning_attachments.append(row.get("ticker"))
         sample_count = payload.get("learning_sample_count")
         try:
             has_samples = int(float(sample_count)) > 0
@@ -601,17 +618,13 @@ def main(*, finalize: bool = False, activate: bool = False) -> None:
     if not directional_validation_safe:
         emit_metrics(metrics)
         fail("The directional OHLCV model was activated without its full OOS evidence gate.")
-    # Settled and calibrated outcome checks above validate the global learner.
-    # Exact-pattern matches are regime-dependent, so treat current-row coverage
-    # as an attachment check rather than a fixed 20% promotion quota.
-    required_learning_rows = required_learning_snapshot_rows(len(snapshot_rows))
-    metrics["required_snapshots_with_learning_samples"] = required_learning_rows
-    if learning_ready < required_learning_rows:
+    # Matching today's patterns is regime-dependent. Audit every attachment
+    # without imposing a minimum number of matches or weakening model gates.
+    metrics["invalid_learning_attachments"] = len(invalid_learning_attachments)
+    if invalid_learning_attachments:
+        metrics["invalid_learning_attachment_examples"] = invalid_learning_attachments[:5]
         emit_metrics(metrics)
-        fail("Too few latest snapshots have learning samples attached.")
-    if learning_scope_ready < required_learning_rows:
-        emit_metrics(metrics)
-        fail("Too few learned snapshots identify their evidence scope.")
+        fail("Latest snapshots have missing or unsafe learning attachments.")
 
     scanner_status = str(latest_payload.get("scanner_status") or "")
     if scanner_status not in {"ok", "degraded"}:
