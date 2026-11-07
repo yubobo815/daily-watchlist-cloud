@@ -1,84 +1,80 @@
 {
   "schema_version": 1,
-  "session_date": "2026-11-05",
-  "issued_at": "2026-11-05T23:23:32.166Z",
-  "headline": "Chip sell-off drags US stocks lower as volatility jumps",
-  "summary": "US equities sold off broadly, led by semiconductors. Credit ETFs were comparatively resilient, but weak breadth and higher volatility left the source outlook tilted slightly towards its downside scenario.",
+  "session_date": "2026-11-06",
+  "issued_at": "2026-11-06T23:17:38.207Z",
+  "headline": "Chip rebound lifts US stocks, but breadth remains weak",
+  "summary": "The S&P 500 edged higher as semiconductor stocks rebounded and volatility eased. Equal-weight stocks lagged and the Dow fell, limiting evidence of a broad recovery.",
   "metrics": [
     {
       "label": "S&P 500",
-      "value": "7,353.73",
-      "detail": "−4.36% · US close"
+      "value": "7,376.86",
+      "detail": "+0.31% · US close"
     },
     {
       "label": "Nasdaq Composite",
-      "value": "24,315.00",
-      "detail": "−5.52% · US close"
+      "value": "24,579.42",
+      "detail": "+1.09% · US close"
     },
     {
       "label": "US 10-year yield",
-      "value": "4.84%",
-      "detail": "−6 bp · Treasury par yield"
+      "value": "4.86%",
+      "detail": "+2 bp · Treasury par yield"
     },
     {
       "label": "Brent futures",
-      "value": "US$98.29",
-      "detail": "+3.88% · January settlement, media-reported"
+      "value": "US$98.32",
+      "detail": "+0.03% · January settlement, media-reported"
     }
   ],
   "highlights": [
     {
-      "title": "Semiconductors led the decline",
-      "text": "The semiconductor index fell 12.25%, while VIX rose from 16.61 to 28.18. The S&P 500 closed near its intraday low."
+      "title": "Chip stocks led the rebound",
+      "text": "Semiconductors recovered part of Thursday’s losses. The equal-weight S&P 500 fell 0.38%, pointing to a narrower rebound than the headline index suggested."
     },
     {
-      "title": "Credit held up better than equities",
-      "text": "HYG slipped 0.31% and LQD rose 0.15%. Equal-weight equities fell less than the headline S&P 500; this was relative resilience, not a broad recovery."
-    },
-    {
-      "title": "Payrolls fall inside the forecast window",
-      "text": "The report retained its original 18/40/42 scenario split after updating its sentiment inputs. It treats payrolls and closing moves in chips, volatility and credit as evidence to monitor."
+      "title": "Payrolls beat expectations",
+      "text": "The report cites 165,000 October payroll gains and 4.1% unemployment. Stronger jobs data and CPI within the forecast window leave material downside risk."
     }
   ],
   "forecast": {
-    "id": "drive:1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc#us-original-outlook",
-    "outlook": "Semiconductor weakness and elevated volatility",
-    "horizon": "6–10 November US sessions · S&P 500 final close",
-    "evaluates_at": "2026-11-10T21:00:00Z",
-    "reference_close": 7353.73,
-    "lower_bound": 7200,
-    "upper_bound": 7550,
+    "id": "drive:11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7#us-original-outlook",
+    "outlook": "Uneven rebound ahead of US CPI",
+    "horizon": "9–11 November US sessions · S&P 500 final close",
+    "evaluates_at": "2026-11-11T21:00:00Z",
+    "reference_close": 7376.86,
+    "lower_bound": 7220,
+    "upper_bound": 7500,
     "probabilities": {
-      "bull": 18,
-      "base": 40,
-      "bear": 42
+      "bull": 22,
+      "base": 42,
+      "bear": 36
     },
-    "completed_sample": 12,
-    "method": "Original US outlook in section 9; the source’s sentiment update did not alter its probabilities or final-close boundaries. The forecast ID is an archive locator. The issue timestamp is the verified completed Drive modification time. Subjective probabilities, not statistically calibrated.",
-    "watch_next": "Watch payrolls and closing confirmation in semiconductors, volatility and credit. Mean Brier was 0.721 across 12 completed original US windows, worse than the 0.667 uniform baseline."
+    "completed_sample": 13,
+    "method": "Original US outlook in section 9. The forecast ID is a Drive archive locator, and the issue timestamp is the verified completed Drive modification time. The report treats these scenarios as levels to monitor, not calibrated odds.",
+    "watch_next": "Watch US CPI, Treasury yields, semiconductor closes and VIX. Mean Brier was 0.727 across 13 completed US windows, worse than the 0.667 uniform baseline."
   },
-  "limitations": "Curated from the source report, not independently verified. NYSE breadth was secondary, end-of-day put/call and fund flows were unavailable, and Brent settlement was media-reported. After-hours quotes were not used as forecast anchors.",
+  "limitations": "Curated from the report, not independently verified. Breadth was secondary, sentiment coverage was partial, and end-of-day put/call and fund-flow data were unavailable. After-hours quotes were not used as forecast anchors.",
   "sources": [
     {
       "label": "Monthly US report and original outlook · Drive access required",
-      "url": "https://drive.google.com/file/d/1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc/view",
-      "modified_at": "2026-11-05T23:23:32.166Z"
+      "url": "https://drive.google.com/file/d/11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7/view",
+      "modified_at": "2026-11-06T23:17:38.207Z"
     },
     {
-      "label": "Treasury yield curve · cited by report",
-      "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=202611"
+      "label": "Yahoo Finance S&P 500 historical data · provider named in report",
+      "url": "https://finance.yahoo.com/quote/%5EGSPC/history/"
     }
   ],
   "provenance": {
-    "report": {
-      "id": "1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc",
-      "modified_at": "2026-11-05T23:23:32.166Z",
-      "sha256": "f0f3c942d1ada4511d0f83165026072ccff2dd0475a4ee9c32865aa3c15cc739"
-    },
     "forecast": {
-      "id": "1LkOWzHr1VxJZdrK-37cVSxgkqIrradbc",
-      "modified_at": "2026-11-05T23:23:32.166Z",
-      "sha256": "f0f3c942d1ada4511d0f83165026072ccff2dd0475a4ee9c32865aa3c15cc739"
+      "id": "11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7",
+      "modified_at": "2026-11-06T23:17:38.207Z",
+      "sha256": "fc87dcf2d9bf96716b8110e5aecf04ce5391d752e8ae18540faae5888858dce4"
+    },
+    "report": {
+      "id": "11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7",
+      "modified_at": "2026-11-06T23:17:38.207Z",
+      "sha256": "fc87dcf2d9bf96716b8110e5aecf04ce5391d752e8ae18540faae5888858dce4"
     }
   }
 }
