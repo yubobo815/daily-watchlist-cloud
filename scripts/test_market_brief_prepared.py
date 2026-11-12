@@ -51,6 +51,53 @@ class Fixture:
 
 
 class PreparedSourceTests(unittest.TestCase):
+    def test_structured_original_and_latest_modified(self):
+        s = Fixture()
+        extra = 'extra_archive_fixture'
+        s.metadata[extra] = dict(s.metadata[ROOT], id=extra)
+        s.metadata[REPORT].update(name='US_AI_Daily_2026-10-31_US-2026-10-30_v1.md', parents=[extra])
+        s.metadata['older'] = dict(s.metadata[REPORT], id='older', modifiedTime='2026-10-30T22:44:00Z')
+        s.brief['forecast']['id'] = 'IND-2026-10-31-3D-v1'
+        s.raw = ('''| 最近完成的美国常规现金时段 | 2026-10-30（周五），16:00 EDT |
+## 3. 三日 S&P 500 预测（NEW）与澳洲条件展望
+### 3.1 预测块（固定解析字段）
+Forecast ID: IND-2026-10-31-3D-v1
+Issued: 2026-10-31 09:45:35 AEDT (UTC+11:00) / 2026-10-30 18:45:35 EDT (UTC-04:00)
+Source US session: 2026-10-30
+Reference S&P 500: 7580.07
+Target session: 2026-11-04 16:00 America/New_York (2026-11-04T21:00:00Z)
+Lower bound: 7480
+Upper bound: 7680
+Status: NEW
+| Bull | > 7680 | 24% |
+| Base | 7480 – 7680 (inclusive) | 43% |
+| Bear | < 7480 | 33% |
+### 3.5 澳洲条件展望
+| Bull | > 9999 | 99% |
+## 9. 历史预测台账
+[计算] IND 序列已评分 8 个窗口。
+''').encode()
+        s.brief['issued_at'] = '2026-10-30T22:45:35Z'
+        def rehash():
+            s.rehash()
+            for ref in s.brief['provenance'].values():
+                ref['modified_at'] = s.metadata[REPORT]['modifiedTime']
+        rehash()
+        self.assertTrue(verify(s, ROOT, s.brief, NOW, extra)['source_verified'])
+        original = s.raw
+        for old, new in ((b'Status: NEW', b'Status: REVISED'), (b'24%', b'25%'),
+                         (b'IND-2026-10-31', b'IND-2026-10-30'),
+                         (b'21:00:00Z', b'20:00:00Z')):
+            s.raw = original.replace(old, new)
+            rehash()
+            with self.subTest(change=new), self.assertRaises(ProbeError):
+                verify(s, ROOT, s.brief, NOW, extra)
+        s.raw = original
+        rehash()
+        s.metadata['older']['modifiedTime'] = '2026-10-30T22:46:00Z'
+        with self.assertRaises(ProbeError):
+            verify(s, ROOT, s.brief, NOW, extra)
+
     def test_section_nine_bullets_and_cumulative_sample(self):
         s = Fixture()
         s.raw = ('累计美股 Brier 现为 **0.721（8 个窗口，5.768/8）**\n'

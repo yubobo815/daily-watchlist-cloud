@@ -89,7 +89,7 @@ def validate_brief(brief, now, *, embedded=False):
         text(highlight["text"], 500)
     forecast = brief["forecast"]
     exact_keys(forecast, FORECAST_KEYS, "forecast")
-    forecast_pattern = r"drive:[A-Za-z0-9_-]{10,120}#us-original-outlook" if embedded else r"IND-" + re.escape(str(session)) + r"-[A-Za-z0-9-]+"
+    forecast_pattern = r"(?:drive:[A-Za-z0-9_-]{10,120}#us-original-outlook|IND-\d{4}-\d{2}-\d{2}-3D-v1)" if embedded else r"IND-" + re.escape(str(session)) + r"-[A-Za-z0-9-]+"
     require(re.fullmatch(forecast_pattern, forecast["id"] or ""), "The forecast identity must match its authorized source contract.")
     for key in ("outlook", "horizon", "method", "watch_next"):
         text(forecast[key], 800)
