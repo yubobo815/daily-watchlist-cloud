@@ -17,6 +17,55 @@ from sync_market_brief_drive import exact_keys, parse_json, require, timestamp, 
 
 MONTH = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
 REPORT = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-v([1-9]\d*))?\.md$")
+US_ARCHIVE = "1vFVQbX-xmbVrOSO4OXDGb1ACwZF3-oXw"
+US_REPORT = re.compile(r"^US_AI_Daily_(\d{4}-\d{2}-\d{2})_US-(\d{4}-\d{2}-\d{2})_v1\.md$")
+
+
+def latest_modified(reports):
+    if len(reports) == 1:
+        return reports[0]
+    times = [timestamp(report["modifiedTime"]) for _, report in reports]
+    newest = max(times)
+    require(times.count(newest) == 1, "Ambiguous latest report modification time.")
+    return reports[times.index(newest)]
+
+
+def structured_outlook(source, brief):
+    sections = list(re.finditer(r"^## 3\. 三日 S&P 500 预测（NEW）与澳洲条件展望[ \t]*\n([\s\S]*?)(?=^## |\Z)", source, re.M))
+    require(len(sections) == 1, "Expected a unique original section 3 US outlook.")
+    blocks = list(re.finditer(
+        r"^### 3\.1 预测块（固定解析字段）[ \t]*\n([\s\S]*?)(?=^### |\Z)", sections[0][1], re.M))
+    require(len(blocks) == 1, "Expected a unique original section 3 US forecast block.")
+    block = blocks[0][1]
+
+    def field(label, pattern, body=block):
+        found = re.findall(r"^" + re.escape(label) + r"\s*" + pattern + r"\s*$", body, re.M)
+        require(len(found) == 1, "A structured US outlook field is missing or ambiguous.")
+        return found[0]
+
+    session = field("Source US session:", r"(\d{4}-\d{2}-\d{2})")
+    close = re.findall(r"^\| 最近完成的美国常规现金时段 \|\s*(\d{4}-\d{2}-\d{2})（", source[:sections[0].start()], re.M)
+    require(close == [session] and session == brief["session_date"], "The structured outlook is not from the stated completed US session.")
+    require(field("Status:", r"(NEW)") == "NEW", "A revised outlook cannot be published.")
+    f = brief["forecast"]
+    require(field("Forecast ID:", r"(IND-\d{4}-\d{2}-\d{2}-3D-v1)") == f["id"], "The author-issued forecast ID differs.")
+    day, clock, offset = field("Issued:", r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) (?:AEDT|AEST) \(UTC([+-]\d{2}:\d{2})\) / [^\n]+")
+    require(timestamp(f"{day}T{clock}{offset}") == timestamp(brief["issued_at"]), "The author-issued timestamp differs.")
+    number = r"(\d+(?:\.\d+)?)"
+    for label, key in (("Reference S&P 500:", "reference_close"), ("Lower bound:", "lower_bound"), ("Upper bound:", "upper_bound")):
+        require(float(field(label, number)) == f[key], "A structured US reference or boundary differs.")
+    day, local_time, utc = field("Target session:", r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) America/New_York \(([^)]+)\)")
+    target = timestamp(utc)
+    require(target == timestamp(f["evaluates_at"]) and target.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M") == f"{day} {local_time}", "The structured US settlement differs.")
+    for name, pattern, expected in (
+        ("Bull", r">\s*" + number, (f["upper_bound"],)),
+        ("Base", number + r"\s*[–—-]\s*" + number + r"\s*\(inclusive\)", (f["lower_bound"], f["upper_bound"])),
+        ("Bear", r"<\s*" + number, (f["lower_bound"],)),
+    ):
+        cells = field("| " + name + " |", pattern + r"\s*\|\s*" + number + r"%\s*\|")
+        require(tuple(map(float, cells[:-1])) == expected and float(cells[-1]) == f["probabilities"][name.lower()], "A structured US scenario differs.")
+    sample = re.findall(r"^\[计算\] IND 序列已评分\s+(\d+)\s*个窗口\b", source, re.M)
+    require(len(sample) == 1 and int(sample[0]) == f["completed_sample"], "The completed IND calibration sample differs.")
 
 
 def readonly_folder(reader, folder_id, parent=None):
@@ -27,7 +76,7 @@ def readonly_folder(reader, folder_id, parent=None):
     return meta
 
 
-def newest_report(reader, root, now):
+def newest_report(reader, root, now, extra=None, session=None):
     readonly_folder(reader, root)
     today = now.astimezone(ZoneInfo("Australia/Melbourne")).date()
     first = today.replace(day=1)
@@ -49,20 +98,32 @@ def newest_report(reader, root, now):
                 continue
             if day <= today:
                 reports.append(((day, int(match[2] or 1)), folder["id"], meta))
-    require(bool(reports), "No completed dated monthly US report is available.")
+    if extra and session:
+        readonly_folder(reader, extra)
+        alternatives = []
+        for meta in reader.list_children(extra):
+            match = US_REPORT.fullmatch(meta.get("name", ""))
+            if match and not meta.get("trashed") and match[2] == session:
+                day = date.fromisoformat(match[1])
+                if day <= today:
+                    alternatives.append((extra, meta))
+        if alternatives:
+            parent, newest = latest_modified(alternatives)
+            day = date.fromisoformat(US_REPORT.fullmatch(newest["name"])[1])
+            reports.append(((day, 1), parent, newest))
+    require(bool(reports), "No completed dated US report is available.")
     rank = max(r[0] for r in reports)
     latest = [r for r in reports if r[0] == rank]
-    require(len(latest) == 1, "Ambiguous duplicate latest report.")
-    return latest[0][1:]
+    return latest_modified([r[1:] for r in latest])
 
 
-def verify(reader, root, candidate, now=None):
+def verify(reader, root, candidate, now=None, extra=None):
     now = now or datetime.now(timezone.utc)
     brief = copy.deepcopy(candidate)
     provenance = brief.pop("provenance", None)
     exact_keys(provenance, {"report", "forecast"}, "source provenance")
     validate_brief(brief, now, embedded=True)
-    month, report = newest_report(reader, root, now)
+    month, report = newest_report(reader, root, now, extra, brief["session_date"])
     reference = provenance["report"]
     exact_keys(reference, {"id", "modified_at", "sha256"}, "report provenance")
     require(reference == provenance["forecast"], "The original US outlook must come from the same report.")
@@ -73,6 +134,9 @@ def verify(reader, root, candidate, now=None):
     raw = reader.get(reference["id"], media=True)
     require(hashlib.sha256(raw).hexdigest() == reference["sha256"], "The original report checksum changed; re-curate before publishing.")
     source = raw.decode("utf-8").replace("**", "").replace(",", "")
+    if extra and month == extra:
+        structured_outlook(source, brief)
+        return finish_verification(reader, month, reference, before, brief, structured=True)
     header = re.search(r"^#\s*美股盘后日报[^\n]*美国[^\n]*?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\s*交易时段", source, re.M)
     require(header is not None, "Expected the original US post-close daily report, not a preview.")
     session = datetime.strptime(f"{header[1]} {header[2][:3]} {header[3]}", "%d %b %Y").date()
@@ -128,11 +192,17 @@ def verify(reader, root, candidate, now=None):
     if sample is None and bullets:
         sample = re.search(r"^累计美股 Brier 现为\s+\d+\.\d+[（(](\d+)\s*个窗口[，\s]+\d+(?:\.\d+)?/\1[）)]", us_text, re.M)
     require(sample is not None and int(sample[1]) == f["completed_sample"], "The completed US calibration sample differs from the report.")
-    require(timestamp(brief["issued_at"]) == timestamp(reference["modified_at"]), "The disclosed archive publication time must match completed Drive metadata.")
+    return finish_verification(reader, month, reference, before, brief)
+
+
+def finish_verification(reader, month, reference, before, brief, structured=False):
+    if not structured:
+        require(timestamp(brief["issued_at"]) == timestamp(reference["modified_at"]), "The disclosed archive publication time must match completed Drive metadata.")
     links = [s for s in brief["sources"] if s["url"].startswith("https://drive.google.com/")]
     require(len(links) == 1 and links[0]["url"] == f"https://drive.google.com/file/d/{reference['id']}/view" and links[0].get("modified_at") == reference["modified_at"], "Only the original report may be linked as a private source.")
     after = reader.get(reference["id"])
     require(after.get("modifiedTime") == before.get("modifiedTime") and month in after.get("parents", []) and after.get("capabilities", {}).get("canEdit") is False, "The source changed during verification.")
+    require(hashlib.sha256(reader.get(reference["id"], media=True)).hexdigest() == reference["sha256"], "The original report bytes changed during verification.")
     return {"source_verified": True, "session_date": brief["session_date"], "private_content_logged": False}
 
 
@@ -153,7 +223,7 @@ def main():
         else:
             require(bool(args.candidate), "A curated candidate is required.")
             candidate = parse_json(Path(args.candidate).read_bytes())
-            result = verify(reader, root, candidate)
+            result = verify(reader, root, candidate, extra=US_ARCHIVE)
         print(json.dumps(result))
         return 0
     except (ProbeError, OSError, ValueError, TypeError, KeyError, UnicodeError) as exc:

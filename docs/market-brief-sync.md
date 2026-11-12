@@ -57,13 +57,17 @@ Use **Market Desk Reports**, parent `1KjIqM7VurftWyjCH3kygjywSMyKZWv4d`, through
 the existing connected Drive account. Discover current and previous `YYYY-MM`
 folders dynamically, including month rollover; never permanently pin October.
 The original daily filename is `YYYY-MM-DD.md`, with an optional `-vN` suffix.
+The additional authorised **US Market & AI Daily Reports** folder supplies
+`US_AI_Daily_<publication-date>_US-<session-date>_v1.md` originals. For
+same-session duplicates use the latest Drive modification time; ties fail closed.
 Exclude weekly reports, PM/AU/Asia previews, forecast logs and unfinished files.
 Verify the actual US session in the report body rather than using the Australian
 filename date. It must equal `assets/market-session.js`'s latest completed US
 cash-market session, including holidays, DST and early closes.
 
 Use the **original US outlook in section 9**, or the approved newer
-**section 4 "新美股展望" three-way paragraph layout**, not a revised row in section 10,
+**section 4 "新美股展望" three-way paragraph layout**, or the additional archive's
+**section 3.1 structured NEW US forecast**. Never use a revised row in section 10,
 an older independent card, or an ASX outlook. Preserve probabilities, reference
 close, final-close boundaries, horizon, limitations and US completed sample.
 If no author-issued forecast ID exists, use
@@ -74,7 +78,7 @@ Never invent an author ID, market figure or forecast, or revise an old forecast.
 
 The summary is **US-market-only**. Exclude Australian stocks, XJO/ASX/RBA/AUD-only
 content, personal positions and account details. Do not use the ASX Reports
-archive or the old `US Market & AI Daily Reports` folder as an older fallback.
+archive or use an older report as a fallback for the current session.
 Do not copy complete private reports or alter Drive originals or public sharing.
 
 ## Live gates and recovery
