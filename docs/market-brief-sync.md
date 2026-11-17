@@ -1,30 +1,13 @@
 # Homepage market research
 
-## Active publication order (authorised 31 October 2026)
+## Active publication order
 
-ChatGPT/Codex curates the market-only content. GitHub publishes it immediately
-after the daily watchlist has passed verification and activated successfully.
-No scanner, signal rule, trading conclusion or historical forecast is changed.
-
-1. Read the newest completed monthly US post-close report and original embedded
-   US outlook. Prepare a normal owner-authored, data-only PR **before** the
-   watchlist finishes. Normal `pull_request` Quality checks run automatically.
-2. `daily-watchlist-pages.yml` runs `dispatch-market-brief` immediately after
-   `verify-and-activate` succeeds. It dispatches `market-brief-sync.yml` on main,
-   carrying the real upstream run ID and activated publication ID. It does not
-   wait for storage maintenance or a later clock slot. GitHub runner queueing
-   can still delay execution; this is not a precise-time guarantee.
-3. The publisher checks the trusted upstream activation, real production US
-   dates, owner-authored ready PR, read-only Drive source/hash, and real PR CI.
-   It renews the short-lived Google token, re-reads Drive and live data, then
-   merges only the exact tested head through unchanged main protection.
-4. Verify Vercel production JSON and the rendered source date and outlook.
-
-The dispatcher is gated by `MARKET_BRIEF_SYNC_ENABLED=true`. A dispatch transport
-failure must not roll back good watchlist data or rerun the scanner. The failed
-step stays visible; retry only the summary publisher with the same real IDs.
-The standalone publisher has no cron schedule. Keep the existing local recovery
-task until a real cloud publication has passed all gates and production checks.
+The curator prepares the brief from the completed monthly Drive report. Dispatch
+`market-brief-sync.yml` on main with `mode=sync` after preparing the owner-authored
+ready PR. Daily Brief publication is independent of watchlist builds and activation.
+The publisher verifies the live Drive source and exact PR Quality checks, rechecks
+the completed US session, and merges only through unchanged branch protection.
+Verify the live JSON and rendered homepage after publication.
 
 ## Curator / ready PR contract
 
@@ -36,10 +19,6 @@ directly from current main, changing only `data/market-brief.json`. Never use
 Run `npm run audit:market-brief`, `npm run audit:watchlist`, syntax checks and
 `npm run uat:docker`; all three real PR Quality jobs must also pass.
 
-Prepare content even if the watchlist has not finished: readiness is enforced at
-publication, not a reason to postpone curation. If the report arrives after
-activation, dispatch the publisher as recovery using that successful main run
-and actual live publication ID. Do not rerun a scanner/rebuild just for research.
 If main advances, refresh the data-only commit against current main and retest.
 Never replace required PR checks with `workflow_dispatch` tests, fake statuses,
 automatic approval, an admin bypass, a new GitHub App or a stored PAT.
@@ -79,23 +58,11 @@ content, personal positions and account details. Do not use the ASX Reports
 archive or the old `US Market & AI Daily Reports` folder as an older fallback.
 Do not copy complete private reports or alter Drive originals or public sharing.
 
-## Live gates and recovery
+## Recovery
 
-Require `live_access_ok=true`, status success/ok/degraded, a nonempty publication
-ID and nonempty rows all carrying that ID. Every row needs a valid date and
-ticker. Derive the US session from US rows, not global `latest_data_date` or
-run timestamps. Explicit `.AX` rows use their own exchange date; at least one
-US row must match the target and no US row may be future-dated. Older US rows
-and honest partial coverage are allowed; never backdate rows or claim full
-coverage. `scripts/check_market_brief_alignment.cjs` implements these gates.
-
-On stale/missing/mismatched inputs, preserve the last valid public snapshot and
-retry only the publisher after the missing input is ready. Source changes or
-main changes during CI fail closed. An unchanged already-published snapshot is
-a no-op only after matching current source IDs, timestamps and content. Local
-recovery checks read the small production JSON and Drive metadata first; avoid
-full watchlist/report reads, audits and PRs when unchanged. Routine waiting is
-quiet; surface meaningful failures or required user action, deduplicated.
+Preserve the last valid public snapshot when the source, session, main or CI
+does not match. Retry only the brief publisher after the issue is resolved.
+Never run or wait for a watchlist scan to publish the brief.
 
 ## Read-only cloud identity
 
@@ -110,8 +77,7 @@ minutes, renewed after CI. Non-secret variables:
 - `MARKET_REPORTS_DRIVE_FOLDER_ID` = the monthly archive parent above
 
 Manual `mode=verify` reads the monthly archive without content logs or writes.
-Manual/recovery `mode=sync` also requires `upstream_run_id` and
-`expected_publication_id`. It will not publish from an unverified/older run.
+Manual/recovery `mode=sync` has no watchlist inputs.
 The former bot-created-PR/manual-CI prototype is retained in legacy scripts for
 audit history only; its workflow is replaced and must not be reinstated.
 

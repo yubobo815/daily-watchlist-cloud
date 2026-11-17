@@ -2,7 +2,6 @@
 // No PR creation with GITHUB_TOKEN, approval APIs, fake statuses or admin bypass.
 const fs = require('node:fs');
 const { stable, digest, validateCandidate, CHECKS } = require('./publish_market_brief.cjs');
-const { alignment, fetchPublication } = require('./check_market_brief_alignment.cjs');
 const market = require('../assets/market-session');
 const REPO = 'yubobo815/daily-watchlist-cloud';
 const FILE = 'data/market-brief.json';
@@ -10,7 +9,7 @@ const READY = /^codex\/market-brief-ready-\d{4}-\d{2}-\d{2}(?:-\d+)?$/;
 const ensure = (ok, message) => { if (!ok) throw new Error(message); };
 const isSha = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
 
-function createPreparedPublisher(api, live = fetchPublication, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), clock = () => new Date()) {
+function createPreparedPublisher(api, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), clock = () => new Date()) {
   async function mainSnapshot() {
     const ref = await api('GET', '/git/ref/heads/main');
     ensure(isSha(ref.object?.sha), 'Cannot resolve protected main.');
@@ -31,19 +30,7 @@ function createPreparedPublisher(api, live = fetchPublication, sleep = ms => new
     const candidate = decode(await api('GET', `/contents/${FILE}?ref=${pr.head.sha}`));
     return { pr, candidate, base: commit.parents[0].sha };
   }
-  async function upstream(runId, publicationId) {
-    ensure(/^\d+$/.test(runId || '') && typeof publicationId === 'string' && publicationId.trim(), 'A verified upstream run and publication are required.');
-    const run = await api('GET', `/actions/runs/${runId}`);
-    ensure(run.repository?.full_name === REPO && run.head_branch === 'main' && run.path === '.github/workflows/daily-watchlist-pages.yml' && ['schedule', 'workflow_dispatch', 'push'].includes(run.event), 'The caller must be the trusted main-branch watchlist workflow.');
-    const jobs = await api('GET', `/actions/runs/${runId}/jobs?per_page=100`);
-    const job = jobs.jobs?.find(j => j.name === 'verify-and-activate');
-    ensure(job?.conclusion === 'success' && job.steps?.some(s => s.name === 'Activate Supabase publication' && s.conclusion === 'success'), 'Watchlist verification and activation have not succeeded.');
-    const publication = await live();
-    ensure(publication.runInfo?.publication_id === publicationId && publication.runInfo?.live_access_ok === true && ['success', 'ok', 'degraded'].includes(publication.runInfo?.status), 'The upstream publication is not the active verified live snapshot.');
-    return publication;
-  }
-  async function inspect(runId, publicationId) {
-    const publication = await upstream(runId, publicationId);
+  async function inspect() {
     const base = await mainSnapshot();
     const target = market.latestCompletedMarketSession(clock()).toISOString().slice(0, 10);
     const prs = await api('GET', '/pulls?state=open&base=main&per_page=100');
@@ -51,17 +38,16 @@ function createPreparedPublisher(api, live = fetchPublication, sleep = ms => new
     // Even a no-op is re-verified against Drive by the workflow. Source changes
     // fail the hash gate rather than silently hiding an updated report.
     if (!matches.length && base.brief.session_date === target && base.brief.provenance) {
-      ensure(alignment(base.brief, publication, clock()).ready, 'Published summary is not aligned.');
+      validateCandidate(base.brief, base.brief, clock());
       return { changed: false, candidate: base.brief };
     }
-    ensure(matches.length === 1, 'A unique owner-curated ready PR is missing; prepare content before the watchlist finishes.');
+    ensure(matches.length === 1, 'A unique owner-curated ready PR is missing; prepare the current completed session brief.');
     const item = await safePR(matches[0].number);
     validateCandidate(item.candidate, base.brief, clock());
     ensure(item.base === base.head, 'Main advanced after preparation; the curator must refresh and retest the ready PR.');
-    const aligned = alignment(item.candidate, publication, clock());
-    ensure(aligned.ready, 'Prepared report and the active US watchlist do not align.');
+    ensure(item.candidate.session_date === target, 'Prepared report is not for the latest completed US session.');
     return { changed: true, repo: REPO, pr: item.pr.number, branch: item.pr.head.ref, head: item.pr.head.sha, base: item.base,
-      upstream: String(runId), publication: publicationId, digest: digest(item.candidate), candidate: item.candidate };
+      digest: digest(item.candidate), candidate: item.candidate };
   }
   async function quality(state) {
     for (let attempt = 0; attempt < 80; attempt++) {
@@ -86,8 +72,7 @@ function createPreparedPublisher(api, live = fetchPublication, sleep = ms => new
     const item = await safePR(state.pr);
     ensure(item.pr.head.sha === state.head && item.base === state.base && stable(item.candidate) === stable(state.candidate), 'Ready PR changed during CI.');
     validateCandidate(item.candidate, base.brief, clock());
-    const publication = await upstream(state.upstream, state.publication);
-    ensure(alignment(item.candidate, publication, clock()).ready, 'Live publication or the completed US session advanced; do not merge.');
+    ensure(item.candidate.session_date === market.latestCompletedMarketSession(clock()).toISOString().slice(0, 10), 'The completed US session advanced; do not merge.');
     const branch = await api('GET', '/branches/main');
     const required = branch.protection?.required_status_checks;
     ensure(branch.protected === true && branch.protection?.enabled === true && required && CHECKS.every(name => required.contexts?.includes(name)), 'Required main protection must remain intact.');
@@ -101,7 +86,7 @@ function createPreparedPublisher(api, live = fetchPublication, sleep = ms => new
     ensure(result.merged === true && isSha(result.sha), 'Protected merge was refused; no bypass was attempted.');
     return { merged: true, pr: state.pr, head: state.head, merge_sha: result.sha, url: `https://github.com/${REPO}/pull/${state.pr}` };
   }
-  return { inspect, quality, merge, upstream };
+  return { inspect, quality, merge };
 }
 
 async function main() {
@@ -118,7 +103,7 @@ async function main() {
   };
   const publisher = createPreparedPublisher(api);
   if (mode === 'inspect') {
-    const state = await publisher.inspect(process.env.UPSTREAM_RUN_ID, process.env.EXPECTED_PUBLICATION_ID);
+    const state = await publisher.inspect();
     fs.writeFileSync(statePath, JSON.stringify(state)+'\n');
     fs.writeFileSync(candidatePath, JSON.stringify(state.candidate,null,2)+'\n');
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${state.changed}\n`);
