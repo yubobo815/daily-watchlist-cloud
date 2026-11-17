@@ -42,10 +42,6 @@
     {
       "title": "Three-session outlook: 19 November US cash close",
       "text": "The original forecast starts from 7,416.59. It assigns 35% to a close above 7,495.72, 30% to a close from 7,369.77 to 7,495.72 inclusive, and 35% to a close below 7,369.77. Intraday levels, futures and after-hours prices do not determine the result. Equal weights on the upside and downside are not a directional call: the model puts substantial weight in both tails relative to the width of the base range."
-    },
-    {
-      "title": "How to interpret the probabilities",
-      "text": "The estimate combines historical returns under comparable realised volatility and VIX conditions with a VIX-based normal model. It is sensitive to which VIX reading is used. Nvidia’s results and the Fed minutes can move prices in ways the model does not estimate separately. Judge the forecast by the official cash close, rather than treating the scenario boundaries as trade triggers."
     }
   ],
   "forecast": {
