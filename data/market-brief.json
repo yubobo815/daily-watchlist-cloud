@@ -3,7 +3,7 @@
   "session_date": "2026-11-16",
   "issued_at": "2026-11-16T23:24:42Z",
   "headline": "Chip sell-off leads US stocks lower",
-  "summary": "The S&P 500 fell 1.92% and the Nasdaq Composite lost 2.49%. The semiconductor index fell more sharply, though the report also noted weakness beyond technology.",
+  "summary": "US stocks fell for a third straight session at the S&P 500 level. The index lost 1.92% to 7,416.59, while the Nasdaq Composite fell 2.49% and the Philadelphia Semiconductor Index lost 5.28%, according to the report’s single-source reading. Selling spread beyond technology into financial and cyclical stocks. The US 10-year Treasury yield fell three basis points to 5.12%. That does not settle the longer-term rates outlook, but it weakens the case that rising yields drove Monday’s equity sell-off.",
   "metrics": [
     {
       "label": "S&P 500",
@@ -28,8 +28,24 @@
   ],
   "highlights": [
     {
-      "title": "Semiconductors led the decline",
-      "text": "The original report flags chip export policy and uncertainty ahead of Nvidia earnings. The sell-off alone does not establish a deterioration in chip orders."
+      "title": "Chip weakness spread beyond one company",
+      "text": "The report points to tighter chip export restrictions, uncertainty over Nvidia’s leadership and caution before its earnings. Pressure across chip and networking names makes the move harder to dismiss as a company-specific event. But a lower share price can reflect investors cutting exposure or paying less for future earnings; it does not establish that customers are cancelling AI infrastructure orders."
+    },
+    {
+      "title": "What would distinguish a rebound from a recovery?",
+      "text": "Watch Nvidia’s order commentary, delivery schedules and forward gross-margin guidance. If guidance holds up and chip stocks bounce, look for gains in the equal-weight S&P 500 and more advancing than declining stocks. A rally confined to a few large names would suggest a narrower reversal. If guidance weakens, breadth deteriorates and credit also comes under pressure, the case for a more persistent repricing strengthens."
+    },
+    {
+      "title": "Rates are a test for the next move",
+      "text": "The Federal Reserve minutes offer another way to separate drivers. If Treasury yields rise and equities fall together after the release, rates may explain more of the next move than they did on Monday. If yields stay subdued while chip stocks and credit weaken, focus instead on whether earnings guidance supports the market’s concerns about demand, financing or the timing of infrastructure investment."
+    },
+    {
+      "title": "Three-session outlook: 19 November US cash close",
+      "text": "The original forecast starts from 7,416.59. It assigns 35% to a close above 7,495.72, 30% to a close from 7,369.77 to 7,495.72 inclusive, and 35% to a close below 7,369.77. Intraday levels, futures and after-hours prices do not determine the result. Equal weights on the upside and downside are not a directional call: the model puts substantial weight in both tails relative to the width of the base range."
+    },
+    {
+      "title": "How to interpret the probabilities",
+      "text": "The estimate combines historical returns under comparable realised volatility and VIX conditions with a VIX-based normal model. It is sensitive to which VIX reading is used. Nvidia’s results and the Fed minutes can move prices in ways the model does not estimate separately. Judge the forecast by the official cash close, rather than treating the scenario boundaries as trade triggers."
     }
   ],
   "forecast": {
@@ -49,7 +65,7 @@
     "method": "Original section 3.1 forecast. The report averages realised-volatility, comparable VIX and normal-model estimates, without a discretionary tilt. Boundaries are inclusive in the base case.",
     "watch_next": "Watch Nvidia guidance, Federal Reserve minutes and whether market breadth improves."
   },
-  "limitations": "The report flags sensitivity to the VIX source, overlapping windows and event risk not modelled separately. The 11 scored US windows were not all re-read and do not establish calibration.",
+  "limitations": "The source lists 11 scored US forecast windows, not all rechecked against the original files. The sample is small, the windows overlap and the estimates are not independent. Neither the sample nor the reported score establishes that the probabilities are calibrated.",
   "sources": [
     {
       "label": "Monthly US report and original outlook",
