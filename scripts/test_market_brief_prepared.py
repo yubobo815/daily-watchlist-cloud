@@ -51,6 +51,33 @@ class Fixture:
 
 
 class PreparedSourceTests(unittest.TestCase):
+    def test_am_original(self):
+        s = Fixture()
+        s.metadata[REPORT]['name'] = 'US_AI_Daily_2026-10-31_US-2026-10-30_v1.md'
+        s.brief['forecast']['id'] = 'IND-2026-10-31-3D-v1'
+        raw = ('# US & AI 每日研究报告（AM）— 美股 2026-10-30（周五）收盘 → 墨尔本 2026-10-31（周六）\n'
+               '## 3. 三日标普 500 预测（NEW）与澳洲条件展望\n### 3.1 预测块\n'
+               'Forecast ID: IND-2026-10-31-3D-v1\nIssued: 2026-10-31 09:45:35 AEDT / 2026-10-30 18:45:35 EDT\n'
+               'Source US session: 2026-10-30\nReference S&P 500: 7580.07\n'
+               'Target session: 2026-11-04 16:00 America/New_York (2026-11-04T21:00:00Z)\n'
+               'Lower bound: 7480\nUpper bound: 7680\nStatus: NEW\n'
+               '| Bull | >7680 | 24% |\n| Base | 7480–7680 (inclusive) | 43% |\n| Bear | <7480 | 33% |\n'
+               '## 9. 历史预测账本\n### 9-C 累计序列\n累计：8 个窗口，合计 5.7。\n')
+        s.brief['issued_at'] = '2026-10-30T22:45:35Z'
+        s.rehash()
+        s.brief['provenance']['report']['modified_at'] = s.metadata[REPORT]['modifiedTime']
+        s.brief['provenance']['forecast']['modified_at'] = s.metadata[REPORT]['modifiedTime']
+        s.raw = raw.encode()
+        for old, new in [('', ''), ('Status: NEW', 'Status: REVISED'), ('24%', '25%'), ('8 个窗口', '9 个窗口'), ('inclusive', 'exclusive')]:
+            s.raw = (raw.replace(old, new) if old else raw).encode()
+            for ref in s.brief['provenance'].values():
+                ref['sha256'] = hashlib.sha256(s.raw).hexdigest()
+            if old:
+                with self.subTest(old=old), self.assertRaises(ProbeError):
+                    s.verify()
+            else:
+                self.assertTrue(s.verify()['source_verified'])
+
     def test_section_nine_bullets_and_cumulative_sample(self):
         s = Fixture()
         s.raw = ('累计美股 Brier 现为 **0.721（8 个窗口，5.768/8）**\n'
