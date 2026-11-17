@@ -17,6 +17,42 @@ from sync_market_brief_drive import exact_keys, parse_json, require, timestamp, 
 
 MONTH = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
 REPORT = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-v([1-9]\d*))?\.md$")
+AM_REPORT = re.compile(r"US_AI_Daily_(\d{4}-\d{2}-\d{2})_US-(\d{4}-\d{2}-\d{2})_v1\.md")
+NUMBER = r"\d+(?:\.\d+)?"
+
+
+def unique(pattern, value):
+    matches = list(re.finditer(pattern, value, re.M))
+    require(len(matches) == 1, "Missing or ambiguous original AM forecast field.")
+    return matches[0]
+
+
+def verify_am(source, brief, filename, modified_at):
+    f = brief["forecast"]
+    header = unique(r"^# US & AI 每日研究报告（AM）— 美股 (\d{4}-\d{2}-\d{2})（周[一二三四五]）收盘 → 墨尔本 (\d{4}-\d{2}-\d{2})（周[一二三四五六日]）$", source)
+    require(header[1] == filename[2] == brief["session_date"] and header[2] == filename[1], "AM report dates do not match.")
+    section = unique(r"^## 3\. 三日标普 500 预测（NEW）与澳洲条件展望\n([\s\S]*?)(?=^## |\Z)", source)[1]
+    block = unique(r"^### 3\.1 预测块[^\n]*\n([\s\S]*?)(?=^### |\Z)", section)[1]
+    require(unique(r"^Status: (.+)$", block)[1] == "NEW", "Forecast was not issued.")
+    require(unique(r"^Source US session: (\d{4}-\d{2}-\d{2})$", block)[1] == header[1], "Forecast source session differs.")
+    require(unique(r"^Forecast ID: (.+)$", block)[1] == f["id"] == f"IND-{header[2]}-3D-v1", "Forecast ID differs.")
+    issue = unique(r"^Issued: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) AE[DS]T / (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) E[DS]T$", block)
+    issued = datetime.fromisoformat(issue[1]).replace(tzinfo=ZoneInfo("Australia/Melbourne"))
+    require(issued == datetime.fromisoformat(issue[2]).replace(tzinfo=ZoneInfo("America/New_York")) and issued.date().isoformat() == header[2] and issued == timestamp(brief["issued_at"]) and issued <= timestamp(modified_at), "Forecast issue time differs.")
+    target = unique(r"^Target session: (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) America/New_York \(([^)]+)\)$", block)
+    settled = timestamp(f["evaluates_at"])
+    require(timestamp(target[3]) == settled and settled.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M") == f"{target[1]} {target[2]}", "Forecast settlement differs.")
+    for label, key in (("Reference S&P 500", "reference_close"), ("Lower bound", "lower_bound"), ("Upper bound", "upper_bound")):
+        require(float(unique(rf"^{re.escape(label)}: ({NUMBER})$", block)[1]) == f[key], "Forecast reference or boundary differs.")
+    for name, interval, keys in (("Bull", rf">\s*({NUMBER})", ["upper_bound"]), ("Base", rf"({NUMBER})\s*[–—-]\s*({NUMBER})\s*\(inclusive\)", ["lower_bound", "upper_bound"]), ("Bear", rf"<\s*({NUMBER})", ["lower_bound"])):
+        row_line = unique(rf"^\|[ \t]*{name}[ \t]*\|[^\n]*$", block)[0]
+        row = re.fullmatch(rf"\|\s*{name}\s*\|\s*([^|]+?)\s*\|\s*({NUMBER})%\s*\|\s*", row_line)
+        require(row is not None, "Invalid original forecast row.")
+        bounds = re.fullmatch(interval, row[1])
+        require(bounds is not None and list(map(float, bounds.groups())) == [f[k] for k in keys] and float(row[2]) == f["probabilities"][name.lower()], "Forecast range or probability differs.")
+    ledger = unique(r"^## 9\. 历史预测账本[^\n]*\n([\s\S]*?)(?=^## |\Z)", source)[1]
+    sample = unique(r"^### 9-C 累计序列[^\n]*\n([^\n]+)", ledger)[1]
+    require(int(unique(r"(\d+) 个窗口\s*[，,]?\s*合计", sample)[1]) == f["completed_sample"], "Completed US sample differs.")
 
 
 def readonly_folder(reader, folder_id, parent=None):
@@ -40,15 +76,16 @@ def newest_report(reader, root, now):
     for folder in folders:
         readonly_folder(reader, folder["id"], root)
         for meta in reader.list_children(folder["id"]):
-            match = REPORT.fullmatch(meta.get("name", ""))
+            am = AM_REPORT.fullmatch(meta.get("name", ""))
+            match = am or REPORT.fullmatch(meta.get("name", ""))
             if not match or meta.get("trashed"):
                 continue
             try:
                 day = date.fromisoformat(match[1])
             except ValueError:
                 continue
-            if day <= today:
-                reports.append(((day, int(match[2] or 1)), folder["id"], meta))
+            if day <= today and (not am or day.strftime("%Y-%m") == folder["name"]):
+                reports.append(((day, 1 if am else int(match[2] or 1)), folder["id"], meta))
     require(bool(reports), "No completed dated monthly US report is available.")
     rank = max(r[0] for r in reports)
     latest = [r for r in reports if r[0] == rank]
@@ -61,8 +98,9 @@ def verify(reader, root, candidate, now=None):
     brief = copy.deepcopy(candidate)
     provenance = brief.pop("provenance", None)
     exact_keys(provenance, {"report", "forecast"}, "source provenance")
-    validate_brief(brief, now, embedded=True)
     month, report = newest_report(reader, root, now)
+    am = AM_REPORT.fullmatch(report["name"])
+    validate_brief(brief, now, embedded=True, am=bool(am))
     reference = provenance["report"]
     exact_keys(reference, {"id", "modified_at", "sha256"}, "report provenance")
     require(reference == provenance["forecast"], "The original US outlook must come from the same report.")
@@ -73,6 +111,18 @@ def verify(reader, root, candidate, now=None):
     raw = reader.get(reference["id"], media=True)
     require(hashlib.sha256(raw).hexdigest() == reference["sha256"], "The original report checksum changed; re-curate before publishing.")
     source = raw.decode("utf-8").replace("**", "").replace(",", "")
+    if am:
+        verify_am(source, brief, am, reference["modified_at"])
+    else:
+        verify_legacy(source, brief, reference)
+    links = [s for s in brief["sources"] if s["url"].startswith("https://drive.google.com/")]
+    require(len(links) == 1 and links[0]["url"] == f"https://drive.google.com/file/d/{reference['id']}/view" and links[0].get("modified_at") == reference["modified_at"], "Only the original report may be linked as a private source.")
+    after = reader.get(reference["id"])
+    require(after.get("modifiedTime") == before.get("modifiedTime") and after.get("name") == before.get("name") == report["name"] and month in after.get("parents", []) and after.get("capabilities", {}).get("canEdit") is False, "The source changed during verification.")
+    return {"source_verified": True, "session_date": brief["session_date"], "private_content_logged": False}
+
+
+def verify_legacy(source, brief, reference):
     header = re.search(r"^#\s*美股盘后日报[^\n]*美国[^\n]*?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\s*交易时段", source, re.M)
     require(header is not None, "Expected the original US post-close daily report, not a preview.")
     session = datetime.strptime(f"{header[1]} {header[2][:3]} {header[3]}", "%d %b %Y").date()
@@ -129,11 +179,6 @@ def verify(reader, root, candidate, now=None):
         sample = re.search(r"^累计美股 Brier 现为\s+\d+\.\d+[（(](\d+)\s*个窗口[，\s]+\d+(?:\.\d+)?/\1[）)]", us_text, re.M)
     require(sample is not None and int(sample[1]) == f["completed_sample"], "The completed US calibration sample differs from the report.")
     require(timestamp(brief["issued_at"]) == timestamp(reference["modified_at"]), "The disclosed archive publication time must match completed Drive metadata.")
-    links = [s for s in brief["sources"] if s["url"].startswith("https://drive.google.com/")]
-    require(len(links) == 1 and links[0]["url"] == f"https://drive.google.com/file/d/{reference['id']}/view" and links[0].get("modified_at") == reference["modified_at"], "Only the original report may be linked as a private source.")
-    after = reader.get(reference["id"])
-    require(after.get("modifiedTime") == before.get("modifiedTime") and month in after.get("parents", []) and after.get("capabilities", {}).get("canEdit") is False, "The source changed during verification.")
-    return {"source_verified": True, "session_date": brief["session_date"], "private_content_logged": False}
 
 
 def main():
