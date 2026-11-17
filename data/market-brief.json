@@ -1,80 +1,76 @@
 {
   "schema_version": 1,
-  "session_date": "2026-11-06",
-  "issued_at": "2026-11-06T23:17:38.207Z",
-  "headline": "Chip rebound lifts US stocks, but breadth remains weak",
-  "summary": "The S&P 500 edged higher as semiconductor stocks rebounded and volatility eased. Equal-weight stocks lagged and the Dow fell, limiting evidence of a broad recovery.",
+  "session_date": "2026-11-16",
+  "issued_at": "2026-11-16T23:24:42Z",
+  "headline": "Chip sell-off leads US stocks lower",
+  "summary": "The S&P 500 fell 1.92% and the Nasdaq Composite lost 2.49%. The semiconductor index fell more sharply, though the report also noted weakness beyond technology.",
   "metrics": [
     {
       "label": "S&P 500",
-      "value": "7,376.86",
-      "detail": "+0.31% · US close"
+      "value": "7,416.59",
+      "detail": "−1.92% · US close"
     },
     {
       "label": "Nasdaq Composite",
-      "value": "24,579.42",
-      "detail": "+1.09% · US close"
+      "value": "24,509.76",
+      "detail": "−2.49% · US close"
     },
     {
       "label": "US 10-year yield",
-      "value": "4.86%",
-      "detail": "+2 bp · Treasury par yield"
+      "value": "5.12%",
+      "detail": "−3 bp · Treasury par yield"
     },
     {
       "label": "Brent futures",
-      "value": "US$98.32",
-      "detail": "+0.03% · January settlement, media-reported"
+      "value": "US$92.20",
+      "detail": "−3.80% · report-cited price"
     }
   ],
   "highlights": [
     {
-      "title": "Chip stocks led the rebound",
-      "text": "Semiconductors recovered part of Thursday’s losses. The equal-weight S&P 500 fell 0.38%, pointing to a narrower rebound than the headline index suggested."
-    },
-    {
-      "title": "Payrolls beat expectations",
-      "text": "The report cites 165,000 October payroll gains and 4.1% unemployment. Stronger jobs data and CPI within the forecast window leave material downside risk."
+      "title": "Semiconductors led the decline",
+      "text": "The original report flags chip export policy and uncertainty ahead of Nvidia earnings. The sell-off alone does not establish a deterioration in chip orders."
     }
   ],
   "forecast": {
-    "id": "drive:11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7#us-original-outlook",
-    "outlook": "Uneven rebound ahead of US CPI",
-    "horizon": "9–11 November US sessions · S&P 500 final close",
-    "evaluates_at": "2026-11-11T21:00:00Z",
-    "reference_close": 7376.86,
-    "lower_bound": 7220,
-    "upper_bound": 7500,
+    "id": "IND-2026-11-17-3D-v1",
+    "outlook": "Equal weight on the upside and downside tails",
+    "horizon": "17–19 November US sessions · S&P 500 final close",
+    "evaluates_at": "2026-11-19T21:00:00Z",
+    "reference_close": 7416.59,
+    "lower_bound": 7369.77,
+    "upper_bound": 7495.72,
     "probabilities": {
-      "bull": 22,
-      "base": 42,
-      "bear": 36
+      "bull": 35,
+      "base": 30,
+      "bear": 35
     },
-    "completed_sample": 13,
-    "method": "Original US outlook in section 9. The forecast ID is a Drive archive locator, and the issue timestamp is the verified completed Drive modification time. The report treats these scenarios as levels to monitor, not calibrated odds.",
-    "watch_next": "Watch US CPI, Treasury yields, semiconductor closes and VIX. Mean Brier was 0.727 across 13 completed US windows, worse than the 0.667 uniform baseline."
+    "completed_sample": 11,
+    "method": "Original section 3.1 forecast. The report averages realised-volatility, comparable VIX and normal-model estimates, without a discretionary tilt. Boundaries are inclusive in the base case.",
+    "watch_next": "Watch Nvidia guidance, Federal Reserve minutes and whether market breadth improves."
   },
-  "limitations": "Curated from the report, not independently verified. Breadth was secondary, sentiment coverage was partial, and end-of-day put/call and fund-flow data were unavailable. After-hours quotes were not used as forecast anchors.",
+  "limitations": "The report flags sensitivity to the VIX source, overlapping windows and event risk not modelled separately. The 11 scored US windows were not all re-read and do not establish calibration.",
   "sources": [
     {
-      "label": "Monthly US report and original outlook · Drive access required",
-      "url": "https://drive.google.com/file/d/11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7/view",
-      "modified_at": "2026-11-06T23:17:38.207Z"
+      "label": "Monthly US report and original outlook",
+      "url": "https://drive.google.com/file/d/18GP_ho7sEE02VnOCGd3gHl_jUiwdQtuY/view",
+      "modified_at": "2026-11-16T23:24:54.771Z"
     },
     {
-      "label": "Yahoo Finance S&P 500 historical data · provider named in report",
+      "label": "Yahoo Finance S&P 500 historical data · provider cited in report",
       "url": "https://finance.yahoo.com/quote/%5EGSPC/history/"
     }
   ],
   "provenance": {
-    "forecast": {
-      "id": "11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7",
-      "modified_at": "2026-11-06T23:17:38.207Z",
-      "sha256": "fc87dcf2d9bf96716b8110e5aecf04ce5391d752e8ae18540faae5888858dce4"
-    },
     "report": {
-      "id": "11NWkMbkQtKwlGqiLS7hFwU_zosHWxGg7",
-      "modified_at": "2026-11-06T23:17:38.207Z",
-      "sha256": "fc87dcf2d9bf96716b8110e5aecf04ce5391d752e8ae18540faae5888858dce4"
+      "id": "18GP_ho7sEE02VnOCGd3gHl_jUiwdQtuY",
+      "modified_at": "2026-11-16T23:24:54.771Z",
+      "sha256": "d729adb0aa4743f1bcf48ec697b403f1631b4cfc2df1cd534dd36295c0646f08"
+    },
+    "forecast": {
+      "id": "18GP_ho7sEE02VnOCGd3gHl_jUiwdQtuY",
+      "modified_at": "2026-11-16T23:24:54.771Z",
+      "sha256": "d729adb0aa4743f1bcf48ec697b403f1631b4cfc2df1cd534dd36295c0646f08"
     }
   }
 }
