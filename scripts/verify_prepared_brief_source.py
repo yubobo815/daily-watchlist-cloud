@@ -31,8 +31,8 @@ def verify_am(source, brief, filename, modified_at):
     f = brief["forecast"]
     header = unique(r"^# US & AI 每日研究报告（AM）— 美股 (\d{4}-\d{2}-\d{2})（周[一二三四五]）收盘 → 墨尔本 (\d{4}-\d{2}-\d{2})（周[一二三四五六日]）$", source)
     require(header[1] == filename[2] == brief["session_date"] and header[2] == filename[1], "AM report dates do not match.")
-    section = unique(r"^## 3\. 三日标普 500 预测（NEW）与澳洲条件展望\n([\s\S]*?)(?=^## |\Z)", source)[1]
-    block = unique(r"^### 3\.1 预测块[^\n]*\n([\s\S]*?)(?=^### |\Z)", section)[1]
+    section = unique(r"^## 3\. (?:三日标普 500 预测（NEW）与澳洲条件展望|预测（标普 500 三个交易日）与澳洲展望)\n([\s\S]*?)(?=^## |\Z)", source)[1]
+    block = unique(r"^### 3\.1 (?:预测块[^\n]*|预测卡（`IND-\d{4}-\d{2}-\d{2}-3D-v1`）)\n([\s\S]*?)(?=^### |\Z)", section)[1]
     require(unique(r"^Status: (.+)$", block)[1] == "NEW", "Forecast was not issued.")
     require(unique(r"^Source US session: (\d{4}-\d{2}-\d{2})$", block)[1] == header[1], "Forecast source session differs.")
     require(unique(r"^Forecast ID: (.+)$", block)[1] == f["id"] == f"IND-{header[2]}-3D-v1", "Forecast ID differs.")
