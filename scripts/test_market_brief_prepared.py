@@ -77,6 +77,11 @@ class PreparedSourceTests(unittest.TestCase):
                     s.verify()
             else:
                 self.assertTrue(s.verify()['source_verified'])
+                revised_heading = raw.replace('三日标普 500 预测（NEW）与澳洲条件展望', '预测（标普 500 三个交易日）与澳洲展望').replace('预测块\n', '预测卡（`IND-2026-10-31-3D-v1`）\n```\n').replace('Status: NEW\n', 'Status: NEW\n```\n')
+                s.raw = revised_heading.encode()
+                for ref in s.brief['provenance'].values():
+                    ref['sha256'] = hashlib.sha256(s.raw).hexdigest()
+                self.assertTrue(s.verify()['source_verified'])
 
     def test_section_nine_bullets_and_cumulative_sample(self):
         s = Fixture()
