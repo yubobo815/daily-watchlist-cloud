@@ -1,88 +1,88 @@
 {
   "schema_version": 1,
-  "session_date": "2026-11-16",
-  "issued_at": "2026-11-16T23:24:42Z",
-  "headline": "Chip sell-off leads US stocks lower",
-  "summary": "US stocks fell for a third straight session at the S&P 500 level. The index lost 1.92% to 7,416.59, while the Nasdaq Composite fell 2.49% and the Philadelphia Semiconductor Index lost 5.28%, according to the report’s single-source reading. Selling spread beyond technology into financial and cyclical stocks. The US 10-year Treasury yield fell three basis points to 5.12%. That does not settle the longer-term rates outlook, but it weakens the case that rising yields drove Monday’s equity sell-off.",
+  "session_date": "2026-11-18",
+  "issued_at": "2026-11-18T23:38:02Z",
+  "headline": "US selling pressure eases, but breadth stays negative",
+  "summary": "The S&P 500 slipped 0.23% to 7,323.63, its fifth consecutive decline, while the Nasdaq Composite rose 0.42%. The Dow lost 1.11% and the Russell 2000 gained 0.46%. NYSE advancers rose to 1,205 against 1,641 decliners, an improvement from Tuesday but still short of parity. The split suggests the sell-off was losing breadth rather than reversing. Falling volatility and resilient credit offered a better signal of easing pressure than the headline S&P 500 move alone.",
   "metrics": [
     {
       "label": "S&P 500",
-      "value": "7,416.59",
-      "detail": "−1.92% · US close"
+      "value": "7,323.63",
+      "detail": "−0.23% · US close"
     },
     {
       "label": "Nasdaq Composite",
-      "value": "24,509.76",
-      "detail": "−2.49% · US close"
+      "value": "24,429.88",
+      "detail": "+0.42% · US close"
     },
     {
       "label": "US 10-year yield",
-      "value": "5.12%",
+      "value": "5.07%",
       "detail": "−3 bp · Treasury par yield"
     },
     {
       "label": "Brent futures",
-      "value": "US$92.20",
-      "detail": "−3.80% · report-cited price"
+      "value": "US$91.95",
+      "detail": "−US$1.19 · January settlement, media-reported"
     }
   ],
   "highlights": [
     {
-      "title": "Chip weakness spread beyond one company",
-      "text": "The report points to tighter chip export restrictions, uncertainty over Nvidia’s leadership and caution before its earnings. Pressure across chip and networking names makes the move harder to dismiss as a company-specific event. But a lower share price can reflect investors cutting exposure or paying less for future earnings; it does not establish that customers are cancelling AI infrastructure orders."
+      "title": "Nvidia’s earnings beat did not settle the stock debate",
+      "text": "The report records revenue above consensus and an upgraded outlook, yet Nvidia closed down 2.89% near its session low. That gap is consistent with investors demanding more than strong headline demand, but price alone cannot isolate concerns about governance, export restrictions or positioning. Check whether weakness persists across chip and networking names and whether upcoming guidance points to delayed deployments or actual order cuts."
     },
     {
-      "title": "What would distinguish a rebound from a recovery?",
-      "text": "Watch Nvidia’s order commentary, delivery schedules and forward gross-margin guidance. If guidance holds up and chip stocks bounce, look for gains in the equal-weight S&P 500 and more advancing than declining stocks. A rally confined to a few large names would suggest a narrower reversal. If guidance weakens, breadth deteriorates and credit also comes under pressure, the case for a more persistent repricing strengthens."
+      "title": "Hawkish minutes did not lift long yields",
+      "text": "The October Fed minutes reinforced the possibility of further tightening, yet the 10-year Treasury yield fell three basis points and the two-year yield was flat. Gold, copper and oil also fell. The dollar strengthened, but the report lacked a verified real-yield reading, so attributing the commodity move to rising real rates would go beyond the data. The cash-session evidence does not show a broad funding squeeze."
     },
     {
-      "title": "Rates are a test for the next move",
-      "text": "The Federal Reserve minutes offer another way to separate drivers. If Treasury yields rise and equities fall together after the release, rates may explain more of the next move than they did on Monday. If yields stay subdued while chip stocks and credit weaken, focus instead on whether earnings guidance supports the market’s concerns about demand, financing or the timing of infrastructure investment."
+      "title": "What would change the view",
+      "text": "A move above parity in NYSE breadth, alongside sustained strength in equal-weight and small-cap stocks, would strengthen the case for a broader recovery. A reversal in those groups alongside renewed volatility and simultaneous weakness in high-yield and investment-grade credit would point the other way. Watch Friday’s options expiry: a sharp move without broader confirmation is not enough to establish a new trend."
     },
     {
-      "title": "Market sentiment: defensive, not panic",
-      "text": "In the AAII survey through 11 November, 51.4% were bearish and 30.8% bullish. Dip-buying talk on social media was not proof of buying on 16 November. CFTC data through 10 November showed asset managers net long S&P 500 futures and leveraged funds net short; neither shows what institutions did on Monday. Volatility rose and breadth weakened, but credit held up better than equities. That points to caution, not broad panic or a confirmed bottom."
+      "title": "Market sentiment: caution is easing unevenly",
+      "text": "AAII’s survey through 11 November was 51.4% bearish and 30.8% bullish. CFTC data through 10 November showed asset managers net long and leveraged funds net short S&P 500 futures. Neither readout captures Wednesday’s flows. The same-session VIX fell to 24.56 and credit held up, while online dip-buying talk was concentrated in some chip names. That chatter is not evidence of net buying, and the volatility level still signals caution."
     }
   ],
   "forecast": {
-    "id": "IND-2026-11-17-3D-v1",
-    "outlook": "Equal weight on the upside and downside tails",
-    "horizon": "17–19 November US sessions · S&P 500 final close",
-    "evaluates_at": "2026-11-19T21:00:00Z",
-    "reference_close": 7416.59,
-    "lower_bound": 7369.77,
-    "upper_bound": 7495.72,
+    "id": "IND-2026-11-19-3D-v1",
+    "outlook": "Upside scenario has the largest weight",
+    "horizon": "19–23 November US sessions · S&P 500 final close",
+    "evaluates_at": "2026-11-23T21:00:00Z",
+    "reference_close": 7323.63,
+    "lower_bound": 7277.19,
+    "upper_bound": 7401.11,
     "probabilities": {
-      "bull": 35,
-      "base": 30,
-      "bear": 35
+      "bull": 45,
+      "base": 25,
+      "bear": 30
     },
-    "completed_sample": 11,
-    "method": "Original section 3.1 forecast. The report averages realised-volatility, comparable VIX and normal-model estimates, without a discretionary tilt. Boundaries are inclusive in the base case.",
-    "watch_next": "Watch Nvidia guidance, Federal Reserve minutes and whether market breadth improves."
+    "completed_sample": 13,
+    "method": "Original section 3.1 forecast. The report includes empirical and VIX-based estimates and discloses a 0.4125% futures adjustment. The base range includes both endpoints.",
+    "watch_next": "Watch market breadth, credit and monthly options expiry."
   },
-  "limitations": "The source lists 11 scored US forecast windows, not all rechecked against the original files. The sample is small, the windows overlap and the estimates are not independent. Neither the sample nor the reported score establishes that the probabilities are calibrated.",
+  "limitations": "The report flags differences across market data sources and missing option-chain and Nasdaq breadth data. Forecast windows overlap, and only four of the 13 scored windows were reread from the originals. The scored sample does not establish calibration.",
   "sources": [
     {
       "label": "Monthly US report and original outlook",
-      "url": "https://drive.google.com/file/d/18GP_ho7sEE02VnOCGd3gHl_jUiwdQtuY/view",
-      "modified_at": "2026-11-16T23:24:54.771Z"
+      "url": "https://drive.google.com/file/d/1a06WgptTdNhBXwOaccM1XbIA0ZIa-7KJ/view",
+      "modified_at": "2026-11-18T23:38:10.284Z"
     },
     {
-      "label": "Yahoo Finance S&P 500 historical data · provider cited in report",
+      "label": "Yahoo Finance S&P 500 historical data · cited by the report",
       "url": "https://finance.yahoo.com/quote/%5EGSPC/history/"
     }
   ],
   "provenance": {
     "report": {
-      "id": "18GP_ho7sEE02VnOCGd3gHl_jUiwdQtuY",
-      "modified_at": "2026-11-16T23:24:54.771Z",
-      "sha256": "d729adb0aa4743f1bcf48ec697b403f1631b4cfc2df1cd534dd36295c0646f08"
+      "id": "1a06WgptTdNhBXwOaccM1XbIA0ZIa-7KJ",
+      "modified_at": "2026-11-18T23:38:10.284Z",
+      "sha256": "5b53cf25195b866cf02180d3d7b5fff1363b5dab6c705b4f3c4e2a7f1e9cfee6"
     },
     "forecast": {
-      "id": "18GP_ho7sEE02VnOCGd3gHl_jUiwdQtuY",
-      "modified_at": "2026-11-16T23:24:54.771Z",
-      "sha256": "d729adb0aa4743f1bcf48ec697b403f1631b4cfc2df1cd534dd36295c0646f08"
+      "id": "1a06WgptTdNhBXwOaccM1XbIA0ZIa-7KJ",
+      "modified_at": "2026-11-18T23:38:10.284Z",
+      "sha256": "5b53cf25195b866cf02180d3d7b5fff1363b5dab6c705b4f3c4e2a7f1e9cfee6"
     }
   }
 }
