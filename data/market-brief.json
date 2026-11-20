@@ -1,88 +1,92 @@
 {
   "schema_version": 1,
-  "session_date": "2026-11-18",
-  "issued_at": "2026-11-18T23:38:02Z",
-  "headline": "US selling pressure eases, but breadth stays negative",
-  "summary": "The S&P 500 slipped 0.23% to 7,323.63, its fifth consecutive decline, while the Nasdaq Composite rose 0.42%. The Dow lost 1.11% and the Russell 2000 gained 0.46%. NYSE advancers rose to 1,205 against 1,641 decliners, an improvement from Tuesday but still short of parity. The split suggests the sell-off was losing breadth rather than reversing. Falling volatility and resilient credit offered a better signal of easing pressure than the headline S&P 500 move alone.",
+  "session_date": "2026-11-19",
+  "issued_at": "2026-11-19T23:35:36Z",
+  "headline": "US stocks slide as volatility jumps and credit holds up",
+  "summary": "The S&P 500 fell 2.02% to 7,175.83, its sixth straight decline. The Nasdaq Composite lost 2.25%, the Dow 2.19% and the Russell 2000 2.18%. All 11 S&P sectors fell, and NYSE decliners outnumbered advancers 2,339 to 515. Equal-weight stocks held up a little better than the cap-weighted benchmark, but they still fell 1.76%. That distinction matters: megacap weakness amplified the decline, but it does not explain a session in which small caps, semiconductors and defensive shares all finished lower.",
   "metrics": [
     {
       "label": "S&P 500",
-      "value": "7,323.63",
-      "detail": "−0.23% · US close"
+      "value": "7,175.83",
+      "detail": "−2.02% · US close"
     },
     {
       "label": "Nasdaq Composite",
-      "value": "24,429.88",
-      "detail": "+0.42% · US close"
+      "value": "23,879.20",
+      "detail": "−2.25% · US close"
     },
     {
       "label": "US 10-year yield",
-      "value": "5.07%",
+      "value": "5.04%",
       "detail": "−3 bp · Treasury par yield"
     },
     {
       "label": "Brent futures",
-      "value": "US$91.95",
-      "detail": "−US$1.19 · January settlement, media-reported"
+      "value": "US$91.98",
+      "detail": "Media-reported settlement"
     }
   ],
   "highlights": [
     {
-      "title": "Nvidia’s earnings beat did not settle the stock debate",
-      "text": "The report records revenue above consensus and an upgraded outlook, yet Nvidia closed down 2.89% near its session low. That gap is consistent with investors demanding more than strong headline demand, but price alone cannot isolate concerns about governance, export restrictions or positioning. Check whether weakness persists across chip and networking names and whether upcoming guidance points to delayed deployments or actual order cuts."
+      "title": "AI demand did not translate into support for AI shares",
+      "text": "Anthropic closed its first session at US$97.17, up 17.1% from its offer but below its US$111.50 opening trade. The drop from the open tells more about the shift in appetite than the gain from the offer. The semiconductor index fell 2.41%, and 19 of 20 stocks in the report’s sample closed in the bottom quarter of their daily ranges. That suggests a broad repricing of AI exposure; it does not prove investors sold other AI stocks to fund IPO purchases."
     },
     {
-      "title": "Hawkish minutes did not lift long yields",
-      "text": "The October Fed minutes reinforced the possibility of further tightening, yet the 10-year Treasury yield fell three basis points and the two-year yield was flat. Gold, copper and oil also fell. The dollar strengthened, but the report lacked a verified real-yield reading, so attributing the commodity move to rising real rates would go beyond the data. The cash-session evidence does not show a broad funding squeeze."
+      "title": "Equity stress did not spread decisively to credit",
+      "text": "The dollar firmed while gold and copper fell, but two-year and ten-year Treasury yields both declined. High-yield and investment-grade bond ETFs slipped just 0.16% and 0.07%. That points more to pressure on equity valuations than to an abrupt funding squeeze or a sell-off driven by rising yields. Defensive sectors fell too, offering little evidence that investors simply rotated from technology into staples and utilities."
     },
     {
       "title": "What would change the view",
-      "text": "A move above parity in NYSE breadth, alongside sustained strength in equal-weight and small-cap stocks, would strengthen the case for a broader recovery. A reversal in those groups alongside renewed volatility and simultaneous weakness in high-yield and investment-grade credit would point the other way. Watch Friday’s options expiry: a sharp move without broader confirmation is not enough to establish a new trend."
+      "text": "Watch whether equal-weight and small-cap shares recover alongside the headline index and whether NYSE breadth returns towards parity. Friday’s options expiry can amplify a move without resolving whether demand has broadened. A rebound confined to megacaps, with near-term volatility still elevated, would be weak evidence of a turn. Further equity losses with more pronounced weakness in both credit ETFs would make the funding-stress explanation more credible."
     },
     {
-      "title": "Market sentiment: caution is easing unevenly",
-      "text": "AAII’s survey through 11 November was 51.4% bearish and 30.8% bullish. CFTC data through 10 November showed asset managers net long and leveraged funds net short S&P 500 futures. Neither readout captures Wednesday’s flows. The same-session VIX fell to 24.56 and credit held up, while online dip-buying talk was concentrated in some chip names. That chatter is not evidence of net buying, and the volatility level still signals caution."
+      "title": "After-hours earnings are a separate signal",
+      "text": "Intuit and Elastic weakened after the bell, according to the report. Those moves did not contribute to the cash-session index declines. The next test is whether weakness carries into regular trading and broadens across software, or stays confined to companies reporting results. If chip and software names both lag on firmer market breadth, that would be stronger evidence of an AI-specific repricing than Thursday’s across-the-board decline."
+    },
+    {
+      "title": "Market sentiment: protection demand rises, retail signals stay mixed",
+      "text": "Nine-day implied volatility reached 29.26, above the VIX at 28.44 and the three-month reading at 27.03. That inversion points to near-term stress. Eight of 14 comments from selected market observers were cautious, against one constructive. Retail signals were mixed: AAII bearishness eased to 42.2% from 51.4%, but the survey closed before the sell-off. Online discussion was mixed and does not measure orders. Volatility and weak breadth were stronger evidence of caution."
     }
   ],
   "forecast": {
-    "id": "IND-2026-11-19-3D-v1",
-    "outlook": "Upside scenario has the largest weight",
-    "horizon": "19–23 November US sessions · S&P 500 final close",
-    "evaluates_at": "2026-11-23T21:00:00Z",
-    "reference_close": 7323.63,
-    "lower_bound": 7277.19,
-    "upper_bound": 7401.11,
+    "id": "IND-2026-11-20-3D-v1",
+    "outlook": "Upside has the largest weight; downside is close behind",
+    "horizon": "20–24 November US sessions · S&P 500 final close",
+    "evaluates_at": "2026-11-24T21:00:00Z",
+    "reference_close": 7175.83,
+    "lower_bound": 7130.09,
+    "upper_bound": 7251.74,
     "probabilities": {
-      "bull": 45,
+      "bull": 40,
       "base": 25,
-      "bear": 30
+      "bear": 35
     },
-    "completed_sample": 13,
-    "method": "Original section 3.1 forecast. The report includes empirical and VIX-based estimates and discloses a 0.4125% futures adjustment. The base range includes both endpoints.",
-    "watch_next": "Watch market breadth, credit and monthly options expiry."
+    "completed_sample": 14,
+    "method": "Original NEW section 3.1 card. Averages three non-independent estimates and includes a −0.0139% ES adjustment. Base includes both endpoints. Sentiment does not adjust the probabilities.",
+    "watch_next": "Watch Friday’s options expiry, breadth, short-dated volatility and credit."
   },
-  "limitations": "The report flags differences across market data sources and missing option-chain and Nasdaq breadth data. Forecast windows overlap, and only four of the 13 scored windows were reread from the originals. The scored sample does not establish calibration.",
+  "limitations": "No verified timestamped SPX options chain. Event risk was not modelled separately. The 14 scored windows overlap, and only the latest was reread from its original for this report; the sample does not establish calibration.",
   "sources": [
     {
       "label": "Monthly US report and original outlook",
-      "url": "https://drive.google.com/file/d/1a06WgptTdNhBXwOaccM1XbIA0ZIa-7KJ/view",
-      "modified_at": "2026-11-18T23:38:10.284Z"
+      "url": "https://drive.google.com/file/d/1vgM8lNuN1MeGuce2YiuQmAMVdDFY9WCU/view",
+      "modified_at": "2026-11-19T23:35:52.367Z"
     },
     {
-      "label": "Yahoo Finance S&P 500 historical data · cited by the report",
-      "url": "https://finance.yahoo.com/quote/%5EGSPC/history/"
+      "label": "US Treasury daily par yields · cited by the report",
+      "url": "https://home.treasury.gov/resource-center/data-and-statistics/interest-rates/"
     }
   ],
   "provenance": {
     "report": {
-      "id": "1a06WgptTdNhBXwOaccM1XbIA0ZIa-7KJ",
-      "modified_at": "2026-11-18T23:38:10.284Z",
-      "sha256": "5b53cf25195b866cf02180d3d7b5fff1363b5dab6c705b4f3c4e2a7f1e9cfee6"
+      "id": "1vgM8lNuN1MeGuce2YiuQmAMVdDFY9WCU",
+      "modified_at": "2026-11-19T23:35:52.367Z",
+      "sha256": "5636de31d9f6f6292bf8f9a8151acbba18561a74478671d4b118c9b31f09fdc3"
     },
     "forecast": {
-      "id": "1a06WgptTdNhBXwOaccM1XbIA0ZIa-7KJ",
-      "modified_at": "2026-11-18T23:38:10.284Z",
-      "sha256": "5b53cf25195b866cf02180d3d7b5fff1363b5dab6c705b4f3c4e2a7f1e9cfee6"
+      "id": "1vgM8lNuN1MeGuce2YiuQmAMVdDFY9WCU",
+      "modified_at": "2026-11-19T23:35:52.367Z",
+      "sha256": "5636de31d9f6f6292bf8f9a8151acbba18561a74478671d4b118c9b31f09fdc3"
     }
   }
 }
