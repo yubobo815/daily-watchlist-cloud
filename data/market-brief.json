@@ -1,76 +1,76 @@
 {
   "schema_version": 1,
-  "session_date": "2026-11-19",
-  "issued_at": "2026-11-19T23:35:36Z",
-  "headline": "US stocks slide as volatility jumps and credit holds up",
-  "summary": "The S&P 500 fell 2.02% to 7,175.83, its sixth straight decline. The Nasdaq Composite lost 2.25%, the Dow 2.19% and the Russell 2000 2.18%. All 11 S&P sectors fell, and NYSE decliners outnumbered advancers 2,339 to 515. Equal-weight stocks held up a little better than the cap-weighted benchmark, but they still fell 1.76%. That distinction matters: megacap weakness amplified the decline, but it does not explain a session in which small caps, semiconductors and defensive shares all finished lower.",
+  "session_date": "2026-11-20",
+  "issued_at": "2026-11-20T23:31:32Z",
+  "headline": "Chip stocks lead a broad US sell-off as Treasury yields fall",
+  "summary": "The S&P 500 fell 3.70% to 6,910.39, its seventh consecutive decline. The Nasdaq Composite lost 5.28%, the Dow 1.93% and the Russell 2000 2.76%. The Philadelphia Semiconductor Index fell 10.73%. Equal-weight S&P shares lost 1.98%, less than the headline index, while NYSE decliners outnumbered advancers by about 3.8 to one. The gap shows how much more severe the damage was in large growth stocks, but the breadth figures rule out a sell-off confined to a few names. Consumer staples rose 0.67%, a rare pocket of strength.",
   "metrics": [
     {
       "label": "S&P 500",
-      "value": "7,175.83",
-      "detail": "−2.02% · US close"
+      "value": "6,910.39",
+      "detail": "−3.70% · US close"
     },
     {
       "label": "Nasdaq Composite",
-      "value": "23,879.20",
-      "detail": "−2.25% · US close"
+      "value": "22,617.73",
+      "detail": "−5.28% · US close"
     },
     {
       "label": "US 10-year yield",
-      "value": "5.04%",
-      "detail": "−3 bp · Treasury par yield"
+      "value": "4.92%",
+      "detail": "−12 bp · Treasury par yield"
     },
     {
       "label": "Brent futures",
-      "value": "US$91.98",
-      "detail": "Media-reported settlement"
+      "value": "US$92.57",
+      "detail": "ICE settlement basis cited by the report"
     }
   ],
   "highlights": [
     {
-      "title": "AI demand did not translate into support for AI shares",
-      "text": "Anthropic closed its first session at US$97.17, up 17.1% from its offer but below its US$111.50 opening trade. The drop from the open tells more about the shift in appetite than the gain from the offer. The semiconductor index fell 2.41%, and 19 of 20 stocks in the report’s sample closed in the bottom quarter of their daily ranges. That suggests a broad repricing of AI exposure; it does not prove investors sold other AI stocks to fund IPO purchases."
+      "title": "The damage was heaviest in AI hardware",
+      "text": "Nvidia fell 14.01%, AMD 13.25% and Micron 13.89%, with all 20 stocks in the report’s sample down. The report notes coverage of an SEC accounting investigation involving Nvidia and tighter export measures. Those headlines may help explain the pressure, but the shared losses across chipmakers make it hard to separate company-specific news from broader selling. The size of the move alone does not prove forced deleveraging."
     },
     {
-      "title": "Equity stress did not spread decisively to credit",
-      "text": "The dollar firmed while gold and copper fell, but two-year and ten-year Treasury yields both declined. High-yield and investment-grade bond ETFs slipped just 0.16% and 0.07%. That points more to pressure on equity valuations than to an abrupt funding squeeze or a sell-off driven by rising yields. Defensive sectors fell too, offering little evidence that investors simply rotated from technology into staples and utilities."
+      "title": "Treasuries and credit tell a different story",
+      "text": "The ten-year Treasury yield dropped 12 basis points to 4.92%. The high-yield bond ETF fell 0.26%, but its investment-grade counterpart rose 0.59%. That combination is more consistent with a repricing of growth and equity risk than with a rise in discount rates or a broad funding squeeze. Credit ETFs are only proxies, though: relatively orderly trading on Friday does not establish that corporate funding conditions are unchanged."
     },
     {
-      "title": "What would change the view",
-      "text": "Watch whether equal-weight and small-cap shares recover alongside the headline index and whether NYSE breadth returns towards parity. Friday’s options expiry can amplify a move without resolving whether demand has broadened. A rebound confined to megacaps, with near-term volatility still elevated, would be weak evidence of a turn. Further equity losses with more pronounced weakness in both credit ETFs would make the funding-stress explanation more credible."
+      "title": "What would change the view next week",
+      "text": "A chip rebound would be more convincing if NYSE breadth also moved towards parity and equal-weight shares recovered. A rebound led only by the largest chip names would be weaker evidence. Watch Monday’s preliminary US activity surveys, listed in the report’s secondary calendar: weak data alongside lower Treasury yields and renewed equity losses would support the growth-scare explanation. A material deterioration in high-yield credit would point to a broader stress event."
     },
     {
-      "title": "After-hours earnings are a separate signal",
-      "text": "Intuit and Elastic weakened after the bell, according to the report. Those moves did not contribute to the cash-session index declines. The next test is whether weakness carries into regular trading and broadens across software, or stays confined to companies reporting results. If chip and software names both lag on firmer market breadth, that would be stronger evidence of an AI-specific repricing than Thursday’s across-the-board decline."
+      "title": "Market sentiment: short-dated protection is expensive",
+      "text": "The VIX rose 26.2% to 35.89. Nine-day volatility reached 40.72 against 30.94 at three months, putting the largest premium on immediate protection. Broad selling and heavy trading reinforce that signal. But the relative resilience of investment-grade credit is a useful counterweight. Friday’s indicators show stress in equities and demand for near-term protection; they do not show that investors were uniformly liquidating across markets."
     },
     {
-      "title": "Market sentiment: protection demand rises, retail signals stay mixed",
-      "text": "Nine-day implied volatility reached 29.26, above the VIX at 28.44 and the three-month reading at 27.03. That inversion points to near-term stress. Eight of 14 comments from selected market observers were cautious, against one constructive. Retail signals were mixed: AAII bearishness eased to 42.2% from 51.4%, but the survey closed before the sell-off. Online discussion was mixed and does not measure orders. Volatility and weak breadth were stronger evidence of caution."
+      "title": "Retail surveys and positioning lag the sell-off",
+      "text": "AAII bearishness eased to 42.2% from 51.4% in the week through 18 November, before the two sharpest down days. CFTC data through 17 November showed asset managers net long and leveraged funds net short in consolidated S&P 500 futures. Neither snapshot captures Friday’s behaviour. Some online discussion still favoured buying individual chip stocks, but social-media posts are not orders and cannot establish net retail flows."
     }
   ],
   "forecast": {
-    "id": "IND-2026-11-20-3D-v1",
-    "outlook": "Upside has the largest weight; downside is close behind",
-    "horizon": "20–24 November US sessions · S&P 500 final close",
-    "evaluates_at": "2026-11-24T21:00:00Z",
-    "reference_close": 7175.83,
-    "lower_bound": 7130.09,
-    "upper_bound": 7251.74,
+    "id": "IND-2026-11-21-3D-v1",
+    "outlook": "Upside has the largest weight; the middle range has the least",
+    "horizon": "23–25 November US sessions · S&P 500 final close",
+    "evaluates_at": "2026-11-25T21:00:00Z",
+    "reference_close": 6910.39,
+    "lower_bound": 6866.03,
+    "upper_bound": 6983.5,
     "probabilities": {
-      "bull": 40,
-      "base": 25,
+      "bull": 50,
+      "base": 15,
       "bear": 35
     },
-    "completed_sample": 14,
-    "method": "Original NEW section 3.1 card. Averages three non-independent estimates and includes a −0.0139% ES adjustment. Base includes both endpoints. Sentiment does not adjust the probabilities.",
-    "watch_next": "Watch Friday’s options expiry, breadth, short-dated volatility and credit."
+    "completed_sample": 15,
+    "method": "Original NEW section 3.1 card. Three non-independent estimates with the full ES adjustment. Base includes both endpoints. The original card flags sensitivity to ES and VIX inputs.",
+    "watch_next": "Watch market breadth, preliminary US activity data and high-yield credit."
   },
-  "limitations": "No verified timestamped SPX options chain. Event risk was not modelled separately. The 14 scored windows overlap, and only the latest was reread from its original for this report; the sample does not establish calibration.",
+  "limitations": "The report did not verify a timestamped SPX options chain. Event effects were not modelled separately. The 15 scored windows overlap; only the latest was reread from the original for this report. The sample does not establish calibration.",
   "sources": [
     {
       "label": "Monthly US report and original outlook",
-      "url": "https://drive.google.com/file/d/1vgM8lNuN1MeGuce2YiuQmAMVdDFY9WCU/view",
-      "modified_at": "2026-11-19T23:35:52.367Z"
+      "url": "https://drive.google.com/file/d/1LB508HwFyOpMWsJWwh-Me7c9jooGzhp6/view",
+      "modified_at": "2026-11-20T23:31:56.187Z"
     },
     {
       "label": "US Treasury daily par yields · cited by the report",
@@ -79,14 +79,14 @@
   ],
   "provenance": {
     "report": {
-      "id": "1vgM8lNuN1MeGuce2YiuQmAMVdDFY9WCU",
-      "modified_at": "2026-11-19T23:35:52.367Z",
-      "sha256": "5636de31d9f6f6292bf8f9a8151acbba18561a74478671d4b118c9b31f09fdc3"
+      "id": "1LB508HwFyOpMWsJWwh-Me7c9jooGzhp6",
+      "modified_at": "2026-11-20T23:31:56.187Z",
+      "sha256": "a14d8a3fd6adf291d1a616e0212f8a23fee5bea828236e65474b1bb0da78791c"
     },
     "forecast": {
-      "id": "1vgM8lNuN1MeGuce2YiuQmAMVdDFY9WCU",
-      "modified_at": "2026-11-19T23:35:52.367Z",
-      "sha256": "5636de31d9f6f6292bf8f9a8151acbba18561a74478671d4b118c9b31f09fdc3"
+      "id": "1LB508HwFyOpMWsJWwh-Me7c9jooGzhp6",
+      "modified_at": "2026-11-20T23:31:56.187Z",
+      "sha256": "a14d8a3fd6adf291d1a616e0212f8a23fee5bea828236e65474b1bb0da78791c"
     }
   }
 }
