@@ -44,7 +44,8 @@ cash-market session, including holidays, DST and early closes.
 
 Use the **original US outlook in section 9**, or the approved newer
 **section 4 "新美股展望" three-way paragraph layout**, or the original AM report's
-**section 3.1 NEW forecast block** with exact issued ID and time, not a revised row in section 10,
+**section 3.1 NEW forecast block** or **section 6.2 New Forecast Card** with
+its verified report issue time and section 6.3 scored sample, not a revised row in section 10,
 an older independent card, or an ASX outlook. Preserve probabilities, reference
 close, final-close boundaries, horizon, limitations and US completed sample.
 If no author-issued forecast ID exists, use
