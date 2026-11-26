@@ -55,6 +55,40 @@ def verify_am(source, brief, filename, modified_at):
     require(int(unique(r"(\d+) 个窗口\s*[，,]?\s*合计", sample)[1]) == f["completed_sample"], "Completed US sample differs.")
 
 
+def verify_am_section_six(source, brief, filename, modified_at):
+    """Validate the new AM layout without interpreting other cards or ledger forecasts."""
+    f = brief["forecast"]
+    day = r"\d{4}-\d{2}-\d{2}"
+    header = unique(rf"^# ({day}) 墨尔本早盘 / ({day}) 美股收盘 AI 与宏观每日研究报告（US_AI_Daily_({day})_US-({day})_v1）$", source)
+    publication, session = filename[1], filename[2]
+    require(header.groups() == (publication, session, publication, session) and brief["session_date"] == session, "AM report dates do not match.")
+    front = source.split("\n## ", 1)[0]
+    require(unique(rf"^- 基准美股交易日（Completed US Session）：({day})（[^\n]*）$", front)[1] == session, "Completed US session differs.")
+    stamp = rf"{day} \d{{2}}:\d{{2}}(?::\d{{2}})?"
+    issue = unique(rf"^- 报告生成时间：({stamp}) AE[DS]T（Australia/Melbourne[^\n）]*）[ \t]*/[ \t]*({stamp}) E[DS]T（America/New_York[^\n）]*）[ \t]*/[ \t]*({day}T\d{{2}}:\d{{2}}:\d{{2}}Z)$", front)
+    issued = timestamp(issue[3])
+    require(issued == datetime.fromisoformat(issue[1]).replace(tzinfo=ZoneInfo("Australia/Melbourne")) == datetime.fromisoformat(issue[2]).replace(tzinfo=ZoneInfo("America/New_York")) and issue[1][:10] == publication and issued == timestamp(brief["issued_at"]) and issued <= timestamp(modified_at), "Forecast issue time differs.")
+    section = unique(r"^## 6\. 量化预测卡与到期核算（Quantitative Forecast Card & Due Forecast Scoring）\n([\s\S]*?)(?=^## |\Z)", source)[1]
+    card = unique(rf"^### 6\.2 新一期 3 交易日预测卡生成（New Forecast Card: (IND-{day}-3D-v1)）\n([\s\S]*?)(?=^### |\Z)", section)
+    block = unique(r"^#### （4）标准化机器可解析预测卡（Standardized Parse Block）\n([\s\S]*?)(?=^#{1,4} |\Z)", card[2])[1]
+    require(unique(r"^Forecast ID: (.+)$", block)[1] == card[1] == f["id"] == f"IND-{publication}-3D-v1", "Forecast ID differs.")
+    require(unique(r"^Target asset: (.+)$", block)[1] == "S&P 500 (.INX)", "Forecast is not for the S&P 500.")
+    require(unique(r"^Horizon: 3 US trading days \(([^\n]+)\)$", block), "Expected a three-session horizon.")
+    target = unique(rf"^Target session: ({day}) (\d{{2}}:\d{{2}}) America/New_York \(([^)]+)\)$", block)
+    settled = timestamp(f["evaluates_at"])
+    require(timestamp(target[3]) == settled and settled.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M") == f"{target[1]} {target[2]}", "Forecast settlement differs.")
+    for label, key in (("Reference S&P 500", "reference_close"), ("Lower bound", "lower_bound"), ("Upper bound", "upper_bound")):
+        require(float(unique(rf"^{re.escape(label)}: ({NUMBER})$", block)[1]) == f[key], "Forecast reference or boundary differs.")
+    for name, interval, keys in (("Bull", rf"> ({NUMBER})", ["upper_bound"]), ("Base", rf"({NUMBER}) - ({NUMBER})", ["lower_bound", "upper_bound"]), ("Bear", rf"< ({NUMBER})", ["lower_bound"])):
+        row = unique(rf"^{name} \({interval}\): ({NUMBER})%$", block)
+        require(list(map(float, row.groups()[:-1])) == [f[k] for k in keys] and float(row.groups()[-1]) == f["probabilities"][name.lower()], "Forecast range or probability differs.")
+    due = unique(rf"^### 6\.1 到期预测核验与 Brier 评分（Due Forecast Verification: (IND-{day}-3D-v1)）\n([\s\S]*?)(?=^### |\Z)", section)
+    count = int(unique(r"^- 历史累计 Brier Score 台账更新（(\d+) 个已评分窗口）\[计算\]：$", due[2])[1])
+    ledger = unique(r"^### 6\.3 历史预测卡追踪与累计 Brier Score 台账（Forecast Ledger）\n([\s\S]*?)(?=^### |\Z)", section)[1]
+    row = unique(rf"^\| {re.escape(due[1])} \|[^|]*\|[^|]*\| {session} \|(?:[^|]*\|){{6}} [\d.]+ \((\d+)\) \| SCORED \(今日新增\) \|$", ledger)
+    require(int(row[1]) == count == f["completed_sample"], "Completed US sample differs.")
+
+
 def readonly_folder(reader, folder_id, parent=None):
     meta = reader.get(folder_id)
     require(meta.get("id") == folder_id and meta.get("mimeType") == FOLDER_MIME, "Expected the authorized archive folder.")
@@ -111,7 +145,9 @@ def verify(reader, root, candidate, now=None):
     raw = reader.get(reference["id"], media=True)
     require(hashlib.sha256(raw).hexdigest() == reference["sha256"], "The original report checksum changed; re-curate before publishing.")
     source = raw.decode("utf-8").replace("**", "").replace(",", "")
-    if am:
+    if am and re.match(r"^# \d{4}-\d{2}-\d{2} 墨尔本早盘 / ", source):
+        verify_am_section_six(source, brief, am, reference["modified_at"])
+    elif am:
         verify_am(source, brief, am, reference["modified_at"])
     else:
         verify_legacy(source, brief, reference)

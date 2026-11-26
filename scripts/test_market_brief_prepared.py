@@ -83,6 +83,41 @@ class PreparedSourceTests(unittest.TestCase):
                     ref['sha256'] = hashlib.sha256(s.raw).hexdigest()
                 self.assertTrue(s.verify()['source_verified'])
 
+    def test_am_section_six_original_and_tampering(self):
+        s = Fixture()
+        s.metadata[REPORT]['name'] = 'US_AI_Daily_2026-10-31_US-2026-10-30_v1.md'
+        s.brief['issued_at'] = '2026-10-30T22:45:00Z'
+        s.brief['forecast']['id'] = 'IND-2026-10-31-3D-v1'
+        raw = ('# 2026-10-31 墨尔本早盘 / 2026-10-30 美股收盘 AI 与宏观每日研究报告（US_AI_Daily_2026-10-31_US-2026-10-30_v1）\n'
+               '- **报告生成时间**：2026-10-31 09:45 AEDT（Australia/Melbourne, UTC+11）/ 2026-10-30 18:45 EDT（America/New_York, UTC-4）/ 2026-10-30T22:45:00Z\n'
+               '- **基准美股交易日（Completed US Session）**：2026-10-30（官方收盘）\n'
+               '## 6. 量化预测卡与到期核算（Quantitative Forecast Card & Due Forecast Scoring）\n'
+               '### 6.1 到期预测核验与 Brier 评分（Due Forecast Verification: IND-2026-10-28-3D-v1）\n'
+               '- **历史累计 Brier Score 台账更新（8 个已评分窗口）[计算]**：\n'
+               '### 6.2 新一期 3 交易日预测卡生成（New Forecast Card: IND-2026-10-31-3D-v1）\n'
+               '#### （4）标准化机器可解析预测卡（Standardized Parse Block）\n\n'
+               'Forecast ID: IND-2026-10-31-3D-v1\nTarget asset: S&P 500 (.INX)\nReference S&P 500: 7580.07\n'
+               'Horizon: 3 US trading days (2026-11-02, 2026-11-03, 2026-11-04)\n'
+               'Target session: 2026-11-04 16:00 America/New_York (2026-11-04T21:00:00Z)\n'
+               'Lower bound: 7480\nUpper bound: 7680\nBull (> 7680): 24%\nBase (7480 - 7680): 43%\nBear (< 7480): 33%\n'
+               '### 6.3 历史预测卡追踪与累计 Brier Score 台账（Forecast Ledger）\n'
+               '| IND-2026-10-28-3D-v1 | 2026-10-28 AM | 7500 | 2026-10-30 | 7400 | 7600 | 25% / 40% / 35% | 7580.07 | Base | 0.5 | 0.7 (8) | SCORED (今日新增) |\n')
+        for old, new in [('', ''), ('New Forecast Card:', 'Revised Forecast Card:'),
+                         ('24%', '25%'), ('Base (7480', 'Base (7479'), ('> 7680', '>= 7680'),
+                         ('8 个已评分', '9 个已评分'), ('0.7 (8)', '0.7 (9)'),
+                         ('18:45 EDT', '18:46 EDT'), ('2026-11-04T21:00:00Z', '2026-11-04T20:00:00Z'),
+                         ('Target asset: S&P 500 (.INX)', 'Target asset: Nasdaq'),
+                         ('Forecast ID: IND-', 'Forecast ID: IND-2026-10-31-3D-v1\nForecast ID: IND-')]:
+            s.raw = (raw.replace(old, new) if old else raw).encode()
+            s.rehash()
+            for ref in s.brief['provenance'].values():
+                ref['modified_at'] = s.metadata[REPORT]['modifiedTime']
+            if old:
+                with self.subTest(old=old), self.assertRaises(ProbeError):
+                    s.verify()
+            else:
+                self.assertTrue(s.verify()['source_verified'])
+
     def test_section_nine_bullets_and_cumulative_sample(self):
         s = Fixture()
         s.raw = ('累计美股 Brier 现为 **0.721（8 个窗口，5.768/8）**\n'
